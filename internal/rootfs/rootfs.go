@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -144,93 +145,38 @@ func Build(base v1.Image, overlays ...v1.Image) (*Rootfs, error) {
 		return nil, fmt.Errorf("closing %s: %w", tarPath, err)
 	}
 
-	return &Rootfs{TarPath: tarPath, Index: index, OverlayStats: stats, tmpDir: tmpDir}, nil
+	r := &Rootfs{TarPath: tarPath, Index: index, OverlayStats: stats, tmpDir: tmpDir}
+	if err := r.addMissingParents(); err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return nil, fmt.Errorf("flattening rootfs: %w", err)
+	}
+	return r, nil
 }
 
-// whiteoutPrefix marks a tar entry (mirroring
-// mutate.Extract's own unexported constant of the same name) as either a
-// per-file tombstone (".wh.<name>") or, when the rest of the basename is
-// itself "..wh..opq", an opaque-directory marker. overlayStats only needs
-// to recognize and count these, not interpret them the way Build's own
-// final flatten (via mutate.Extract) does.
-const whiteoutPrefix = ".wh."
-
-// overlayStats computes overlay's OverlayStats: Files/Bytes from its own
-// flattened view (mutate.Extract applied to overlay alone, so only its
-// own layers are read - never base, never any other overlay), and
-// Removed from a raw scan of its own layers' tar entries for whiteout
-// and opaque-directory markers. See OverlayStats's doc comment for
-// exactly what each field means.
-func overlayStats(overlay v1.Image) (OverlayStats, error) {
-	var st OverlayStats
-
-	layers, err := overlay.Layers()
-	if err != nil {
-		return st, fmt.Errorf("reading overlay image layers: %w", err)
-	}
-	for _, l := range layers {
-		n, err := countWhiteouts(l)
-		if err != nil {
-			return st, fmt.Errorf("scanning overlay layer for whiteouts: %w", err)
-		}
-		st.Removed += n
-	}
-
-	rc := mutate.Extract(overlay)
-	defer func() { _ = rc.Close() }() // read-only stream; nothing to flush
-	tr := tar.NewReader(rc)
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return st, err
-		}
-		if _, err := io.Copy(io.Discard, tr); err != nil { //nolint:gosec // G110: discarded, and bounded by the overlay's real content
-			return st, fmt.Errorf("reading content of %s: %w", hdr.Name, err)
-		}
-		if normalizePath(hdr.Name) == "/" {
-			continue
-		}
-		st.Files++
-		if hdr.Typeflag == tar.TypeReg {
-			st.Bytes += hdr.Size
+// addMissingParents gives every parent directory that some entry needs,
+// but that no layer carries an entry for, a synthesized directory entry
+// (mode 0755, root-owned). A layer tar need not list a file's parent
+// directories, and without these the ext4 population step would have
+// nowhere to create the file.
+func (r *Rootfs) addMissingParents() error {
+	seen := map[string]bool{}
+	var missing []SyntheticFile
+	for p := range r.Index {
+		for dir := path.Dir(p); dir != "/"; dir = path.Dir(dir) {
+			if seen[dir] {
+				break
+			}
+			seen[dir] = true
+			if _, ok := r.Index[dir]; !ok {
+				missing = append(missing, SyntheticFile{Path: dir, Typeflag: tar.TypeDir})
+			}
 		}
 	}
-	return st, nil
-}
-
-// countWhiteouts returns the number of whiteout/opaque-directory marker
-// entries in l's own tar stream - a plain scan, with no whiteout
-// resolution or cross-layer bookkeeping (that's what mutate.Extract does
-// for the entries that survive; this just counts the markers themselves,
-// which Extract never emits).
-func countWhiteouts(l v1.Layer) (int, error) {
-	r, err := l.Uncompressed()
-	if err != nil {
-		return 0, fmt.Errorf("reading layer contents: %w", err)
+	if len(missing) == 0 {
+		return nil
 	}
-	defer func() { _ = r.Close() }() // read-only stream; nothing to flush
-
-	tr := tar.NewReader(r)
-	n := 0
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return 0, err
-		}
-		if _, err := io.Copy(io.Discard, tr); err != nil { //nolint:gosec // G110: discarded, and bounded by the overlay's real content
-			return 0, fmt.Errorf("reading content of %s: %w", hdr.Name, err)
-		}
-		if strings.HasPrefix(path.Base(path.Clean(hdr.Name)), whiteoutPrefix) {
-			n++
-		}
-	}
-	return n, nil
+	sort.Slice(missing, func(i, j int) bool { return missing[i].Path < missing[j].Path })
+	return r.appendSynthetic(missing)
 }
 
 // countingWriter tracks the number of bytes written through it.
@@ -558,4 +504,90 @@ func (r *Rootfs) appendSynthetic(files []SyntheticFile) error {
 		return fmt.Errorf("closing %s: %w", r.TarPath, err)
 	}
 	return nil
+}
+
+// whiteoutPrefix marks a tar entry (mirroring
+// mutate.Extract's own unexported constant of the same name) as either a
+// per-file tombstone (".wh.<name>") or, when the rest of the basename is
+// itself "..wh..opq", an opaque-directory marker. overlayStats only needs
+// to recognize and count these, not interpret them the way Build's own
+// final flatten (via mutate.Extract) does.
+const whiteoutPrefix = ".wh."
+
+// overlayStats computes overlay's OverlayStats: Files/Bytes from its own
+// flattened view (mutate.Extract applied to overlay alone, so only its
+// own layers are read - never base, never any other overlay), and
+// Removed from a raw scan of its own layers' tar entries for whiteout
+// and opaque-directory markers. See OverlayStats's doc comment for
+// exactly what each field means.
+func overlayStats(overlay v1.Image) (OverlayStats, error) {
+	var st OverlayStats
+
+	layers, err := overlay.Layers()
+	if err != nil {
+		return st, fmt.Errorf("reading overlay image layers: %w", err)
+	}
+	for _, l := range layers {
+		n, err := countWhiteouts(l)
+		if err != nil {
+			return st, fmt.Errorf("scanning overlay layer for whiteouts: %w", err)
+		}
+		st.Removed += n
+	}
+
+	rc := mutate.Extract(overlay)
+	defer func() { _ = rc.Close() }() // read-only stream; nothing to flush
+	tr := tar.NewReader(rc)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return st, err
+		}
+		if _, err := io.Copy(io.Discard, tr); err != nil { //nolint:gosec // G110: discarded, and bounded by the overlay's real content
+			return st, fmt.Errorf("reading content of %s: %w", hdr.Name, err)
+		}
+		if normalizePath(hdr.Name) == "/" {
+			continue
+		}
+		st.Files++
+		if hdr.Typeflag == tar.TypeReg {
+			st.Bytes += hdr.Size
+		}
+	}
+	return st, nil
+}
+
+// countWhiteouts returns the number of whiteout/opaque-directory marker
+// entries in l's own tar stream - a plain scan, with no whiteout
+// resolution or cross-layer bookkeeping (that's what mutate.Extract does
+// for the entries that survive; this just counts the markers themselves,
+// which Extract never emits).
+func countWhiteouts(l v1.Layer) (int, error) {
+	r, err := l.Uncompressed()
+	if err != nil {
+		return 0, fmt.Errorf("reading layer contents: %w", err)
+	}
+	defer func() { _ = r.Close() }() // read-only stream; nothing to flush
+
+	tr := tar.NewReader(r)
+	n := 0
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return 0, err
+		}
+		if _, err := io.Copy(io.Discard, tr); err != nil { //nolint:gosec // G110: discarded, and bounded by the overlay's real content
+			return 0, fmt.Errorf("reading content of %s: %w", hdr.Name, err)
+		}
+		if strings.HasPrefix(path.Base(path.Clean(hdr.Name)), whiteoutPrefix) {
+			n++
+		}
+	}
+	return n, nil
 }

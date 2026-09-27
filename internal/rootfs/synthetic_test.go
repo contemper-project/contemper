@@ -146,3 +146,35 @@ func TestWriteFileThenPopulateOrderIsIndexDriven(t *testing.T) {
 		t.Errorf("/etc/b = %q, want %q", got, "2")
 	}
 }
+
+// TestBuildAddsMissingParentDirs checks that a layer listing a file but
+// not its parent directories still yields a directory entry for each
+// parent, so the ext4 population step has somewhere to create the file.
+func TestBuildAddsMissingParentDirs(t *testing.T) {
+	img, err := imgtest.Image(linuxAMD64, nil,
+		[]imgtest.File{{Path: "usr/", Typeflag: tar.TypeDir, Mode: 0o700}, {Path: "usr/lib/app/data", Data: []byte("x")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rfs, err := rootfs.Build(img)
+	if err != nil {
+		t.Fatalf("rootfs.Build: %v", err)
+	}
+	defer func() { _ = rfs.Close() }()
+
+	for _, p := range []string{"/usr/lib", "/usr/lib/app"} {
+		e, ok := rfs.Lookup(p)
+		if !ok {
+			t.Fatalf("%s: missing", p)
+		}
+		if e.Header.Typeflag != tar.TypeDir || e.Header.Mode != 0o755 {
+			t.Errorf("%s: typeflag %c mode %o, want a 0755 directory", p, e.Header.Typeflag, e.Header.Mode)
+		}
+	}
+	if e, _ := rfs.Lookup("/usr"); e.Header.Mode != 0o700 {
+		t.Errorf("/usr: mode %o, want the layer's own 0700 left alone", e.Header.Mode)
+	}
+	if got, err := rfs.ReadFile("/usr/lib/app/data"); err != nil || string(got) != "x" {
+		t.Errorf("ReadFile = %q, %v", got, err)
+	}
+}
