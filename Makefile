@@ -25,13 +25,13 @@ example:
 	podman build -t contemper-example:dev examples/alpine
 
 e2e:
-	./hack/e2e.sh
+	./hack/e2e.sh $(if $(EXAMPLE),--example $(EXAMPLE))
 
 e2e-variants:
 	./hack/e2e-variants.sh
 
 e2e-volumes:
-	./hack/e2e-volumes.sh
+	./hack/e2e-volumes.sh $(if $(EXAMPLE),--example $(EXAMPLE))
 
 clean:
 	rm -rf bin _out
