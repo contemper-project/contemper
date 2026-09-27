@@ -18,7 +18,7 @@ func buildTestRootfs(t *testing.T, files []imgtest.File) *rootfs.Rootfs {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	t.Cleanup(func() { rfs.Close() })
+	t.Cleanup(func() { _ = rfs.Close() })
 	return rfs
 }
 

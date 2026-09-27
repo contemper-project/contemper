@@ -39,7 +39,7 @@ func TestWhiteoutsAndOpaqueDirs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	defer rfs.Close()
+	defer func() { _ = rfs.Close() }()
 
 	if _, ok := rfs.Lookup("/etc/remove.conf"); ok {
 		t.Errorf("etc/remove.conf should have been whited out")
@@ -81,7 +81,7 @@ func TestSymlinkResolution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	defer rfs.Close()
+	defer func() { _ = rfs.Close() }()
 
 	for _, p := range []string{"/etc/link.conf", "/etc/abslink.conf", "/etc/chain.conf"} {
 		data, err := rfs.ReadFile(p)
@@ -127,7 +127,7 @@ func TestResolveMergedUsr(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	defer rfs.Close()
+	defer func() { _ = rfs.Close() }()
 
 	e, err := rfs.Resolve("/sbin/openrc")
 	if err != nil {
@@ -266,7 +266,7 @@ func TestHardlinksAndDeviceNodes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	defer rfs.Close()
+	defer func() { _ = rfs.Close() }()
 
 	link, ok := rfs.Lookup("/bin/hardlink")
 	if !ok {

@@ -122,18 +122,26 @@ func Build(base v1.Image, overlays ...v1.Image) (*Rootfs, error) {
 	tarPath := path.Join(tmpDir, "rootfs.tar")
 	f, err := os.Create(tarPath)
 	if err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		return nil, fmt.Errorf("creating %s: %w", tarPath, err)
 	}
-	defer f.Close()
 
 	rc := mutate.Extract(img)
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	index, err := indexTar(rc, f)
 	if err != nil {
-		os.RemoveAll(tmpDir)
+		_ = f.Close()
+		_ = os.RemoveAll(tmpDir)
 		return nil, fmt.Errorf("flattening rootfs: %w", err)
+	}
+	// Checked, not deferred-and-ignored: every later read of this Rootfs
+	// goes through TarPath by byte offset, so a write error surfaced
+	// only at Close (e.g. a delayed flush failure) would otherwise
+	// silently corrupt every subsequent read.
+	if err := f.Close(); err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return nil, fmt.Errorf("closing %s: %w", tarPath, err)
 	}
 
 	return &Rootfs{TarPath: tarPath, Index: index, OverlayStats: stats, tmpDir: tmpDir}, nil
@@ -254,7 +262,12 @@ func indexTar(r io.Reader, w io.Writer) (map[string]*Entry, error) {
 		}
 		p := normalizePath(hdr.Name)
 		offset := cw.n
-		if _, err := io.Copy(io.Discard, tr); err != nil {
+		// Not a decompression-bomb risk: this drains one already
+		// decompressed tar entry from an image the caller chose to
+		// convert (a local file or one they pulled themselves), sized by
+		// its own real content - there is no attacker supplying an
+		// oversized stream over the wire here.
+		if _, err := io.Copy(io.Discard, tr); err != nil { //nolint:gosec // G110: bounded by the source image's real content, not attacker-controlled
 			return nil, fmt.Errorf("reading content of %s: %w", hdr.Name, err)
 		}
 		if p == "/" {
@@ -265,7 +278,7 @@ func indexTar(r io.Reader, w io.Writer) (map[string]*Entry, error) {
 	// Drain any trailing archive padding so the file on disk is a
 	// complete, independently readable tar (not required for our own
 	// offset-based reads, but cheap and useful for debugging).
-	io.Copy(cw, r) //nolint:errcheck // best-effort trailing padding
+	io.Copy(cw, r) //nolint:errcheck,gosec // G104/errcheck: best-effort trailing padding, already drained the archive content we need above
 	return index, nil
 }
 
@@ -309,7 +322,7 @@ func (r *Rootfs) Resolve(p string) (*Entry, error) {
 	hops := 0
 	resolved, err := r.resolvePath(normalizePath(p), &hops)
 	if err != nil {
-		return nil, fmt.Errorf("%s (resolving %s)", err, p)
+		return nil, fmt.Errorf("%w (resolving %s)", err, p)
 	}
 	e, ok := r.Index[resolved]
 	if !ok {
@@ -354,7 +367,11 @@ func (r *Rootfs) resolvePath(target string, hops *int) (string, error) {
 	}
 	linkTarget := e.Header.Linkname
 	if !strings.HasPrefix(linkTarget, "/") {
-		linkTarget = path.Join(path.Dir(full), linkTarget)
+		// Not a real extraction: full and linkTarget only ever address
+		// r.Index, an in-memory map, never a path on the host
+		// filesystem, so there is nothing here for a ".." segment to
+		// traverse out of.
+		linkTarget = path.Join(path.Dir(full), linkTarget) //nolint:gosec // G305: resolves within the in-memory index only, never touches the host filesystem
 	}
 	return r.resolvePath(normalizePath(linkTarget), hops)
 }
@@ -375,7 +392,7 @@ func (r *Rootfs) ReadFile(p string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, err := f.Seek(e.DataOffset, io.SeekStart); err != nil {
 		return nil, err
 	}
@@ -398,7 +415,7 @@ func (r *Rootfs) Open(e *Entry) (io.ReadCloser, error) {
 		return nil, err
 	}
 	if _, err := f.Seek(e.DataOffset, io.SeekStart); err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, err
 	}
 	return &limitedReadCloser{r: io.LimitReader(f, e.Header.Size), c: f}, nil
@@ -487,7 +504,7 @@ func (r *Rootfs) appendSynthetic(files []SyntheticFile) error {
 	if err != nil {
 		return fmt.Errorf("opening %s to append synthesized entries: %w", r.TarPath, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	offset, err := f.Seek(0, io.SeekEnd)
 	if err != nil {
@@ -532,5 +549,13 @@ func (r *Rootfs) appendSynthetic(files []SyntheticFile) error {
 		r.Index[p] = &Entry{Path: p, Header: hdr, DataOffset: dataOffset}
 	}
 
-	return tw.Flush()
+	if err := tw.Flush(); err != nil {
+		return fmt.Errorf("flushing synthesized entries to %s: %w", r.TarPath, err)
+	}
+	// Checked, not deferred-and-ignored: same reasoning as Build - every
+	// later read of this Rootfs goes through TarPath by byte offset.
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("closing %s: %w", r.TarPath, err)
+	}
+	return nil
 }
