@@ -52,3 +52,10 @@ e2e:
         sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils ovmf
     - run: ./hack/e2e.sh --timeout 300s
 ```
+
+A second job, `e2e-variants` (`hack/e2e-variants.sh`), boots the same
+example with a dummy `--support` image to exercise variant resolution
+end to end: it pushes a support image and its variants to a local
+registry, asserts the resolved variants recorded in `contemper.json`,
+and boots waiting for the winning variant's own marker alongside the
+example's.
