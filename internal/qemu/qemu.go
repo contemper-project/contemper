@@ -5,6 +5,7 @@ package qemu
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -157,7 +158,7 @@ func kvmUsable() bool {
 	if err != nil {
 		return false
 	}
-	f.Close()
+	_ = f.Close()
 	return true
 }
 
@@ -204,12 +205,16 @@ func buildArgs(info archInfo, opts Options) (args []string, err error) {
 	return args, nil
 }
 
+// copyFile copies the UEFI variable store template (src, one of a fixed
+// list of firmware paths - see pflashCandidates) into this boot's
+// per-instance work dir (dst) as a private scratch file only this
+// process and the qemu child it spawns need to read.
 func copyFile(src, dst string) error {
 	data, err := os.ReadFile(src)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dst, data, 0o644)
+	return os.WriteFile(dst, data, 0o600) //nolint:gosec // G703: dst is always opts.WorkDir (a dir we created) joined with a fixed filename, never user input
 }
 
 // Deploy boots the disk described by opts under qemu. With opts.Expect
@@ -236,7 +241,7 @@ func Deploy(opts Options) error {
 			return fmt.Errorf("creating serial log: %w", err)
 		}
 		opts.SerialLogPath = f.Name()
-		f.Close()
+		_ = f.Close()
 	}
 
 	if opts.WorkDir == "" {
@@ -244,7 +249,7 @@ func Deploy(opts Options) error {
 		if err != nil {
 			return fmt.Errorf("creating qemu work dir: %w", err)
 		}
-		defer os.RemoveAll(dir)
+		defer func() { _ = os.RemoveAll(dir) }()
 		opts.WorkDir = dir
 	}
 
@@ -258,7 +263,7 @@ func Deploy(opts Options) error {
 	rep.Line("🚀", "booting "+filepath.Base(opts.DiskPath), fmt.Sprintf("UEFI/%s · 1 GiB", strings.ToUpper(accel)))
 	rep.VerboseCmd(binPath, args)
 
-	cmd := exec.Command(binPath, args...)
+	cmd := exec.CommandContext(context.Background(), binPath, args...) //nolint:gosec // G204: binPath is resolved by hostenv.Required, never a shell
 	var toolErr bytes.Buffer
 	cmd.Stderr = io.MultiWriter(os.Stderr, &toolErr)
 	if err := cmd.Start(); err != nil {
@@ -321,7 +326,7 @@ func tailToWriter(path string, w io.Writer) (stop func()) {
 					n, _ := io.Copy(w, f)
 					offset += n
 				}
-				f.Close()
+				_ = f.Close()
 			}
 			select {
 			case <-done:
@@ -361,7 +366,7 @@ func waitForExpect(logPath, expect string, timeout time.Duration, exited <-chan 
 				return nil
 			}
 			if err != nil {
-				return fmt.Errorf("%w (%v) waiting for %q", errExitedEarly, err, expect)
+				return fmt.Errorf("%w (%w) waiting for %q", errExitedEarly, err, expect)
 			}
 			return fmt.Errorf("%w waiting for %q", errExitedEarly, expect)
 		default:
