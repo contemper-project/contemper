@@ -275,6 +275,90 @@ func loadDockerArchive(ref Ref, platform v1.Platform) (*Image, error) {
 	}, nil
 }
 
+// IndexAnnotations returns the annotations recorded on the index
+// descriptor that selects platform's manifest, for support-image
+// resolution's manifest/index-descriptor annotation fallback (see
+// docs/reference/support-image-annotations.md). It returns nil, nil (not
+// an error) for a reference that doesn't resolve through a multi-platform
+// index, since there is then no descriptor-level fallback to read.
+func IndexAnnotations(ref Ref, platform v1.Platform) (map[string]string, error) {
+	switch ref.Kind {
+	case KindRegistry:
+		return registryIndexAnnotations(ref, platform)
+	case KindOCIArchive:
+		return ociArchiveIndexAnnotations(ref, platform)
+	case KindOCILayout:
+		return ociLayoutIndexAnnotations(ref, platform)
+	case KindDockerArchive:
+		// docker-archive's manifest.json has no index-descriptor
+		// annotation concept.
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("unknown source kind %q", ref.Kind)
+	}
+}
+
+func registryIndexAnnotations(ref Ref, platform v1.Platform) (map[string]string, error) {
+	nref, err := name.ParseReference(ref.Value)
+	if err != nil {
+		return nil, fmt.Errorf("parsing registry ref %q: %w", ref.Value, err)
+	}
+	desc, err := remote.Get(nref, remote.WithAuthFromKeychain(authn.DefaultKeychain))
+	if err != nil {
+		return nil, fmt.Errorf("fetching %s: %w", ref.Value, err)
+	}
+	if !desc.MediaType.IsIndex() {
+		return nil, nil
+	}
+	idx, err := desc.ImageIndex()
+	if err != nil {
+		return nil, fmt.Errorf("reading index %s: %w", ref.Value, err)
+	}
+	return indexManifestAnnotations(idx, platform, ref.Value)
+}
+
+func ociArchiveIndexAnnotations(ref Ref, platform v1.Platform) (map[string]string, error) {
+	tmpDir, err := os.MkdirTemp("", "contemper-oci-archive-")
+	if err != nil {
+		return nil, fmt.Errorf("creating temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	f, err := os.Open(ref.Value)
+	if err != nil {
+		return nil, fmt.Errorf("opening oci-archive %q: %w", ref.Value, err)
+	}
+	defer f.Close()
+
+	if err := extractTar(f, tmpDir); err != nil {
+		return nil, fmt.Errorf("extracting oci-archive %q: %w", ref.Value, err)
+	}
+	return ociLayoutIndexAnnotations(Ref{Kind: KindOCILayout, Value: tmpDir}, platform)
+}
+
+func ociLayoutIndexAnnotations(ref Ref, platform v1.Platform) (map[string]string, error) {
+	idx, err := layout.ImageIndexFromPath(ref.Value)
+	if err != nil {
+		return nil, fmt.Errorf("reading OCI layout %q: %w", ref.Value, err)
+	}
+	return indexManifestAnnotations(idx, platform, ref.Value)
+}
+
+func indexManifestAnnotations(idx v1.ImageIndex, platform v1.Platform, name string) (map[string]string, error) {
+	im, err := idx.IndexManifest()
+	if err != nil {
+		return nil, fmt.Errorf("reading index manifest of %q: %w", name, err)
+	}
+	if len(im.Manifests) == 0 {
+		return nil, nil
+	}
+	desc, err := selectManifest(im.Manifests, platform)
+	if err != nil {
+		return nil, fmt.Errorf("%q: %w", name, err)
+	}
+	return desc.Annotations, nil
+}
+
 // selectManifest picks the descriptor matching platform from an index's
 // manifest list. A single-manifest layout with no platform metadata at
 // all (a single-arch archive) is accepted unconditionally.

@@ -152,6 +152,30 @@ func TestLoadOCILayoutWrongArch(t *testing.T) {
 	}
 }
 
+func TestIndexAnnotationsFallsBackToDescriptor(t *testing.T) {
+	dir := t.TempDir()
+	buildLayout(t, dir) // tags the amd64 manifest's index descriptor with RefNameAnnotation
+
+	anns, err := source.IndexAnnotations(source.Ref{Kind: source.KindOCILayout, Value: dir},
+		v1.Platform{OS: "linux", Architecture: "amd64"})
+	if err != nil {
+		t.Fatalf("IndexAnnotations: %v", err)
+	}
+	if anns[source.RefNameAnnotation] != "example:dev" {
+		t.Errorf("IndexAnnotations = %v, want %s=example:dev", anns, source.RefNameAnnotation)
+	}
+
+	// The arm64 descriptor in the same index carries no such annotation.
+	anns, err = source.IndexAnnotations(source.Ref{Kind: source.KindOCILayout, Value: dir},
+		v1.Platform{OS: "linux", Architecture: "arm64"})
+	if err != nil {
+		t.Fatalf("IndexAnnotations: %v", err)
+	}
+	if _, ok := anns[source.RefNameAnnotation]; ok {
+		t.Errorf("arm64 descriptor should carry no ref-name annotation, got %v", anns)
+	}
+}
+
 func TestRefStringCleansLocalPaths(t *testing.T) {
 	for raw, want := range map[string]string{
 		"oci-archive:/a/dev/../contemper/_out/x.tar": "oci-archive:/a/contemper/_out/x.tar",
