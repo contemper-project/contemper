@@ -175,3 +175,14 @@ func TestFstabOptedOut(t *testing.T) {
 		t.Errorf("did not expect opt-out")
 	}
 }
+
+func TestFromConfigRejectsInvalidPaths(t *testing.T) {
+	for _, p := range []string{"data", "/data\nLABEL=x /etc ext4 defaults 0 0", "/tab\there", "/del\x7f"} {
+		if _, err := volume.FromConfig([]string{p}, nil); err == nil {
+			t.Errorf("FromConfig(%q) succeeded, want an error", p)
+		}
+	}
+	if _, err := volume.FromConfig([]string{"/srv/my data"}, nil); err != nil {
+		t.Errorf("FromConfig with a space in the path: %v", err)
+	}
+}

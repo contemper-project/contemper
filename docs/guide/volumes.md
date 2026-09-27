@@ -20,7 +20,8 @@ size. Without a size, `convert` still records the volume — unsized — but
 `deploy` refuses to create it until one is supplied, either by adding the
 label or by passing `--volume /data=10GiB` at deploy time (which also
 overrides a label's size, if you want a different size for one
-deployment). contemper never guesses a size.
+deployment). contemper never guesses a size. The path must be absolute
+and may not contain control characters such as a newline or tab.
 
 Sizes accept the same units everywhere in contemper: `10GiB`, `512MiB`,
 or a bare byte count.

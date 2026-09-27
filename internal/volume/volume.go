@@ -73,6 +73,9 @@ func FromConfig(paths []string, labels map[string]string) ([]Spec, error) {
 	byName := map[string][]string{}
 
 	for _, p := range sorted {
+		if err := validatePath(p); err != nil {
+			return nil, err
+		}
 		name := DeriveName(p)
 		if explicit, ok := labels[nameLabelKey(p)]; ok {
 			explicit = strings.TrimSpace(explicit)
@@ -109,6 +112,22 @@ func FromConfig(paths []string, labels map[string]string) ([]Spec, error) {
 	}
 
 	return specs, nil
+}
+
+// validatePath checks a declared VOLUME path: it must be absolute (it
+// becomes an fstab mount point) and free of control characters (it is
+// written as the last field of a line in /etc/contemper/volumes, which
+// the guest reads line by line).
+func validatePath(p string) error {
+	if !strings.HasPrefix(p, "/") {
+		return fmt.Errorf("volume %q: path must be absolute", p)
+	}
+	for i := 0; i < len(p); i++ {
+		if p[i] < 0x20 || p[i] == 0x7f {
+			return fmt.Errorf("volume %q: path contains a control character", p)
+		}
+	}
+	return nil
 }
 
 // RootSize returns the root partition size labels declare
