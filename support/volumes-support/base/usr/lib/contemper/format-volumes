@@ -105,6 +105,50 @@ is_blank() {
 	return $result
 }
 
+# ext4_label reads device $1's ext2/3/4 superblock directly and prints
+# its volume label, or nothing (and fails) if $1 doesn't start with a
+# valid ext2/3/4 superblock. This deliberately avoids e2label (and
+# tune2fs, dumpe2fs): those ship in e2fsprogs-extra, not the base
+# e2fsprogs package, so an image that installs only e2fsprogs for
+# mkfs.ext4 - Alpine's does exactly this - would not have them. dd and
+# od (like cmp above) are the ones dependency busybox and coreutils both
+# always install.
+#
+# The ext2/3/4 superblock starts at byte 1024. s_magic, a little-endian
+# 16-bit value at offset 1024+56, must read 0xEF53 for this to be an
+# ext2/3/4 filesystem at all. s_volume_name, 16 bytes at offset 1024+120,
+# is NUL-padded ASCII; capturing it through command substitution
+# truncates at the first NUL the same way a C string would, so a short
+# label comes back exactly as mkfs.ext4 -L stored it, and a full
+# 16-byte label (no NUL byte at all) comes back whole.
+#
+# dd extracts the exact byte ranges (busybox and GNU dd agree on
+# if/bs/skip/count); od turns the bytes into hex two digits at a time
+# ("od -An -tx1" is supported by both busybox and GNU od, unlike -j/-N
+# skip/count options or GNU-only decoding tricks); printf's own
+# "0x.."-prefixed numeric-argument handling (POSIX-specified, unlike
+# "$((16#..))" arithmetic base conversion) turns each hex byte into an
+# octal escape, and printf '%b' decodes those back into raw bytes -
+# everything past od is POSIX parameter expansion and printf, so no
+# other tool is required.
+ext4_label() {
+	dev=$1
+
+	magic=$(dd if="$dev" bs=1 skip=1080 count=2 2>/dev/null | od -An -tx1 | tr -d ' \t\n')
+	[ "$magic" = "53ef" ] || return 1
+
+	hex=$(dd if="$dev" bs=1 skip=1144 count=16 2>/dev/null | od -An -tx1 | tr -d ' \t\n')
+
+	label=
+	rest=$hex
+	while [ -n "$rest" ]; do
+		byte=${rest%"${rest#??}"}
+		rest=${rest#??}
+		label="$label\\$(printf '%03o' "0x$byte")"
+	done
+	printf '%b' "$label"
+}
+
 if [ ! -f "$VOLUMES_FILE" ]; then
 	exit 0
 fi
@@ -127,7 +171,7 @@ while IFS=' ' read -r vol_name vol_serial vol_fs vol_mount; do
 		continue
 	fi
 
-	existing_label=$(e2label "$dev" 2>/dev/null)
+	existing_label=$(ext4_label "$dev")
 	if [ -n "$existing_label" ] && [ "$existing_label" = "$vol_name" ]; then
 		log "volume $vol_name: $dev is already ext4 labelled '$vol_name', reusing for $vol_mount"
 		continue

@@ -22,19 +22,21 @@ import (
 
 // Prereqs lists the host tools the volume-formatting helper needs the
 // *image* to provide (the helper runs in the guest, not on the host),
-// and the usual locations to look for each: mkfs.ext4 and e2label from
-// e2fsprogs (e2label is how the helper recognizes a volume it can reuse
-// - see docs/guide/volumes.md), and cmp/dd, which either busybox or
-// coreutils installs in /bin or /usr/bin on every Linux contemper
-// targets.
+// and the usual locations to look for each: mkfs.ext4 from e2fsprogs,
+// and cmp/dd/od, which either busybox or coreutils installs in /bin or
+// /usr/bin on every Linux contemper targets. The helper recognizes a
+// volume it can reuse by reading the ext2/3/4 superblock directly with
+// dd and od (see docs/guide/volumes.md) rather than shelling out to
+// e2label, which lives in e2fsprogs-extra on Alpine and so isn't
+// guaranteed just because mkfs.ext4 is present.
 var Prereqs = []struct {
 	Tool  string
 	Paths []string
 }{
 	{"mkfs.ext4", []string{"/sbin/mkfs.ext4", "/usr/sbin/mkfs.ext4"}},
-	{"e2label", []string{"/sbin/e2label", "/usr/sbin/e2label"}},
 	{"cmp", []string{"/bin/cmp", "/usr/bin/cmp"}},
 	{"dd", []string{"/bin/dd", "/usr/bin/dd"}},
+	{"od", []string{"/bin/od", "/usr/bin/od"}},
 }
 
 // CheckPrereqs fails with an error naming every tool in Prereqs (and the
