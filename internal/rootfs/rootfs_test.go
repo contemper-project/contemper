@@ -106,6 +106,42 @@ func TestSymlinkResolution(t *testing.T) {
 	}
 }
 
+// TestResolveMergedUsr checks that Resolve follows a symlink in an
+// *intermediate* path segment, not just the final one - the
+// merged-/usr layout real distros (Fedora, Arch, current Debian/Ubuntu)
+// use, where /sbin is itself a symlink to /usr/sbin and no tar entry is
+// ever literally named "/sbin/<anything>". This is what lets a
+// requires.files predicate written as "/sbin/openrc" match such an
+// image.
+func TestResolveMergedUsr(t *testing.T) {
+	img, err := imgtest.Image(linuxAMD64, nil, []imgtest.File{
+		{Path: "usr/", Typeflag: tar.TypeDir},
+		{Path: "usr/sbin/", Typeflag: tar.TypeDir},
+		{Path: "usr/sbin/openrc", Data: []byte("bin")},
+		{Path: "sbin", Typeflag: tar.TypeSymlink, Linkname: "usr/sbin"},
+	})
+	if err != nil {
+		t.Fatalf("building image: %v", err)
+	}
+	rfs, err := rootfs.Build(img)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer rfs.Close()
+
+	e, err := rfs.Resolve("/sbin/openrc")
+	if err != nil {
+		t.Fatalf("Resolve(/sbin/openrc): %v", err)
+	}
+	if e.Path != "/usr/sbin/openrc" {
+		t.Errorf("Resolve(/sbin/openrc).Path = %q, want /usr/sbin/openrc", e.Path)
+	}
+
+	if _, err := rfs.Resolve("/sbin/does-not-exist"); err == nil {
+		t.Errorf("Resolve(/sbin/does-not-exist) should fail")
+	}
+}
+
 func TestHardlinksAndDeviceNodes(t *testing.T) {
 	layer := []imgtest.File{
 		{Path: "bin/", Typeflag: tar.TypeDir},

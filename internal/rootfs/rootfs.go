@@ -155,25 +155,70 @@ func (r *Rootfs) Lookup(p string) (*Entry, bool) {
 }
 
 // Resolve resolves p, following symlinks inside the index only, clamped
-// at "/" and bounded by maxSymlinkHops. It returns the final, non-symlink
-// entry.
+// at "/" and bounded (in total) by maxSymlinkHops. Unlike a plain
+// lookup by the literal path string, it also follows a symlink in any
+// *intermediate* path segment - not just the final one - so a
+// merged-/usr layout (where /bin, /sbin and /lib are themselves
+// symlinks to their /usr equivalents, as on Fedora, Arch and current
+// Debian/Ubuntu) resolves a path like /sbin/openrc correctly even
+// though no tar entry is ever literally named "/sbin/openrc". This
+// matters for every requires.files-style predicate contemper checks
+// (support-image variants, the volume helper's own prerequisites): a
+// predicate written as "/sbin/foo" must still match an image that only
+// has /usr/sbin/foo plus a merged-/usr /sbin symlink. It returns the
+// final, non-symlink entry.
 func (r *Rootfs) Resolve(p string) (*Entry, error) {
-	cur := normalizePath(p)
-	for hop := 0; hop < maxSymlinkHops; hop++ {
-		e, ok := r.Index[cur]
-		if !ok {
-			return nil, fmt.Errorf("%s: no such path (resolving %s)", cur, p)
-		}
-		if e.Header.Typeflag != tar.TypeSymlink {
-			return e, nil
-		}
-		target := e.Header.Linkname
-		if !strings.HasPrefix(target, "/") {
-			target = path.Join(path.Dir(cur), target)
-		}
-		cur = normalizePath(target)
+	hops := 0
+	resolved, err := r.resolvePath(normalizePath(p), &hops)
+	if err != nil {
+		return nil, fmt.Errorf("%s (resolving %s)", err, p)
 	}
-	return nil, fmt.Errorf("%s: too many symlink hops", p)
+	e, ok := r.Index[resolved]
+	if !ok {
+		return nil, fmt.Errorf("%s: no such path (resolving %s)", resolved, p)
+	}
+	return e, nil
+}
+
+// resolvePath resolves target (an absolute, cleaned path) to its final,
+// symlink-free path string, resolving every segment's own symlink chain
+// as it descends - including the leaf's. A segment with no index entry
+// of its own is passed through unresolved rather than treated as an
+// error (there is nothing to redirect through, and reporting "missing"
+// is the top-level caller's job, once it looks up the fully resolved
+// path itself): most tar streams carry an explicit entry for every
+// parent directory, but nothing requires it.
+func (r *Rootfs) resolvePath(target string, hops *int) (string, error) {
+	if target == "/" {
+		return "/", nil
+	}
+	dir, base := path.Split(target)
+	dir = path.Clean(dir)
+
+	resolvedDir := "/"
+	if dir != "/" {
+		var err error
+		resolvedDir, err = r.resolvePath(dir, hops)
+		if err != nil {
+			return "", err
+		}
+	}
+	full := path.Join(resolvedDir, base)
+
+	e, ok := r.Index[full]
+	if !ok || e.Header.Typeflag != tar.TypeSymlink {
+		return full, nil
+	}
+
+	*hops++
+	if *hops > maxSymlinkHops {
+		return "", fmt.Errorf("too many symlink hops")
+	}
+	linkTarget := e.Header.Linkname
+	if !strings.HasPrefix(linkTarget, "/") {
+		linkTarget = path.Join(path.Dir(full), linkTarget)
+	}
+	return r.resolvePath(normalizePath(linkTarget), hops)
 }
 
 // ReadFile returns the content of the regular file at p, resolving

@@ -155,6 +155,63 @@ func TestMergeResolvesWinningVariant(t *testing.T) {
 	}
 }
 
+// TestMergeResolvesOnMergedUsr checks branch resolution against a
+// merged-/usr source image (real openrc at /usr/sbin/openrc, /sbin a
+// symlink to /usr/sbin - as on Fedora, Arch and current Debian/Ubuntu):
+// the "openrc" branch's requires.files is written as "/sbin/openrc" (see
+// docs/reference/support-image-annotations.md and
+// docs/guide/volumes.md), which only matches such an image because
+// rootfs.Resolve follows a symlink in an intermediate path segment, not
+// just the final one.
+func TestMergeResolvesOnMergedUsr(t *testing.T) {
+	host := newTestRegistry(t)
+
+	src, err := imgtest.Image(linuxAMD64, nil, []imgtest.File{
+		{Path: "sbin/", Typeflag: tar.TypeSymlink, Linkname: "usr/sbin"},
+		{Path: "usr/", Typeflag: tar.TypeDir},
+		{Path: "usr/sbin/", Typeflag: tar.TypeDir},
+		{Path: "usr/sbin/mkfs.ext4", Data: []byte("bin")},
+		{Path: "usr/sbin/e2label", Data: []byte("bin")},
+		{Path: "usr/sbin/openrc", Data: []byte("bin")},
+		{Path: "bin/", Typeflag: tar.TypeDir},
+		{Path: "bin/cmp", Data: []byte("bin")},
+		{Path: "bin/dd", Data: []byte("bin")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	openrcVariant, err := imgtest.Image(linuxAMD64, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	openrcRef := pushImage(t, host, "volumes-support-init-system-openrc:v1", openrcVariant)
+
+	helperImg, err := imgtest.Image(linuxAMD64, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	helperImg = withAnnotations(helperImg, map[string]string{
+		"io.contemper.branch.init-system.openrc.requires.files":  "/sbin/openrc",
+		"io.contemper.branch.init-system.openrc.image":           openrcRef,
+		"io.contemper.branch.init-system.systemd.requires.files": "/usr/lib/systemd/systemd",
+	})
+	helperRef := pushImage(t, host, "volumes-support:v1", helperImg)
+
+	result, err := volumehelper.Merge(helperRef, src, linuxAMD64)
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	defer result.Img.Close()
+	for _, vi := range result.VariantImages {
+		defer vi.Close()
+	}
+
+	if len(result.Resolved) != 1 || result.Resolved[0].Variant != "openrc" {
+		t.Fatalf("unexpected resolution on a merged-/usr image: %+v", result.Resolved)
+	}
+}
+
 func TestMergeNoMatchNoDefaultMentionsNoVolumeHelper(t *testing.T) {
 	host := newTestRegistry(t)
 
