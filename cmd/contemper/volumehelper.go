@@ -25,9 +25,14 @@ func mergeVolumeHelper(ref string, img *source.Image, platform v1.Platform, rep 
 	if err != nil {
 		return nil, fmt.Errorf("reading volume helper layers: %w", err)
 	}
+	helperDownload, err := downloadSize(result.Img.Image)
+	if err != nil {
+		return nil, fmt.Errorf("reading volume helper manifest: %w", err)
+	}
 	rep.Line("🧰", "volume helper · "+ref, "")
-	rep.Sub("✔", "rootfs", fmt.Sprintf("%d layers", len(helperLayers)))
+	rep.Sub("✔", "rootfs", fmt.Sprintf("%d %s · %s download", len(helperLayers), pluralize(len(helperLayers), "layer"), progress.HumanBytes(helperDownload)))
 
+	variantImg := 0
 	for i, r := range result.Resolved {
 		variantLabel := r.Variant
 		detail := ""
@@ -38,7 +43,13 @@ func mergeVolumeHelper(ref string, img *source.Image, platform v1.Platform, rep 
 		}
 		rep.Sub("✔", fmt.Sprintf("branch %s → %s", r.Branch, variantLabel), detail)
 		if v := result.Variants[i]; v.Ref != "" {
-			rep.SubChild("%s %s", v.Ref, platform.String())
+			vi := result.VariantImages[variantImg]
+			variantImg++
+			vDownload, err := downloadSize(vi.Image)
+			if err != nil {
+				return nil, fmt.Errorf("reading volume helper variant manifest: %w", err)
+			}
+			rep.SubChild("%s %s · %s download", v.Ref, platform.String(), progress.HumanBytes(vDownload))
 		}
 	}
 

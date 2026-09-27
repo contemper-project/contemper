@@ -186,7 +186,7 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 			originLabel = "--support"
 		}
 		rep.Line("🧩", "support image · "+resolvedSupportRef, "("+originLabel+")")
-		rep.Sub("✔", "rootfs", fmt.Sprintf("%d layers", len(supportLayers)))
+		rep.Sub("✔", "rootfs", fmt.Sprintf("%d %s · %s download", len(supportLayers), pluralize(len(supportLayers), "layer"), progress.HumanBytes(manifestDownloadSize(supportManifest))))
 
 		if len(schema.Branches) > 0 {
 			vr, err := resolveVariants(schema, img, platform, rep)
@@ -231,6 +231,17 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 		rep.Blank()
 	}
 
+	// overlayReportLabels lines up positionally with overlays (and so with
+	// rootfs.Build's resulting OverlayStats): support image, then each of
+	// its winning variants, then the volume helper and each of its own.
+	var overlayReportLabels []string
+	if resolvedSupportRef != "" {
+		overlayReportLabels = append(overlayReportLabels, overlayLabels("support image", resolvedVariants)...)
+	}
+	if helperResult != nil {
+		overlayReportLabels = append(overlayReportLabels, overlayLabels("volume helper", helperResult.Variants)...)
+	}
+
 	sourceLayers, err := img.Image.Layers()
 	if err != nil {
 		return fmt.Errorf("reading source image layers: %w", err)
@@ -253,6 +264,7 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 	}
 	defer rfs.Close()
 	mergeStage.Done("🧬", mergeLabel, "")
+	reportOverlayStats(rep, overlayReportLabels, rfs.OverlayStats)
 
 	if schema != nil {
 		if err := schema.CheckRequires(rfs); err != nil {
@@ -528,7 +540,11 @@ func resolveVariants(schema *support.Schema, img *source.Image, platform v1.Plat
 			}
 			vr.images = append(vr.images, variantImg)
 			vr.overlays = append(vr.overlays, variantImg.Image)
-			rep.SubChild("%s %s", variantRef.String(), platform.String())
+			vDownload, err := downloadSize(variantImg.Image)
+			if err != nil {
+				return nil, fmt.Errorf("branch %s: variant %s: reading manifest: %w", r.Branch, r.Variant, err)
+			}
+			rep.SubChild("%s %s · %s download", variantRef.String(), platform.String(), progress.HumanBytes(vDownload))
 			sv.Ref = variantRef.String()
 			sv.Digest = variantImg.Digest.String()
 		}
@@ -671,6 +687,68 @@ func pluralize(n int, unit string) string {
 		return unit
 	}
 	return unit + "s"
+}
+
+// downloadSize reads img's manifest and sums its layer descriptors' Size
+// fields: the compressed bytes a puller has to fetch for it, known
+// without pulling any layer content and without an extra registry round
+// trip beyond the manifest read every image load already does.
+func downloadSize(img v1.Image) (int64, error) {
+	m, err := img.Manifest()
+	if err != nil {
+		return 0, err
+	}
+	return manifestDownloadSize(m), nil
+}
+
+// manifestDownloadSize is downloadSize for a manifest the caller has
+// already read, so it doesn't fetch (or re-fetch, from go-containerregistry's
+// own cache) one just to add its layer sizes up.
+func manifestDownloadSize(m *v1.Manifest) int64 {
+	var total int64
+	for _, l := range m.Layers {
+		total += l.Size
+	}
+	return total
+}
+
+// overlayLabels returns the progress labels for one merged piece: name
+// (e.g. "support image" or "volume helper") followed by one "variant
+// branch=variant" label for each entry in variants that resolved to an
+// actual image - in the same order rootfs.Build's overlays parameter
+// lists them (see how the caller builds that slice), so the result lines
+// up positionally with the matching slice of rootfs.OverlayStats.
+func overlayLabels(name string, variants []bundle.SupportVariant) []string {
+	labels := []string{name}
+	for _, v := range variants {
+		if v.Ref != "" {
+			labels = append(labels, fmt.Sprintf("variant %s=%s", v.Branch, v.Variant))
+		}
+	}
+	return labels
+}
+
+// reportOverlayStats prints, under the merge stage, one "✔" line per
+// overlay rootfs.Build was given, pairing labels (built by overlayLabels)
+// with the matching entry of stats (Rootfs.OverlayStats) - see
+// rootfs.OverlayStats's doc comment for exactly what Files/Bytes/Removed
+// count. A whiteout/opaque-directory removal count is only shown when
+// nonzero; an overlay that changed nothing at all (Files == 0 and
+// Removed == 0) is skipped rather than printed as a no-op line.
+func reportOverlayStats(rep *progress.Reporter, labels []string, stats []rootfs.OverlayStats) {
+	for i, st := range stats {
+		if i >= len(labels) {
+			break
+		}
+		if st.Files == 0 && st.Removed == 0 {
+			continue
+		}
+		detail := fmt.Sprintf("+%d %s · %s", st.Files, pluralize(st.Files, "file"), progress.HumanBytes(st.Bytes))
+		if st.Removed > 0 {
+			detail += fmt.Sprintf(" · %d removed", st.Removed)
+		}
+		rep.Sub("✔", labels[i], detail)
+	}
 }
 
 // redactedRefString returns the string /etc/contemper/build records for
