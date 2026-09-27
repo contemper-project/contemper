@@ -12,6 +12,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"time"
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
@@ -227,3 +228,126 @@ type limitedReadCloser struct {
 
 func (l *limitedReadCloser) Read(p []byte) (int, error) { return l.r.Read(p) }
 func (l *limitedReadCloser) Close() error               { return l.c.Close() }
+
+// synthEpoch is the fixed modification time given to every synthesized
+// entry (WriteFile, EnsureDir), so identical inputs always produce a
+// byte-identical rootfs regardless of wall-clock build time.
+var synthEpoch = time.Unix(0, 0).UTC()
+
+// SyntheticFile is one entry to inject into the merged rootfs after Build,
+// as if it had been present in a layer.
+type SyntheticFile struct {
+	Path string
+	// Typeflag selects the entry's tar type; the zero value means
+	// tar.TypeReg.
+	Typeflag byte
+	// Mode is the entry's permission bits; 0 means 0644 for a regular
+	// file or 0755 for a directory.
+	Mode    int64
+	Content []byte
+}
+
+// WriteFile creates or replaces the regular file at p in the merged
+// rootfs with content, mode 0644, by appending a new tar entry to the
+// backing tar file and updating the index to point at it. It is used to
+// inject convert-time synthesized content (/etc/contemper/*, an updated
+// /etc/fstab) without ever re-merging or re-reading image layers.
+//
+// The backing tar file is no longer a single valid archive stream for a
+// generic sequential reader once this has been called (the old bytes for
+// a replaced path are left in place, now dead); only Rootfs's own
+// index-driven reads (Lookup, Resolve, ReadFile, Open, and whatever
+// PopulateExt4 does with r.Index) ever see the result.
+//
+// p's parent directories are created first (see EnsureDir) if they
+// aren't already present, so a nested path like /etc/contemper/build
+// works even when the image's layers have no explicit /etc/contemper
+// entry.
+func (r *Rootfs) WriteFile(p string, content []byte) error {
+	if err := r.EnsureDir(path.Dir(normalizePath(p))); err != nil {
+		return err
+	}
+	return r.appendSynthetic([]SyntheticFile{{Path: p, Content: content}})
+}
+
+// EnsureDir creates every path segment of dir not already present in the
+// index (as any entry type), mode 0755, so a volume's mount point exists
+// even when the image's layers never included an explicit tar entry for
+// one of its parent directories. Existing entries, of any type, are left
+// untouched.
+func (r *Rootfs) EnsureDir(dir string) error {
+	dir = normalizePath(dir)
+	if dir == "/" {
+		return nil
+	}
+	segs := strings.Split(strings.TrimPrefix(dir, "/"), "/")
+	var missing []SyntheticFile
+	cur := ""
+	for _, seg := range segs {
+		cur += "/" + seg
+		if _, ok := r.Index[cur]; ok {
+			continue
+		}
+		missing = append(missing, SyntheticFile{Path: cur, Typeflag: tar.TypeDir})
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return r.appendSynthetic(missing)
+}
+
+// appendSynthetic appends files to the end of the rootfs tar file (which
+// Build has already closed) and updates r.Index so each path resolves to
+// its newly appended entry, replacing any prior one.
+func (r *Rootfs) appendSynthetic(files []SyntheticFile) error {
+	f, err := os.OpenFile(r.TarPath, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		return fmt.Errorf("opening %s to append synthesized entries: %w", r.TarPath, err)
+	}
+	defer f.Close()
+
+	offset, err := f.Seek(0, io.SeekEnd)
+	if err != nil {
+		return fmt.Errorf("seeking %s: %w", r.TarPath, err)
+	}
+	cw := &countingWriter{w: f, n: offset}
+	tw := tar.NewWriter(cw)
+
+	for _, sf := range files {
+		typeflag := sf.Typeflag
+		if typeflag == 0 {
+			typeflag = tar.TypeReg
+		}
+		mode := sf.Mode
+		if mode == 0 {
+			if typeflag == tar.TypeDir {
+				mode = 0o755
+			} else {
+				mode = 0o644
+			}
+		}
+		p := normalizePath(sf.Path)
+		hdr := &tar.Header{
+			Name:     strings.TrimPrefix(p, "/"),
+			Typeflag: typeflag,
+			Mode:     mode,
+			Size:     int64(len(sf.Content)),
+			ModTime:  synthEpoch,
+		}
+		if typeflag == tar.TypeDir && !strings.HasSuffix(hdr.Name, "/") {
+			hdr.Name += "/"
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return fmt.Errorf("writing header for %s: %w", p, err)
+		}
+		dataOffset := cw.n
+		if len(sf.Content) > 0 {
+			if _, err := tw.Write(sf.Content); err != nil {
+				return fmt.Errorf("writing content for %s: %w", p, err)
+			}
+		}
+		r.Index[p] = &Entry{Path: p, Header: hdr, DataOffset: dataOffset}
+	}
+
+	return tw.Flush()
+}
