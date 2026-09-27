@@ -1,0 +1,50 @@
+name: Publish volumes-support
+
+# Publishes the volume-formatting helper (support/volumes-support) and
+# its two init-system variant images to ghcr.io/contemper-project, as
+# multi-platform (linux/amd64, linux/arm64) indexes, whenever its sources
+# change on main. Tags each image "v1" (the floating tag
+# docs/reference default-ref points at) and the commit SHA (a pinned,
+# reproducible reference).
+on:
+  push:
+    branches: [main]
+    paths:
+      - support/volumes-support/**
+      - hack/volumes-support/buildimg/**
+      - .github/workflows/volumes-support.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build volumes-support buildimg
+        run: go build -o /tmp/volumes-support-buildimg ./hack/volumes-support/buildimg
+      - name: Push v1 and the commit SHA
+        run: |
+          for tag in v1 "${GITHUB_SHA}"; do
+            echo "==> publishing tag ${tag}"
+            /tmp/volumes-support-buildimg \
+              -prefix ghcr.io/contemper-project \
+              -tag "${tag}" \
+              -support-dir support/volumes-support
+          done

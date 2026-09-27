@@ -1,0 +1,27 @@
+#!/bin/sh
+# hack/e2e-volumes.sh's boot check: prints whether /data is mounted with
+# the label the volume helper should have given it, then prints
+# contemper-volume-fresh (and leaves a marker behind) on a volume's first
+# boot, or contemper-volume-persisted if that marker is already there.
+#
+# The "zzz-" filename prefix sorts after examples/alpine's own
+# contemper.start in OpenRC's local.d run order (the same trick
+# hack/e2e-variants/files/openrc-local.start uses), so
+# hack/e2e-volumes.sh can rely on contemper-boot-ok always having been
+# printed first.
+dev=$(awk '$2 == "/data" { print $1; exit }' /proc/mounts)
+if [ -n "$dev" ]; then
+	label=$(e2label "$dev" 2>/dev/null)
+	echo "contemper-volume-mounted label=${label:-<none>} dev=$dev" >/dev/console
+else
+	echo "contemper-volume-not-mounted" >/dev/console
+fi
+
+marker=/data/marker
+if [ -e "$marker" ]; then
+	echo contemper-volume-persisted >/dev/console
+else
+	echo contemper-volume-fresh >/dev/console
+	: >"$marker"
+	sync
+fi

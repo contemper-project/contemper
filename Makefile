@@ -6,7 +6,7 @@ COMMIT     ?= $(shell git rev-parse --short HEAD 2>/dev/null)
 DATE       ?= $(shell git log -1 --format=%cI 2>/dev/null)
 LDFLAGS    := -X $(PKG).version=$(VERSION) -X $(PKG).commit=$(COMMIT) -X $(PKG).date=$(DATE)
 
-.PHONY: build test vet stubs example e2e e2e-variants clean
+.PHONY: build test vet stubs example e2e e2e-variants e2e-volumes clean
 
 build:
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/contemper
@@ -29,6 +29,9 @@ e2e:
 
 e2e-variants:
 	./hack/e2e-variants.sh
+
+e2e-volumes:
+	./hack/e2e-volumes.sh
 
 clean:
 	rm -rf bin _out

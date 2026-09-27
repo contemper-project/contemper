@@ -1,0 +1,18 @@
+# Derived from the Alpine example (built by hack/e2e.sh's own build
+# step; this Containerfile is never built standalone) purely to declare
+# one volume and add a boot-time check for it, so examples/alpine itself
+# stays volume-free and the plain e2e test never needs the volume
+# helper. See hack/e2e-volumes.sh.
+FROM contemper-example:dev
+
+LABEL io.contemper.volume./data.size="64MiB"
+VOLUME /data
+
+# Changed between the two builds hack/e2e-volumes.sh makes (REVISION=1,
+# then REVISION=2 for the "deploy an image update" check), so the two
+# images differ by more than just their tag.
+ARG REVISION=1
+RUN echo "revision=${REVISION}" >/etc/contemper-e2e-volumes-revision
+
+COPY files/zzz-contemper-volume-test.start /etc/local.d/zzz-contemper-volume-test.start
+RUN chmod +x /etc/local.d/zzz-contemper-volume-test.start
