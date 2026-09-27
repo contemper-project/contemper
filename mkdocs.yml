@@ -67,6 +67,7 @@ nav:
       - The disk and VM lifecycle: guide/disk.md
       - Targets: guide/targets.md
       - Support images: guide/support-images.md
+      - Volumes: guide/volumes.md
       - Deploying locally: guide/deploying.md
       - Multi-architecture: guide/multi-arch.md
       - In a CI pipeline: guide/ci.md
@@ -74,6 +75,7 @@ nav:
       - CLI: reference/cli.md
       - Source references: reference/sources.md
       - Bundle manifest: reference/bundle.md
+      - Image labels: reference/labels.md
       - Support image annotations: reference/support-image-annotations.md
       - Host tools: reference/host-tools.md
   - Design:

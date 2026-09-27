@@ -102,7 +102,7 @@ only some of them.
 | Instruction | contemper |
 | --- | --- |
 | `LABEL` | **read**: readiness marker and contemper configuration |
-| `VOLUME` | **read**: recorded in the bundle manifest |
+| `VOLUME` | **read**: named, sized and formatted on first boot - see [Volumes](volumes.md) |
 | `EXPOSE`, `HEALTHCHECK` | **read**: recorded as deployment hints; not used for the disk |
 | `ENTRYPOINT`, `CMD` | ignored |
 | `USER`, `WORKDIR` | ignored |
