@@ -62,7 +62,7 @@ func testBuildAndRoundTrip(t *testing.T, arch string) {
 	if err != nil {
 		t.Fatalf("debug/pe could not parse the built UKI: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	want := map[string][]byte{
 		".osrel":   sections.OSRelease,

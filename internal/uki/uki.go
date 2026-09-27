@@ -89,7 +89,7 @@ func PrepareKernel(data []byte) (out []byte, warning string, err error) {
 		if err != nil {
 			return nil, "", fmt.Errorf("decompressing gzip kernel: %w", err)
 		}
-		defer zr.Close()
+		defer func() { _ = zr.Close() }()
 		decompressed, err := io.ReadAll(zr)
 		if err != nil {
 			return nil, "", fmt.Errorf("decompressing gzip kernel: %w", err)

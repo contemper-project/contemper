@@ -3,6 +3,7 @@ package uki
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 )
 
 // Minimal PE32+ (64-bit) reader/writer sufficient for appending sections
@@ -155,10 +156,19 @@ func appendSections(data []byte, sections []namedSection) ([]byte, error) {
 		if len(s.Name) > 8 {
 			return nil, fmt.Errorf("section name %q longer than 8 bytes", s.Name)
 		}
+		// PE32+ section sizes are 32-bit fields (shVirtualSize,
+		// shSizeOfRawData): reject anything that wouldn't round-trip,
+		// rather than silently truncating it into a corrupt image.
+		if len(s.Data) > math.MaxUint32 {
+			return nil, fmt.Errorf("section %q is %d bytes, too large for a PE32+ 32-bit size field", s.Name, len(s.Data))
+		}
 	}
 
+	// pe.numSections came from the stub's own COFF header (a uint16) and
+	// len(sections) is our own small, fixed list of UKI sections, so this
+	// can't approach the int/uint32 boundary in practice.
 	newTableEnd := pe.sectionsOff + (pe.numSections+len(sections))*sectionHeaderSize
-	if uint32(newTableEnd) > pe.sizeOfHeaders {
+	if uint32(newTableEnd) > pe.sizeOfHeaders { //nolint:gosec // G115: bounded by a uint16 section count plus our own fixed section list
 		return nil, fmt.Errorf("stub has no room in its header area for %d more section headers (need offset %#x, SizeOfHeaders is %#x)",
 			len(sections), newTableEnd, pe.sizeOfHeaders)
 	}
@@ -179,10 +189,11 @@ func appendSections(data []byte, sections []namedSection) ([]byte, error) {
 	var newRaw []byte
 	initializedDataAdd := uint32(0)
 	for _, s := range sections {
-		rawSize := alignUp(uint32(len(s.Data)), pe.fileAlign)
+		// len(s.Data) was checked above to fit uint32.
+		rawSize := alignUp(uint32(len(s.Data)), pe.fileAlign) //nolint:gosec // G115: checked above
 		var hdr [sectionHeaderSize]byte
 		copy(hdr[shName:shName+shNameLen], []byte(s.Name))
-		binary.LittleEndian.PutUint32(hdr[shVirtualSize:], uint32(len(s.Data)))
+		binary.LittleEndian.PutUint32(hdr[shVirtualSize:], uint32(len(s.Data))) //nolint:gosec // G115: checked above
 		binary.LittleEndian.PutUint32(hdr[shVirtualAddress:], nextVA)
 		binary.LittleEndian.PutUint32(hdr[shSizeOfRawData:], rawSize)
 		binary.LittleEndian.PutUint32(hdr[shPointerToRawData:], nextRaw)
@@ -194,14 +205,16 @@ func appendSections(data []byte, sections []namedSection) ([]byte, error) {
 		newRaw = append(newRaw, padded...)
 
 		initializedDataAdd += rawSize
-		nextVA = alignUp(nextVA+uint32(len(s.Data)), pe.sectionAlign)
+		nextVA = alignUp(nextVA+uint32(len(s.Data)), pe.sectionAlign) //nolint:gosec // G115: checked above
 		nextRaw += rawSize
 	}
 
 	copy(out[pe.sectionsOff+pe.numSections*sectionHeaderSize:], newHeaders)
 	out = append(out, newRaw...)
 
-	binary.LittleEndian.PutUint16(out[pe.coffOff+coffNumberOfSections:], uint16(pe.numSections+len(sections)))
+	// pe.numSections (a uint16 from the stub's own COFF header) plus our
+	// own small, fixed section list can't approach the uint16 boundary.
+	binary.LittleEndian.PutUint16(out[pe.coffOff+coffNumberOfSections:], uint16(pe.numSections+len(sections))) //nolint:gosec // G115: bounded by a uint16 section count plus our own fixed section list
 
 	sizeOfInit := binary.LittleEndian.Uint32(out[pe.optOff+optSizeOfInitializedData:])
 	binary.LittleEndian.PutUint32(out[pe.optOff+optSizeOfInitializedData:], sizeOfInit+initializedDataAdd)
