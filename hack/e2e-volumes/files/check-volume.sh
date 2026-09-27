@@ -60,11 +60,14 @@ else
 	} | sed 's/^/diag: /' >/dev/console
 fi
 
+# The marker is written and synced before "fresh" is printed: deploy
+# --expect stops the VM as soon as that string appears, so printing it
+# first would race the write and could lose it.
 marker=/data/marker
 if [ -e "$marker" ]; then
 	echo contemper-volume-persisted >/dev/console
 else
-	echo contemper-volume-fresh >/dev/console
 	: >"$marker"
 	sync
+	echo contemper-volume-fresh >/dev/console
 fi
