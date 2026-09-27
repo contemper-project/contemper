@@ -25,6 +25,7 @@ import (
 // Mode selects how progress is rendered.
 type Mode string
 
+// The three valid Mode values, as accepted by ParseMode.
 const (
 	ModeAuto  Mode = "auto"
 	ModeTTY   Mode = "tty"
@@ -80,6 +81,8 @@ func New(w io.Writer, mode Mode, verbose bool, quiet bool) *Reporter {
 	return &Reporter{w: w, tty: resolve(mode, w) == ModeTTY, verbose: verbose, start: time.Now()}
 }
 
+// Verbose reports whether --verbose was requested. Safe to call on a nil
+// Reporter (i.e. when --quiet was given), returning false.
 func (r *Reporter) Verbose() bool { return r != nil && r.verbose }
 
 // Writer exposes the underlying writer for callers that need to stream
@@ -201,7 +204,7 @@ func (r *Reporter) println(s string) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	fmt.Fprintln(r.w, s)
+	_, _ = fmt.Fprintln(r.w, s)
 }
 
 // stopLiveForLine clears any in-progress live stage line before printing

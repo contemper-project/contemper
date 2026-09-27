@@ -111,7 +111,7 @@ func (s *Stage) draw() {
 	}
 
 	s.r.mu.Lock()
-	fmt.Fprint(s.r.w, "\r\x1b[K"+line)
+	_, _ = fmt.Fprint(s.r.w, "\r\x1b[K"+line)
 	s.r.mu.Unlock()
 }
 
@@ -124,7 +124,7 @@ func (s *Stage) clearLine() {
 		return
 	}
 	s.r.mu.Lock()
-	fmt.Fprint(s.r.w, "\r\x1b[K")
+	_, _ = fmt.Fprint(s.r.w, "\r\x1b[K")
 	s.r.mu.Unlock()
 }
 
@@ -161,7 +161,7 @@ func (s *Stage) Done(icon, label, detail string) {
 	s.stop()
 	if s.r.tty {
 		s.r.mu.Lock()
-		fmt.Fprint(s.r.w, "\r\x1b[K")
+		_, _ = fmt.Fprint(s.r.w, "\r\x1b[K")
 		s.r.mu.Unlock()
 	}
 	// If the header was already printed up front (verbose, plain mode)
@@ -197,7 +197,7 @@ func (r *Reporter) stopLive(_ *Stage) {
 		live.stop()
 		if r.tty {
 			r.mu.Lock()
-			fmt.Fprint(r.w, "\r\x1b[K")
+			_, _ = fmt.Fprint(r.w, "\r\x1b[K")
 			r.mu.Unlock()
 		}
 	}
