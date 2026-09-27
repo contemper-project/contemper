@@ -29,8 +29,10 @@ Volumes are the next milestone. The decisions so far:
   the root disk. Command-line flags override them. A volume without a
   size is recorded without one, and deployment fails until a label or a
   flag provides it; contemper never guesses a size.
-- **Names.** Each volume has a name of at most 16 characters, the ext4
-  label limit, either given explicitly or derived from the path: the
+- **Names.** A volume is identified by its path. Its name, at most 16
+  characters (the ext4 label limit), is derived from the path unless the
+  optional name label overrides it, which keeps a volume attached when
+  its path changes between image versions. Derivation: the
   leading `/` dropped and the remaining `/` turned into `-`, and, when
   that is too long, shortened with a hash of the path appended. Two
   volumes with the same name fail the conversion. The name is the
@@ -61,9 +63,17 @@ Volumes are the next milestone. The decisions so far:
   `/etc/contemper/volumes` line by line and never sources it. A script
   rather than a binary keeps it architecture-independent and readable
   in the guest; the image must provide `mkfs.ext4`.
-- **Blank means zeros.** The helper formats a disk only if its first and
-  last MiB are all zeros. Anything else is left alone and logged, so the
-  failure mode is an unformatted volume, never lost data.
+- **Reuse first, format only blank disks.** On every boot the helper
+  checks each volume. An ext4 filesystem carrying the expected label is
+  reused as-is and mounted, which is what lets a new image version run
+  on the data of the previous one. A disk whose first and last MiB are
+  all zeros is blank and gets formatted. Anything else is left alone and
+  logged as a mismatch, so the failure mode is an unmounted volume,
+  never lost data.
+- **Local instances.** `deploy --to local-qemu` keeps volume disks per
+  instance, named after the image repository without its tag, so
+  deploying a new tag of the same image reuses the volumes while the
+  root disk starts fresh.
 - **Manifest.** Volumes in `contemper.json` become objects (name, path,
   size, filesystem), with a new format version. The same change nests
   the resolved support-image variants inside the `support` object.
