@@ -84,7 +84,10 @@ func packageFor(name string) string {
 	case "mkfs.ext4", "debugfs", "e2fsck":
 		return "e2fsprogs"
 	case "qemu-img":
-		return "qemu"
+		if isDarwin() {
+			return "qemu"
+		}
+		return "qemu-utils"
 	default:
 		if len(name) >= len("qemu-system-") && name[:len("qemu-system-")] == "qemu-system-" {
 			if isDarwin() {

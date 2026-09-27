@@ -1,6 +1,7 @@
 package hostenv_test
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 
@@ -30,5 +31,15 @@ func TestInstallHint(t *testing.T) {
 func TestRequiredMissing(t *testing.T) {
 	if _, err := hostenv.Required("definitely-not-a-real-tool-xyz"); err == nil {
 		t.Errorf("Required(bogus): expected an error")
+	}
+}
+
+func TestInstallHintQemuImg(t *testing.T) {
+	want := "apt install qemu-utils"
+	if runtime.GOOS == "darwin" {
+		want = "brew install qemu"
+	}
+	if got := hostenv.InstallHint("qemu-img"); got != want {
+		t.Errorf("InstallHint(qemu-img) = %q, want %q", got, want)
 	}
 }
