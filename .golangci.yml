@@ -1,0 +1,47 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    # go vet's checks are part of the standard set already; these add
+    # real coverage for a CLI that shells out to host tools and talks to
+    # a registry over HTTP.
+    - errorlint # requires %w wrapping and errors.Is/As-safe comparisons instead of == on wrapped errors
+    - gosec # security: command construction, file permissions, path handling
+    - revive # broader style/correctness checks than go vet alone (unused params, naming, etc.)
+    - misspell # catches misspellings in comments, docs and messages
+    - gocritic # diagnostics for bugs, performance and style beyond staticcheck
+    - bodyclose # HTTP response bodies must be closed (registry/image fetches)
+    - unparam # flags parameters that are always the same value or never used
+    - nolintlint # keeps //nolint directives specific and explained
+    - errname # sentinel errors named Err*, error types named *Error
+    - noctx # HTTP requests must carry a context
+  exclusions:
+    generated: lax
+    rules:
+      # Test helpers build argv for the binary under test; not attacker input.
+      - path: _test\.go
+        linters:
+          - gosec
+      # G304 (file inclusion via variable) fires on essentially every
+      # os.Open/os.Create/os.ReadFile/os.WriteFile call in this codebase,
+      # because a CLI that converts and deploys local files necessarily
+      # opens paths that come from flags, manifests or its own temp/state
+      # dirs - never from a remote or otherwise untrusted source. Per-site
+      # nolints would just repeat this same justification at each of the
+      # many call sites, so it is excluded once, here, instead.
+      - text: "G304"
+        linters:
+          - gosec
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/contemper-project/contemper
