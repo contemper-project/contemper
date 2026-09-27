@@ -88,10 +88,19 @@ tooling already produces. More in
 
 ## Status
 
-Early. `convert` and `deploy --to local-qemu` work end to end, and CI
-boots a converted image on every change. Support-image variants, the
-`build`/`publish` adapters and Incus deploys are designed but not built
-yet; see the [roadmap](docs/design/roadmap.md).
+contemper is pre-1.0: the CLI and the bundle format may still change.
+
+**Works today:** `convert` for the qemu target, and `deploy
+--to local-qemu`. Support images can declare variants, selected by
+what's actually present in your image (an init system, a first-boot
+mechanism). Volumes are supported too: declare one with `VOLUME` in
+your build file, and contemper sizes, formats and mounts it in the
+guest through a first-boot helper, persisted across redeploys for
+`local-qemu` instances.
+
+**Planned:** adapters that drive `build` and `publish` through your
+usual container tooling, then an Incus target and provider. See the
+[roadmap](docs/design/roadmap.md) for the rest.
 
 ## Documentation
 
