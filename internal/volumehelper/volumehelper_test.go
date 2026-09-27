@@ -58,7 +58,6 @@ func sourceWithTools(t *testing.T, extra ...imgtest.File) v1.Image {
 		{Path: "sbin/", Typeflag: tar.TypeDir},
 		{Path: "sbin/mkfs.ext4", Data: []byte("bin")},
 		{Path: "bin/", Typeflag: tar.TypeDir},
-		{Path: "bin/cmp", Data: []byte("bin")},
 		{Path: "bin/dd", Data: []byte("bin")},
 		{Path: "bin/od", Data: []byte("bin")},
 	}
@@ -84,7 +83,6 @@ func TestCheckPrereqsAllPresent(t *testing.T) {
 func TestCheckPrereqsMissingMkfsExt4(t *testing.T) {
 	img, err := imgtest.Image(linuxAMD64, nil, []imgtest.File{
 		{Path: "bin/", Typeflag: tar.TypeDir},
-		{Path: "bin/cmp", Data: []byte("bin")},
 		{Path: "bin/dd", Data: []byte("bin")},
 		{Path: "bin/od", Data: []byte("bin")},
 	})
@@ -174,7 +172,6 @@ func TestMergeResolvesOnMergedUsr(t *testing.T) {
 		{Path: "usr/sbin/mkfs.ext4", Data: []byte("bin")},
 		{Path: "usr/sbin/openrc", Data: []byte("bin")},
 		{Path: "bin/", Typeflag: tar.TypeDir},
-		{Path: "bin/cmp", Data: []byte("bin")},
 		{Path: "bin/dd", Data: []byte("bin")},
 		{Path: "bin/od", Data: []byte("bin")},
 	})

@@ -116,7 +116,7 @@ before any support layers are merged, `systemd` wins if
 conversion — naming the branch and pointing at `--no-volume-helper` — so
 a build never silently produces unprepared volumes. This also means an
 image needs `mkfs.ext4` (from e2fsprogs — the same package that provides
-the boot-time `fsck.ext4` most images already need) and `cmp`/`dd`/`od`
+the boot-time `fsck.ext4` most images already need) and `dd`/`od`
 (from busybox or coreutils) available for the helper to do its job;
 `convert` checks and fails naming whatever's missing. Unlike `fsck.ext4`,
 `e2label`/`tune2fs`/`dumpe2fs` live in a separate `e2fsprogs-extra`

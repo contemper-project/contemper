@@ -66,43 +66,30 @@ device_size_bytes() {
 	echo $((sectors * 512))
 }
 
+# chunk_is_zero tests whether the $3 bytes of device $1 starting at
+# MiB offset $2 can be read in full and are all zero. It needs no
+# temporary files: when it runs, the root filesystem is usually still
+# read-only. A short or failed read counts as "not zero", so an
+# unreadable disk is never mistaken for a blank one. od collapses
+# repeated lines into "*", which is safe to drop: a repeated line is
+# identical to the line printed before it.
+chunk_is_zero() {
+	got=$(dd if="$1" bs="$3" skip="$2" count=1 2>/dev/null | wc -c)
+	[ "$got" -eq "$3" ] || return 1
+	nonzero=$(dd if="$1" bs="$3" skip="$2" count=1 2>/dev/null | od -An -tx1 | tr -d ' \n0*')
+	[ -z "$nonzero" ]
+}
+
 # is_blank tests whether device $1, of size $2 bytes, has its first and
-# last MiB all zero. Both chunks are extracted with dd into temporary
-# files and compared with cmp against a same-sized zero-filled
-# reference file (rather than /dev/zero directly, which never reaches
-# EOF and so would always compare as "different" against a finite file).
+# last MiB all zero (the whole device, if it is smaller than a MiB).
 is_blank() {
-	dev=$1
-	size=$2
 	mib=1048576
-
-	zero_ref=$(mktemp /tmp/contemper-volumes.XXXXXX) || return 1
-	chunk=$(mktemp /tmp/contemper-volumes.XXXXXX) || {
-		rm -f "$zero_ref"
-		return 1
-	}
-
-	result=1
-	if [ "$size" -lt "$mib" ]; then
-		dd if=/dev/zero of="$zero_ref" bs="$size" count=1 >/dev/null 2>&1
-		dd if="$dev" of="$chunk" bs="$size" count=1 >/dev/null 2>&1
-		if cmp -s "$chunk" "$zero_ref"; then
-			result=0
-		fi
-	else
-		dd if=/dev/zero of="$zero_ref" bs=1M count=1 >/dev/null 2>&1
-		dd if="$dev" of="$chunk" bs=1M count=1 >/dev/null 2>&1
-		if cmp -s "$chunk" "$zero_ref"; then
-			skip_mib=$(((size - mib) / mib))
-			dd if="$dev" of="$chunk" bs=1M skip="$skip_mib" count=1 >/dev/null 2>&1
-			if cmp -s "$chunk" "$zero_ref"; then
-				result=0
-			fi
-		fi
+	if [ "$2" -lt "$mib" ]; then
+		chunk_is_zero "$1" 0 "$2"
+		return
 	fi
-
-	rm -f "$zero_ref" "$chunk"
-	return $result
+	chunk_is_zero "$1" 0 "$mib" || return 1
+	chunk_is_zero "$1" $((($2 - mib) / mib)) "$mib"
 }
 
 # ext4_label reads device $1's ext2/3/4 superblock directly and prints
@@ -111,7 +98,7 @@ is_blank() {
 # tune2fs, dumpe2fs): those ship in e2fsprogs-extra, not the base
 # e2fsprogs package, so an image that installs only e2fsprogs for
 # mkfs.ext4 - Alpine's does exactly this - would not have them. dd and
-# od (like cmp above) are the ones dependency busybox and coreutils both
+# od (with wc and tr) are what busybox and coreutils both
 # always install.
 #
 # The ext2/3/4 superblock starts at byte 1024. s_magic, a little-endian
