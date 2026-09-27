@@ -11,7 +11,7 @@ set -euo pipefail
 # Bump this deliberately - and re-run this script - to pick up a newer
 # stub.
 SYSTEMD_BOOT_EFI_VERSION="257.13-1~deb13u1"
-MIRROR="http://ftp.debian.org/debian/pool/main/s/systemd"
+MIRROR="https://deb.debian.org/debian/pool/main/s/systemd"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 out_dir="${repo_root}/internal/uki/stubs"
@@ -27,7 +27,7 @@ fetch_arch() {
 	local extract="${work_dir}/extract-${arch}"
 
 	echo "fetching systemd-boot-efi ${SYSTEMD_BOOT_EFI_VERSION} (${arch})..." >&2
-	curl -fsSL -o "${deb}" \
+	curl --proto =https -fsSL -o "${deb}" \
 		"${MIRROR}/systemd-boot-efi_${SYSTEMD_BOOT_EFI_VERSION}_${arch}.deb"
 
 	mkdir -p "${extract}"
