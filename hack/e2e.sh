@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# End-to-end boot test: build the Alpine example image for the host
-# architecture, convert it with `contemper convert --target qemu`, and boot
-# the bundle with `contemper deploy --to local-qemu`, passing once the
-# image's boot marker appears on the serial console.
+# End-to-end boot test: build the chosen example image (--example
+# alpine|debian, default alpine) for the host architecture, convert it
+# with `contemper convert --target qemu`, and boot the bundle with
+# `contemper deploy --to local-qemu`, passing once the image's boot
+# marker appears on the serial console.
 #
-# Usage: hack/e2e.sh [--timeout DURATION]
+# Usage: hack/e2e.sh [--example alpine|debian] [--timeout DURATION]
 #
 # Requires: go, podman or docker (CONTAINER_ENGINE selects one explicitly),
 # e2fsprogs (mkfs.ext4, debugfs, e2fsck), qemu-img, qemu-system-<arch> and
@@ -15,10 +16,14 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${REPO}/_out"
 TIMEOUT="180s"
 MARKER="contemper-boot-ok"
-IMAGE="contemper-example:dev"
+EXAMPLE="alpine"
 
 while [ $# -gt 0 ]; do
 	case "$1" in
+	--example)
+		EXAMPLE="$2"
+		shift 2
+		;;
 	--timeout)
 		TIMEOUT="$2"
 		shift 2
@@ -29,6 +34,15 @@ while [ $# -gt 0 ]; do
 		;;
 	esac
 done
+
+case "${EXAMPLE}" in
+alpine | debian) ;;
+*)
+	echo "e2e.sh: unknown --example '${EXAMPLE}' (want alpine or debian)" >&2
+	exit 2
+	;;
+esac
+IMAGE="contemper-example-${EXAMPLE}:dev"
 
 engine="${CONTAINER_ENGINE:-}"
 if [ -z "${engine}" ]; then
@@ -55,8 +69,8 @@ echo "==> go build (${platform})" >&2
 rm -rf "${OUT}"
 mkdir -p "${OUT}"
 
-echo "==> ${engine} build examples/alpine" >&2
-"${engine}" build -t "${IMAGE}" -f "${REPO}/examples/alpine/Containerfile" "${REPO}/examples/alpine"
+echo "==> ${engine} build examples/${EXAMPLE}" >&2
+"${engine}" build -t "${IMAGE}" -f "${REPO}/examples/${EXAMPLE}/Containerfile" "${REPO}/examples/${EXAMPLE}"
 
 # podman can write an OCI archive; docker save only writes its own format.
 case "${engine}" in
