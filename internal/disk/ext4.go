@@ -287,6 +287,9 @@ func buildDebugfsScript(rfs *rootfs.Rootfs, payloadDir string, stage *progress.S
 
 		case tar.TypeLink:
 			target := normalize(hdr.Linkname)
+			if err := checkHardlinkTarget(rfs, p, target); err != nil {
+				return "", nil, err
+			}
 			qt, err := quoteArg(target)
 			if err != nil {
 				return "", nil, fmt.Errorf("%s: hardlink target: %w", p, err)
@@ -437,6 +440,24 @@ func findErrorMarker(script, out string) string {
 		}
 	}
 	return ""
+}
+
+// checkHardlinkTarget fails unless the hardlink at p points at an entry
+// that exists in the merged rootfs and is not a directory. A later
+// layer can delete or replace a hardlink's target while keeping the link
+// itself; the merged view then no longer has the content the link
+// shared, so the conversion stops with an explicit error instead of a
+// debugfs failure. A hardlink to a directory would corrupt the
+// filesystem.
+func checkHardlinkTarget(rfs *rootfs.Rootfs, p, target string) error {
+	e, ok := rfs.Index[target]
+	if !ok {
+		return fmt.Errorf("%s: hardlink target %s is not in the merged filesystem (a later layer removed it); its content can't be recovered", p, target)
+	}
+	if e.Header.Typeflag == tar.TypeDir {
+		return fmt.Errorf("%s: hardlink target %s is a directory", p, target)
+	}
+	return nil
 }
 
 // checkScriptLines fails if any line of script is longer than

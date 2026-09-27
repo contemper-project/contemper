@@ -308,3 +308,50 @@ func TestPopulateExt4MarkerTextInPath(t *testing.T) {
 		t.Fatalf("PopulateExt4: %v", err)
 	}
 }
+
+// TestPopulateExt4BadHardlinkTargets checks that a hardlink whose target
+// a later layer removed, or whose target is a directory, fails with an
+// explicit error rather than a debugfs or e2fsck failure.
+func TestPopulateExt4BadHardlinkTargets(t *testing.T) {
+	requireExt4Tools(t)
+
+	cases := map[string]struct {
+		layers [][]imgtest.File
+		want   string
+	}{
+		"target removed": {
+			layers: [][]imgtest.File{
+				{{Path: "bin/", Typeflag: tar.TypeDir}, {Path: "bin/a", Data: []byte("x")}, {Path: "bin/b", Typeflag: tar.TypeLink, Linkname: "bin/a"}},
+				{imgtest.WhiteoutFile("bin/a")},
+			},
+			want: "not in the merged filesystem",
+		},
+		"target is a directory": {
+			layers: [][]imgtest.File{
+				{{Path: "d/", Typeflag: tar.TypeDir}, {Path: "b", Typeflag: tar.TypeLink, Linkname: "d"}},
+			},
+			want: "is a directory",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			img, err := imgtest.Image(v1.Platform{OS: "linux", Architecture: "amd64"}, nil, tc.layers...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rfs, err := rootfs.Build(img)
+			if err != nil {
+				t.Fatalf("rootfs.Build: %v", err)
+			}
+			defer func() { _ = rfs.Close() }()
+
+			_, err = disk.PopulateExt4(rfs, t.TempDir()+"/root.img", disk.Ext4Options{
+				Label:     "contemper-root",
+				SizeBytes: 64 * 1024 * 1024,
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("PopulateExt4 error = %v, want one containing %q", err, tc.want)
+			}
+		})
+	}
+}
