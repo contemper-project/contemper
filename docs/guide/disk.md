@@ -23,6 +23,7 @@ mounts the root partition and boot is over.
 
 The root partition is sized `max(1 GiB, 1.5 × content + 256 MiB)` by
 default. Override it with `--root-size`, for example `--root-size 4GiB`.
+Either way the size is rounded up to a whole MiB.
 
 ## State behaves the way a container's does
 

@@ -44,8 +44,8 @@ func alignUp64(v, align uint64) uint64 {
 
 // RootPartitionSize computes the default root partition size, leaving
 // headroom for the image to grow without the caller specifying a size
-// explicitly: max(1 GiB, 1.5 x contentBytes + 256 MiB). See
-// docs/guide/disk.md for the rationale.
+// explicitly: max(1 GiB, 1.5 x contentBytes + 256 MiB), rounded up to a
+// whole MiB. See docs/guide/disk.md for the rationale.
 func RootPartitionSize(contentBytes int64) int64 {
 	const oneGiB = 1 << 30
 	const twoFiftySixMiB = 256 << 20
@@ -53,7 +53,14 @@ func RootPartitionSize(contentBytes int64) int64 {
 	if computed < oneGiB {
 		return oneGiB
 	}
-	return computed
+	return AlignRootSize(computed)
+}
+
+// AlignRootSize rounds a root partition size up to a whole MiB. The ext4
+// image fills the partition exactly, and the partition spans whole
+// sectors, so a size that isn't sector-aligned can't be written.
+func AlignRootSize(size int64) int64 {
+	return int64(alignUp64(uint64(size), alignmentBytes))
 }
 
 // BuildOptions configures BuildGPTImage.

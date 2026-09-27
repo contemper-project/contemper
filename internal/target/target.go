@@ -171,6 +171,7 @@ func (UEFIQcow2) Assemble(rfs *rootfs.Rootfs, val *validate.Result, arch string,
 	if rootSize == 0 {
 		rootSize = disk.RootPartitionSize(contentBytes)
 	}
+	rootSize = disk.AlignRootSize(rootSize)
 
 	rootImgPath := filepath.Join(workDir, "root.img")
 	ext4Warnings, err := disk.PopulateExt4(rfs, rootImgPath, disk.Ext4Options{

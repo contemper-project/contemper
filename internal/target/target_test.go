@@ -166,6 +166,25 @@ func TestRootPartitionSize(t *testing.T) {
 	if got := disk.RootPartitionSize(content); got != want {
 		t.Errorf("RootPartitionSize(2GiB) = %d, want %d", got, want)
 	}
+	// Content sizes that make 1.5x land off a sector boundary still give
+	// a whole number of MiB.
+	for _, content := range []int64{621_175_125, 620_000_001, 1<<30 + 1} {
+		if got := disk.RootPartitionSize(content); got%(1<<20) != 0 {
+			t.Errorf("RootPartitionSize(%d) = %d, not MiB-aligned", content, got)
+		}
+	}
+}
+
+func TestAlignRootSize(t *testing.T) {
+	for _, tc := range []struct{ in, want int64 }{
+		{1 << 30, 1 << 30},
+		{1<<30 + 1, 1<<30 + 1<<20},
+		{1187762944, 1188036608},
+	} {
+		if got := disk.AlignRootSize(tc.in); got != tc.want {
+			t.Errorf("AlignRootSize(%d) = %d, want %d", tc.in, got, tc.want)
+		}
+	}
 }
 
 func TestPrepareKernelUsedByAssembler(t *testing.T) {
