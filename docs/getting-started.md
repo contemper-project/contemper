@@ -38,13 +38,25 @@ The example lives in `examples/alpine/Containerfile`. It installs a
 kernel, generates a generic initrd, writes a kernel command line and
 enables OpenRC, all at the paths contemper expects:
 
-```console
-$ podman build -t contemper-example:dev examples/alpine
-$ podman save --format oci-archive -o example.tar contemper-example:dev
-```
+=== "podman"
 
-With docker, use `docker save -o example.tar contemper-example:dev` and
-the `docker-archive:` prefix below instead.
+    ```console
+    $ podman build -t contemper-example:dev examples/alpine
+    $ podman save --format oci-archive -o example.tar contemper-example:dev
+    ```
+
+=== "docker"
+
+    ```console
+    $ docker build -f examples/alpine/Containerfile -t contemper-example:dev examples/alpine
+    $ docker save -o example.tar contemper-example:dev
+    ```
+
+    Docker doesn't look for a file named `Containerfile` on its own, so
+    pass `-f` explicitly. Docker 25 and later write `docker save` output
+    as an OCI layout, which the `oci-archive:` prefix below reads
+    directly; with an older Docker, read the same file with
+    `docker-archive:` in place of `oci-archive:`.
 
 ## Convert it
 
