@@ -97,6 +97,15 @@ func firstExistingFirmware(fws []firmware) (firmware, bool) {
 	return firmware{}, false
 }
 
+// VolumeAttachment is one declared volume's qcow2 disk file, attached as
+// virtio-blk with serial=<name> so the guest can find it under
+// /sys/block/*/serial the same way it would on a real provider (see
+// target.SerialPattern).
+type VolumeAttachment struct {
+	Name string
+	Path string
+}
+
 // Options configures Deploy.
 type Options struct {
 	Arch          string
@@ -106,6 +115,9 @@ type Options struct {
 	// WorkDir holds per-boot scratch files (the writable UEFI variable
 	// store). If empty, firmware is booted code-only.
 	WorkDir string
+	// Volumes attaches one virtio-blk drive per entry, in order, after
+	// the root disk.
+	Volumes []VolumeAttachment
 	Expect  string
 	Timeout time.Duration
 	// Progress, if non-nil, receives a "booting" line, the qemu argv
@@ -176,6 +188,9 @@ func buildArgs(info archInfo, opts Options) (args []string, err error) {
 		format = "qcow2"
 	}
 	args = append(args, "-drive", fmt.Sprintf("file=%s,if=virtio,format=%s,snapshot=on", opts.DiskPath, format))
+	for _, v := range opts.Volumes {
+		args = append(args, "-drive", fmt.Sprintf("file=%s,if=virtio,format=qcow2,serial=%s", v.Path, v.Name))
+	}
 	args = append(args, "-netdev", "user,id=net0", "-device", "virtio-net-pci,netdev=net0")
 	args = append(args, "-nographic", "-monitor", "none", "-serial", "file:"+opts.SerialLogPath)
 

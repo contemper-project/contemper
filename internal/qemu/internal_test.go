@@ -79,6 +79,39 @@ func TestBuildArgsCopiesVarsTemplate(t *testing.T) {
 	}
 }
 
+func TestBuildArgsAttachesVolumes(t *testing.T) {
+	pflash := writeFakeFile(t, "edk2-fake.fd")
+	info := archInfo{
+		machine:          "virt",
+		pflashCandidates: []firmware{{code: pflash}},
+	}
+	args, err := buildArgs(info, Options{
+		DiskPath:      "/tmp/bundle/disk.qcow2",
+		DiskFormat:    "qcow2",
+		SerialLogPath: "/tmp/serial.log",
+		Volumes: []VolumeAttachment{
+			{Name: "data", Path: "/state/data.qcow2"},
+			{Name: "logs", Path: "/state/logs.qcow2"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
+	joined := strings.Join(args, " ")
+	for _, want := range []string{
+		"file=/tmp/bundle/disk.qcow2,if=virtio,format=qcow2,snapshot=on",
+		"file=/state/data.qcow2,if=virtio,format=qcow2,serial=data",
+		"file=/state/logs.qcow2,if=virtio,format=qcow2,serial=logs",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("args %q missing %q", joined, want)
+		}
+	}
+	if strings.Contains(joined, "snapshot=on,serial=") || strings.Contains(joined, "data.qcow2,if=virtio,format=qcow2,snapshot=on") {
+		t.Errorf("a volume drive must not carry snapshot=on: %q", joined)
+	}
+}
+
 func TestBuildArgsNoFirmwareFound(t *testing.T) {
 	info := archInfo{machine: "virt"}
 	if _, err := buildArgs(info, Options{}); err == nil {

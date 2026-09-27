@@ -7,6 +7,8 @@ import (
 func newDeployCmd() *cobra.Command {
 	var (
 		to           string
+		name         string
+		volumes      []string
 		serialLog    string
 		expect       string
 		timeoutStr   string
@@ -23,6 +25,8 @@ func newDeployCmd() *cobra.Command {
 			return runDeploy(cmd, deployOptions{
 				bundleDir:    args[0],
 				to:           to,
+				name:         name,
+				volumes:      volumes,
 				serialLog:    serialLog,
 				expect:       expect,
 				timeout:      timeoutStr,
@@ -34,6 +38,8 @@ func newDeployCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&to, "to", "", "deploy target (local-qemu)")
+	cmd.Flags().StringVar(&name, "name", "", "local-qemu instance name (default: the source image's repository name)")
+	cmd.Flags().StringArrayVar(&volumes, "volume", nil, "set or override a volume's size: --volume <path>=<size>, repeatable")
 	cmd.Flags().StringVar(&serialLog, "serial-log", "", "file to write the VM's serial console to")
 	cmd.Flags().StringVar(&expect, "expect", "", "exit 0 once this string appears on the serial console")
 	cmd.Flags().StringVar(&timeoutStr, "timeout", "60s", "timeout waiting for --expect")

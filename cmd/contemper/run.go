@@ -15,6 +15,7 @@ import (
 	"github.com/contemper-project/contemper/internal/buildinfo"
 	"github.com/contemper-project/contemper/internal/bundle"
 	"github.com/contemper-project/contemper/internal/guestmeta"
+	"github.com/contemper-project/contemper/internal/localqemu"
 	"github.com/contemper-project/contemper/internal/progress"
 	"github.com/contemper-project/contemper/internal/qemu"
 	"github.com/contemper-project/contemper/internal/rootfs"
@@ -45,6 +46,8 @@ type convertOptions struct {
 type deployOptions struct {
 	bundleDir    string
 	to           string
+	name         string
+	volumes      []string
 	serialLog    string
 	expect       string
 	timeout      string
@@ -565,6 +568,31 @@ func runDeploy(cmd *cobra.Command, opts deployOptions) error {
 		return err
 	}
 
+	overrides, err := parseVolumeOverrides(opts.volumes)
+	if err != nil {
+		return err
+	}
+
+	var unsized []string
+	sizes := make(map[string]int64, len(manifest.Volumes))
+	for _, v := range manifest.Volumes {
+		size := v.SizeBytes
+		if override, ok := overrides[v.Path]; ok {
+			size = override
+			delete(overrides, v.Path)
+		}
+		if size == 0 {
+			unsized = append(unsized, v.Path)
+		}
+		sizes[v.Path] = size
+	}
+	if len(unsized) > 0 {
+		return fmt.Errorf("volume(s) %s have no size; supply one with --volume <path>=<size>", strings.Join(unsized, ", "))
+	}
+	for path := range overrides {
+		return fmt.Errorf("--volume %s does not match any volume declared in this bundle", path)
+	}
+
 	var timeout time.Duration
 	if opts.timeout != "" {
 		timeout, err = time.ParseDuration(opts.timeout)
@@ -573,15 +601,67 @@ func runDeploy(cmd *cobra.Command, opts deployOptions) error {
 		}
 	}
 
+	var attachments []qemu.VolumeAttachment
+	if len(manifest.Volumes) > 0 {
+		instance := opts.name
+		if instance == "" {
+			instance, err = localqemu.DefaultInstance(manifest.Source.Repo)
+			if err != nil {
+				return err
+			}
+		}
+		stateDir, err := localqemu.StateDir(instance)
+		if err != nil {
+			return err
+		}
+		rep.Line("📁", "instance "+instance, stateDir)
+		for _, v := range manifest.Volumes {
+			diskPath, created, err := localqemu.EnsureVolumeDisk(stateDir, v.Name, sizes[v.Path])
+			if err != nil {
+				rep.Fail("volumes", err.Error(), "")
+				return err
+			}
+			status := "reusing"
+			if created {
+				status = "created"
+			}
+			rep.Sub("✔", v.Path+" → "+v.Name, fmt.Sprintf("%s (%s)", status, progress.HumanBytes(sizes[v.Path])))
+			attachments = append(attachments, qemu.VolumeAttachment{Name: v.Name, Path: diskPath})
+		}
+		rep.Blank()
+	}
+
 	return qemu.Deploy(qemu.Options{
 		Arch:          manifest.Arch,
 		DiskPath:      filepath.Join(opts.bundleDir, manifest.Disk.File),
 		DiskFormat:    manifest.Disk.Format,
+		Volumes:       attachments,
 		SerialLogPath: opts.serialLog,
 		Expect:        opts.expect,
 		Timeout:       timeout,
 		Progress:      rep,
 	})
+}
+
+// parseVolumeOverrides parses --volume <path>=<size> flags into a
+// path->bytes map.
+func parseVolumeOverrides(raw []string) (map[string]int64, error) {
+	if len(raw) == 0 {
+		return map[string]int64{}, nil
+	}
+	out := make(map[string]int64, len(raw))
+	for _, spec := range raw {
+		path, sizeStr, ok := strings.Cut(spec, "=")
+		if !ok || path == "" || sizeStr == "" {
+			return nil, fmt.Errorf("--volume %q: want <path>=<size>", spec)
+		}
+		size, err := volume.ParseSize(sizeStr)
+		if err != nil {
+			return nil, fmt.Errorf("--volume %s: %w", path, err)
+		}
+		out[path] = size
+	}
+	return out, nil
 }
 
 // pluralize returns unit or unit+"s" depending on n, for the common case
