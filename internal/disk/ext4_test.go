@@ -143,6 +143,15 @@ func TestPopulateExt4Xattrs(t *testing.T) {
 			Typeflag: tar.TypeDir,
 			Xattrs:   map[string]string{"user.dirattr": "on a directory"},
 		},
+		{Path: "dev/", Typeflag: tar.TypeDir},
+		{
+			Path:     "dev/null",
+			Typeflag: tar.TypeChar,
+			Devmajor: 1,
+			Devminor: 3,
+			Mode:     0o666,
+			Xattrs:   map[string]string{"user.devattr": "on a device node"},
+		},
 		{
 			Path: "usr/bin/ping",
 			Data: []byte("#!/bin/sh\necho pretend-ping\n"),
@@ -201,6 +210,11 @@ func TestPopulateExt4Xattrs(t *testing.T) {
 	dirList := debugfsRun(t, debugfsPath, imgPath, "ea_list /usr/bin")
 	if !strings.Contains(dirList, `user.dirattr`) {
 		t.Errorf("user.dirattr not set on /usr/bin: %s", dirList)
+	}
+
+	devList := debugfsRun(t, debugfsPath, imgPath, "ea_list /dev/null")
+	if !strings.Contains(devList, `user.devattr`) {
+		t.Errorf("user.devattr not set on /dev/null: %s", devList)
 	}
 
 	// Round-trip the binary value exactly, not just its length.

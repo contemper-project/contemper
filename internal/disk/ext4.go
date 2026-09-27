@@ -323,6 +323,9 @@ func buildDebugfsScript(rfs *rootfs.Rootfs, payloadDir string, stage *progress.S
 			}
 			b.WriteString("cd \"/\"\n")
 			writeAttrs(&b, qp, hdr)
+			if err := writeXattrs(&b, payloadDir, &xattrN, qp, hdr); err != nil {
+				return "", nil, fmt.Errorf("%s: %w", p, err)
+			}
 
 		default:
 			warnings = append(warnings, fmt.Sprintf("%s: unsupported tar entry type %d, skipped", p, hdr.Typeflag))
