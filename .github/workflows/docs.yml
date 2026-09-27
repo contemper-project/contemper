@@ -3,32 +3,53 @@ name: Docs
 on:
   push:
     branches: [main]
-    paths:
-      - docs/**
-      - mkdocs.yml
-      - pyproject.toml
-      - uv.lock
-      - cmd/contemper/**
-      - .github/workflows/docs.yml
   pull_request:
-    paths:
-      - docs/**
-      - mkdocs.yml
-      - pyproject.toml
-      - uv.lock
-      - cmd/contemper/**
-      - .github/workflows/docs.yml
   workflow_dispatch:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  changes:
+    # docs: everything that feeds the published site - the Markdown/nav
+    # sources and MkDocs config, the Python toolchain lockfiles, the CLI
+    # reference generator's source (docs/reference/cli.md is generated
+    # from cmd/contemper and never committed), and this workflow file.
+    # README.md, CONTRIBUTING.md and SECURITY.md aren't part of the site
+    # (mkdocs.yml's nav and edit_uri only cover docs/), so they don't
+    # belong here.
+    runs-on: ubuntu-latest
+    outputs:
+      docs: ${{ steps.filter.outputs.docs }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          filters: |
+            docs:
+              - 'docs/**'
+              - mkdocs.yml
+              - pyproject.toml
+              - uv.lock
+              - 'cmd/contemper/**'
+              - .github/workflows/docs.yml
+
   build:
+    # A distinct check name: ci.yml's skipped build matrix also reports
+    # as plain "build", so requiring "build" would be ambiguous.
+    name: docs-build
+    needs: changes
+    # On a PR, skip entirely (reported "skipped") unless docs actually
+    # changed. On push-to-main and manual runs, always build: a full docs
+    # build is a handful of seconds, cheaper than the path-filtered skip
+    # logic it would take to avoid it.
+    if: github.event_name != 'pull_request' || needs.changes.outputs.docs == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
