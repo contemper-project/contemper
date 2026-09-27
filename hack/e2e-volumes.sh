@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# End-to-end volumes test: build the Alpine example image, derive a
-# second image from it (hack/e2e-volumes/Containerfile) that declares one
-# volume and checks it on boot, build and push the volume-formatting
-# helper images to a local registry with hack/volumes-support/buildimg,
-# convert with `contemper convert --volume-helper <local ref>`, then:
+# End-to-end volumes test: build the chosen example image (--example
+# alpine|debian, default alpine), derive a second image from it
+# (hack/e2e-volumes/Containerfile) that declares one volume and checks it
+# on boot, build and push the volume-formatting helper images to a local
+# registry with hack/volumes-support/buildimg, convert with `contemper
+# convert --volume-helper <local ref>`, then:
 #
 #  1. deploy with a fixed --name into a temp XDG_STATE_HOME: expect
 #     contemper-volume-fresh (the volume was blank, formatted, mounted).
@@ -19,7 +20,7 @@
 # and contemper-volume-mounted (the label the helper gave the disk)
 # appear on the console.
 #
-# Usage: hack/e2e-volumes.sh [--timeout DURATION]
+# Usage: hack/e2e-volumes.sh [--example alpine|debian] [--timeout DURATION]
 #
 # Requires: go, podman or docker (CONTAINER_ENGINE selects one
 # explicitly), curl, e2fsprogs (mkfs.ext4, debugfs, e2fsck),
@@ -32,9 +33,7 @@ OUT="${REPO}/_out/volumes"
 TIMEOUT="180s"
 BOOT_MARKER="contemper-boot-ok"
 MOUNTED_MARKER="contemper-volume-mounted label=data"
-IMAGE="contemper-example:dev"
-DERIVED_IMAGE="contemper-example-volumes:e2e"
-DERIVED_IMAGE_V2="contemper-example-volumes:e2e-v2"
+EXAMPLE="alpine"
 # Not 5000: macOS AirPlay Receiver listens there.
 REGISTRY_HOST="${E2E_REGISTRY:-localhost:5555}"
 REGISTRY_NAME="contemper-e2e-registry"
@@ -43,6 +42,10 @@ TAG="e2e"
 
 while [ $# -gt 0 ]; do
 	case "$1" in
+	--example)
+		EXAMPLE="$2"
+		shift 2
+		;;
 	--timeout)
 		TIMEOUT="$2"
 		shift 2
@@ -53,6 +56,17 @@ while [ $# -gt 0 ]; do
 		;;
 	esac
 done
+
+case "${EXAMPLE}" in
+alpine | debian) ;;
+*)
+	echo "e2e-volumes.sh: unknown --example '${EXAMPLE}' (want alpine or debian)" >&2
+	exit 2
+	;;
+esac
+IMAGE="contemper-example-${EXAMPLE}:dev"
+DERIVED_IMAGE="contemper-example-volumes-${EXAMPLE}:e2e"
+DERIVED_IMAGE_V2="contemper-example-volumes-${EXAMPLE}:e2e-v2"
 
 engine="${CONTAINER_ENGINE:-}"
 if [ -z "${engine}" ]; then
@@ -110,12 +124,12 @@ cleanup_registry() {
 }
 trap cleanup_registry EXIT
 
-# --- Alpine example, plus a derived image declaring one volume ------------
-echo "==> ${engine} build examples/alpine" >&2
-"${engine}" build -t "${IMAGE}" -f "${REPO}/examples/alpine/Containerfile" "${REPO}/examples/alpine"
+# --- example image, plus a derived image declaring one volume -------------
+echo "==> ${engine} build examples/${EXAMPLE}" >&2
+"${engine}" build -t "${IMAGE}" -f "${REPO}/examples/${EXAMPLE}/Containerfile" "${REPO}/examples/${EXAMPLE}"
 
-echo "==> ${engine} build hack/e2e-volumes (revision 1)" >&2
-"${engine}" build -t "${DERIVED_IMAGE}" --build-arg REVISION=1 -f "${REPO}/hack/e2e-volumes/Containerfile" "${REPO}/hack/e2e-volumes"
+echo "==> ${engine} build hack/e2e-volumes (revision 1, from ${IMAGE})" >&2
+"${engine}" build -t "${DERIVED_IMAGE}" --build-arg BASE_IMAGE="${IMAGE}" --build-arg REVISION=1 -f "${REPO}/hack/e2e-volumes/Containerfile" "${REPO}/hack/e2e-volumes"
 
 save_archive() {
 	local image="$1" out_tar="$2"
@@ -166,16 +180,16 @@ deploy_and_check() {
 }
 
 # No --name in any of these three deploys: every one relies on the
-# default instance name (the source image's repository, "contemper-
-# example-volumes" for both revisions built below), which is exactly
-# what makes the third deploy - a different tag, converted separately -
-# land on the same volume disk as the first two.
+# default instance name (the source image's repository, the same for
+# both revisions built below), which is exactly what makes the third
+# deploy - a different tag, converted separately - land on the same
+# volume disk as the first two.
 deploy_and_check "first boot" "${bundle}" "contemper-volume-fresh" "${OUT}/serial-fresh.log"
 deploy_and_check "second boot, same bundle" "${bundle}" "contemper-volume-persisted" "${OUT}/serial-persisted.log"
 
 # --- an image update: same instance (source repo, no tag), new content ----
-echo "==> ${engine} build hack/e2e-volumes (revision 2)" >&2
-"${engine}" build -t "${DERIVED_IMAGE_V2}" --build-arg REVISION=2 -f "${REPO}/hack/e2e-volumes/Containerfile" "${REPO}/hack/e2e-volumes"
+echo "==> ${engine} build hack/e2e-volumes (revision 2, from ${IMAGE})" >&2
+"${engine}" build -t "${DERIVED_IMAGE_V2}" --build-arg BASE_IMAGE="${IMAGE}" --build-arg REVISION=2 -f "${REPO}/hack/e2e-volumes/Containerfile" "${REPO}/hack/e2e-volumes"
 source_ref_v2="$(save_archive "${DERIVED_IMAGE_V2}" "${OUT}/example-volumes-v2.tar")"
 
 echo "==> contemper convert (revision 2)" >&2
