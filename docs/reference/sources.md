@@ -8,7 +8,7 @@ takes another, in the same forms.
 | `ghcr.io/example/app:v1` | a registry reference, pulled with your registry credentials (the same keychain docker and podman use) |
 | `oci-archive:<path>` | an OCI archive, as written by `podman save --format oci-archive` or `docker save` (Docker 25 and later) |
 | `oci:<path>` | an OCI image layout directory |
-| `docker-archive:<path>` | a docker archive, as written by `docker save` (Docker 24 and earlier, or with the classic image store) or `podman save --format docker-archive` |
+| `docker-archive:<path>` | a docker archive, as written by `docker save` (Docker 24 and earlier) or `podman save --format docker-archive` |
 
 There is no container-daemon source. Save the image to an archive and
 point `convert` at that instead. Nothing needs to be pushed to a
