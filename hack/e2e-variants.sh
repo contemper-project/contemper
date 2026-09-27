@@ -167,6 +167,14 @@ bundle="$("${contemper}" convert --target qemu --support "${support_ref}" "${sou
 
 manifest="${bundle}/contemper.json"
 echo "==> checking resolved variants in ${manifest}" >&2
+# contemper.json nests resolved variants under support.variants now;
+# earlier it had a top-level "support.variants" key instead - see
+# docs/reference/bundle.md.
+if grep -q '"support\.variants"' "${manifest}"; then
+	echo "e2e-variants.sh: contemper.json still has the old top-level \"support.variants\" key:" >&2
+	cat "${manifest}" >&2
+	exit 1
+fi
 if ! grep -A2 '"branch": "init-system"' "${manifest}" | grep -q '"variant": "openrc"'; then
 	echo "e2e-variants.sh: contemper.json does not record branch init-system -> openrc:" >&2
 	cat "${manifest}" >&2

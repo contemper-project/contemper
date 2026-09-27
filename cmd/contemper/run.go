@@ -14,6 +14,7 @@ import (
 
 	"github.com/contemper-project/contemper/internal/buildinfo"
 	"github.com/contemper-project/contemper/internal/bundle"
+	"github.com/contemper-project/contemper/internal/guestmeta"
 	"github.com/contemper-project/contemper/internal/progress"
 	"github.com/contemper-project/contemper/internal/qemu"
 	"github.com/contemper-project/contemper/internal/rootfs"
@@ -21,6 +22,7 @@ import (
 	"github.com/contemper-project/contemper/internal/support"
 	"github.com/contemper-project/contemper/internal/target"
 	"github.com/contemper-project/contemper/internal/validate"
+	"github.com/contemper-project/contemper/internal/volume"
 )
 
 type convertOptions struct {
@@ -30,6 +32,7 @@ type convertOptions struct {
 	outDir       string
 	arch         string
 	rootSize     string
+	noFstab      bool
 	keepRaw      bool
 	quiet        bool
 	verbose      bool
@@ -73,7 +76,7 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 
 	var rootSizeBytes int64
 	if opts.rootSize != "" {
-		rootSizeBytes, err = parseSize(opts.rootSize)
+		rootSizeBytes, err = volume.ParseSize(opts.rootSize)
 		if err != nil {
 			return fmt.Errorf("--root-size: %w", err)
 		}
@@ -103,6 +106,19 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 	}
 	rep.Line("✅", "contemper-ready", "")
 
+	specs, err := volume.FromConfig(bundle.SortedKeys(cfg.Config.Volumes), cfg.Config.Labels)
+	if err != nil {
+		rep.Fail("volumes", err.Error(), "")
+		return err
+	}
+	if rootSizeBytes == 0 {
+		rootSizeBytes, err = volume.RootSize(cfg.Config.Labels)
+		if err != nil {
+			rep.Fail("volumes", err.Error(), "")
+			return err
+		}
+	}
+
 	if opts.target == canonicalTarget {
 		rep.Line("🎯", "target "+canonicalTarget, "(explicit, no alias)")
 	} else {
@@ -114,7 +130,7 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 	rep.Blank()
 
 	var supportImg *source.Image
-	var supportRefStr string
+	var supportRefStr, supportRefForBuild string
 	var schema *support.Schema
 	var overlays []v1.Image
 	var resolvedVariants []bundle.SupportVariant
@@ -128,6 +144,7 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 			return err
 		}
 		supportRefStr = supportRef.String()
+		supportRefForBuild = redactedRefString(supportRef)
 		supportImg, err = source.Load(supportRef, platform)
 		if err != nil {
 			rep.Fail("support image", err.Error(), "")
@@ -208,6 +225,67 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 		}
 	}
 
+	buildInfo := guestmeta.BuildInfo{
+		ContemperVersion: buildinfo.Get().Version,
+		Target:           canonicalTarget,
+		Arch:             platform.Architecture,
+		Source:           guestmeta.ImageRef{Ref: redactedRefString(ref), Digest: img.Digest.String()},
+	}
+	if supportImg != nil {
+		buildInfo.Support = &guestmeta.ImageRef{Ref: supportRefForBuild, Digest: supportImg.Digest.String()}
+		for _, v := range resolvedVariants {
+			buildInfo.SupportVariants = append(buildInfo.SupportVariants, guestmeta.VariantRef{
+				Branch: v.Branch, Variant: v.Variant, Ref: v.Ref, Digest: v.Digest,
+			})
+		}
+	}
+	if err := rfs.WriteFile(guestmeta.BuildPath, guestmeta.RenderBuild(buildInfo)); err != nil {
+		return fmt.Errorf("writing %s: %w", guestmeta.BuildPath, err)
+	}
+
+	if len(specs) > 0 {
+		rep.Line("💾", fmt.Sprintf("%d %s declared", len(specs), pluralize(len(specs), "volume")), "")
+		var lines []guestmeta.VolumeLine
+		var fstabLines []string
+		for _, s := range specs {
+			if err := rfs.EnsureDir(s.Path); err != nil {
+				return fmt.Errorf("creating mount point %s: %w", s.Path, err)
+			}
+			detail := "unsized"
+			if s.SizeBytes > 0 {
+				detail = progress.HumanBytes(s.SizeBytes)
+			}
+			rep.Sub("✔", s.Path+" → "+s.Name, detail)
+			lines = append(lines, guestmeta.VolumeLine{
+				Name: s.Name, SerialPattern: target.SerialPattern(canonicalTarget, s.Name), FS: "ext4", Mountpoint: s.Path,
+			})
+			fstabLines = append(fstabLines, guestmeta.FstabLine(s.Name, s.Path))
+		}
+		if err := rfs.WriteFile(guestmeta.VolumesPath, guestmeta.RenderVolumes(lines)); err != nil {
+			return fmt.Errorf("writing %s: %w", guestmeta.VolumesPath, err)
+		}
+
+		if opts.noFstab || volume.FstabOptedOut(cfg.Config.Labels) {
+			rep.Sub("·", "fstab", "opted out")
+		} else {
+			var existing []byte
+			if _, ok := rfs.Lookup(guestmeta.FstabPath); ok {
+				existing, err = rfs.ReadFile(guestmeta.FstabPath)
+				if err != nil {
+					return fmt.Errorf("reading %s: %w", guestmeta.FstabPath, err)
+				}
+			}
+			updated, changed := guestmeta.AppendFstab(existing, fstabLines)
+			if changed {
+				if err := rfs.WriteFile(guestmeta.FstabPath, updated); err != nil {
+					return fmt.Errorf("writing %s: %w", guestmeta.FstabPath, err)
+				}
+			}
+			rep.Sub("✔", "fstab", "LABEL=<name> <path> ext4 defaults,nofail 0 2")
+		}
+		rep.Blank()
+	}
+
 	val, err := validate.Validate(rfs)
 	if err != nil {
 		rep.Fail("validate", err.Error(), "a contemper-ready image must provide a kernel, initrd, cmdline and init at the fixed paths")
@@ -235,6 +313,11 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 		rep.Warn("warning", w)
 	}
 
+	volumes := make([]bundle.Volume, 0, len(specs))
+	for _, s := range specs {
+		volumes = append(volumes, bundle.Volume{Name: s.Name, Path: s.Path, SizeBytes: s.SizeBytes, FS: "ext4"})
+	}
+
 	manifest := &bundle.Manifest{
 		FormatVersion:    bundle.FormatVersion,
 		ContemperVersion: buildinfo.Get().Version,
@@ -242,6 +325,7 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 		Source: bundle.ImageRef{
 			Ref:    ref.String(),
 			Digest: img.Digest.String(),
+			Repo:   img.RepoBase,
 		},
 		Target: canonicalTarget,
 		Arch:   platform.Architecture,
@@ -251,17 +335,17 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 			SizeBytes: diskInfo.SizeBytes,
 			SHA256:    diskInfo.SHA256,
 		},
-		Volumes:      bundle.SortedKeys(cfg.Config.Volumes),
+		Volumes:      volumes,
 		Hints:        hintsFrom(cfg),
 		Reproducible: img.Reproducible,
 	}
 	if supportImg != nil {
 		manifest.Support = &bundle.SupportRef{
-			Ref:    supportRefStr,
-			Digest: supportImg.Digest.String(),
-			Origin: string(supportOrigin),
+			Ref:      supportRefStr,
+			Digest:   supportImg.Digest.String(),
+			Origin:   string(supportOrigin),
+			Variants: resolvedVariants,
 		}
-		manifest.SupportVariants = resolvedVariants
 	}
 
 	if err := bundle.Write(outBundleDir, manifest); err != nil {
@@ -454,37 +538,17 @@ func pluralize(n int, unit string) string {
 	return unit + "s"
 }
 
-// parseSize parses a human size like "2GiB", "512MiB", "1073741824" into
-// bytes.
-func parseSize(s string) (int64, error) {
-	s = strings.TrimSpace(s)
-	suffixes := []struct {
-		suffix string
-		mult   int64
-	}{
-		{"GiB", 1 << 30},
-		{"MiB", 1 << 20},
-		{"KiB", 1 << 10},
-		{"GB", 1e9},
-		{"MB", 1e6},
-		{"KB", 1e3},
-		{"B", 1},
+// redactedRefString returns the string /etc/contemper/build records for
+// ref: the full reference for a registry source, or (per the design's
+// "no build-machine paths in the guest" rule) just the scheme and file
+// name for a local archive/layout source. contemper.json's own
+// source.ref/support.ref, by contrast, keep the reference exactly as
+// given, since the bundle directory is already build-host-specific.
+func redactedRefString(ref source.Ref) string {
+	if ref.Kind == source.KindRegistry {
+		return ref.String()
 	}
-	for _, sfx := range suffixes {
-		if strings.HasSuffix(strings.ToUpper(s), strings.ToUpper(sfx.suffix)) {
-			numStr := s[:len(s)-len(sfx.suffix)]
-			n, err := strconv.ParseFloat(strings.TrimSpace(numStr), 64)
-			if err != nil {
-				return 0, fmt.Errorf("invalid size %q", s)
-			}
-			return int64(n * float64(sfx.mult)), nil
-		}
-	}
-	n, err := strconv.ParseInt(s, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("invalid size %q", s)
-	}
-	return n, nil
+	return guestmeta.RedactLocalRef(string(ref.Kind), ref.Value)
 }
 
 // machineArch maps an OCI architecture to the machine name used in bundle

@@ -11,6 +11,7 @@ func newConvertCmd() *cobra.Command {
 		outDir       string
 		arch         string
 		rootSizeStr  string
+		noFstab      bool
 		keepRaw      bool
 		quiet        bool
 		verbose      bool
@@ -29,6 +30,7 @@ func newConvertCmd() *cobra.Command {
 				outDir:       outDir,
 				arch:         arch,
 				rootSize:     rootSizeStr,
+				noFstab:      noFstab,
 				keepRaw:      keepRaw,
 				quiet:        quiet,
 				verbose:      verbose,
@@ -42,6 +44,7 @@ func newConvertCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&outDir, "out", "o", ".", "output directory for the bundle")
 	cmd.Flags().StringVar(&arch, "arch", "", "target architecture (amd64|arm64); defaults to host")
 	cmd.Flags().StringVar(&rootSizeStr, "root-size", "", "override the root partition size (e.g. 2GiB)")
+	cmd.Flags().BoolVar(&noFstab, "no-fstab", false, "don't append fstab lines for declared volumes")
 	cmd.Flags().BoolVar(&keepRaw, "keep-raw", false, "keep the intermediate disk.raw file")
 	cmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "suppress progress output (stdout still prints the bundle path)")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "show each host tool invocation")

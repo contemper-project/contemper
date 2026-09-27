@@ -13,22 +13,38 @@ import (
 	"time"
 )
 
-// FormatVersion is the current contemper.json schema version.
+// FormatVersion is the current contemper.json schema version. It stays 1
+// until after the public v0.1.0 release: before then, the format can
+// still change (as it does here, for volumes and sizing - volumes became
+// objects, and the support image's resolved variants moved from a
+// top-level "support.variants" key to Support.Variants) without a bump.
 const FormatVersion = 1
 
 // ImageRef identifies a source image by reference and digest.
 type ImageRef struct {
 	Ref    string `json:"ref"`
 	Digest string `json:"digest"`
+	// Repo is the source image's repository name, without its tag (the
+	// same value convert uses to name the bundle directory, before the
+	// "-<tag>.<arch>" suffix). deploy --to local-qemu uses it as the
+	// default per-instance state directory name, so redeploying a new
+	// tag of the same image reuses that instance's volumes. Set only on
+	// Source; empty (and omitted) elsewhere.
+	Repo string `json:"repo,omitempty"`
 }
 
-// SupportRef identifies the support image that was merged in, and where
-// its reference came from: "target" when the target's own default
-// applied, or "flag" when --support replaced it.
+// SupportRef identifies a support-image merge (the target's or the
+// user's support image, or the automatically merged volume helper) by
+// reference and digest, where the reference came from, and each of its
+// branches' resolved variant.
 type SupportRef struct {
 	Ref    string `json:"ref"`
 	Digest string `json:"digest"`
-	Origin string `json:"origin"`
+	// Origin is "target" when the target's own default applied, or
+	// "flag" when --support replaced it. Empty (and omitted) for the
+	// volume helper.
+	Origin   string           `json:"origin,omitempty"`
+	Variants []SupportVariant `json:"variants,omitempty"`
 }
 
 // DiskInfo describes the bundle's disk file.
@@ -66,20 +82,39 @@ type SupportVariant struct {
 	Digest  string `json:"digest,omitempty"`
 }
 
+// Volume describes one volume declared in the source image, resolved to
+// a name and (once known) a size.
+type Volume struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+	// SizeBytes is omitted when the volume's size isn't known yet: no
+	// io.contemper.volume.<path>.size label and no --root-size-shaped
+	// override were given at convert time. deploy fails on an unsized
+	// volume unless --volume <path>=<size> supplies one.
+	SizeBytes int64  `json:"size,omitempty"`
+	FS        string `json:"fs"`
+}
+
 // Manifest is the top-level contemper.json document.
 type Manifest struct {
-	FormatVersion    int              `json:"formatVersion"`
-	ContemperVersion string           `json:"contemperVersion"`
-	CreatedAt        time.Time        `json:"createdAt"`
-	Source           ImageRef         `json:"source"`
-	Support          *SupportRef      `json:"support,omitempty"`
-	SupportVariants  []SupportVariant `json:"support.variants,omitempty"`
-	Target           string           `json:"target"`
-	Arch             string           `json:"arch"`
-	Disk             DiskInfo         `json:"disk"`
-	Volumes          []string         `json:"volumes,omitempty"`
-	Hints            Hints            `json:"hints"`
-	Reproducible     bool             `json:"reproducible"`
+	FormatVersion    int         `json:"formatVersion"`
+	ContemperVersion string      `json:"contemperVersion"`
+	CreatedAt        time.Time   `json:"createdAt"`
+	Source           ImageRef    `json:"source"`
+	Support          *SupportRef `json:"support,omitempty"`
+	// VolumeHelper describes the automatically merged volume-formatting
+	// support image, kept separate from Support (the user's own
+	// --support image, if any) since the two are independent merges:
+	// Support reflects only what the user asked for, VolumeHelper only
+	// what contemper added on its own because the image declares
+	// volumes. See docs/reference/bundle.md for why.
+	VolumeHelper *SupportRef `json:"volumeHelper,omitempty"`
+	Target       string      `json:"target"`
+	Arch         string      `json:"arch"`
+	Disk         DiskInfo    `json:"disk"`
+	Volumes      []Volume    `json:"volumes,omitempty"`
+	Hints        Hints       `json:"hints"`
+	Reproducible bool        `json:"reproducible"`
 }
 
 // Read parses <dir>/contemper.json.
