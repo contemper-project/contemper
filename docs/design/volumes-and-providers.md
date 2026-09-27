@@ -26,11 +26,16 @@ Volumes are the next milestone. The decisions so far:
 - **Declaration.** `VOLUME` in the image, plus labels
   `io.contemper.volume.<path>.size`, an optional
   `io.contemper.volume.<path>.name`, and `io.contemper.root.size` for
-  the root disk. Command-line flags override them.
+  the root disk. Command-line flags override them. A volume without a
+  size is recorded without one, and deployment fails until a label or a
+  flag provides it; contemper never guesses a size.
 - **Names.** Each volume has a name of at most 16 characters, the ext4
-  label limit, either given explicitly or derived from the path. The name
-  is the filesystem label and, where the provider lets contemper choose,
-  the disk serial.
+  label limit, either given explicitly or derived from the path: the
+  leading `/` dropped and the remaining `/` turned into `-`, and, when
+  that is too long, shortened with a hash of the path appended. Two
+  volumes with the same name fail the conversion. The name is the
+  filesystem label and, where the provider lets contemper choose, the
+  disk serial.
 - **fstab.** contemper appends one line per volume,
   `LABEL=<name> <path> ext4 defaults,nofail 0 2`, the same on every
   target. Images opt out with `io.contemper.fstab="false"`, builds with
@@ -40,22 +45,28 @@ Volumes are the next milestone. The decisions so far:
   provider's own metadata channel. `build` is written for every image:
   `key=value` lines with the contemper version, target, architecture,
   source reference and digest, and support image digests, without a
-  timestamp so the root filesystem stays reproducible. `volumes` is
+  timestamp so the root filesystem stays reproducible. A local archive
+  source is recorded by file name and digest only, so no paths from the
+  build machine end up in the guest. `volumes` is
   written whenever volumes are declared, even with the fstab opt-out:
   one volume per line as `name serial-pattern fs mountpoint`, with the
   mount path last so it may contain spaces.
 - **A shell-script helper.** First-boot formatting is a POSIX `sh`
-  script, identical in every image, shipped in a common contemper
-  support layer with one variant per init system, and merged only when
-  an image declares volumes. It reads `/etc/contemper/volumes` line by
-  line and never sources it. A script rather than a binary keeps it
-  architecture-independent and readable in the guest; the image must
-  provide `mkfs.ext4`.
+  script, identical in every image. It ships as a published support
+  image built from this repository, with one variant per init system
+  (OpenRC and systemd), and is merged only when an image declares
+  volumes. A flag replaces it with another image or leaves it out. An
+  image with volumes but neither init system fails the conversion
+  rather than silently getting unformatted volumes. The helper reads
+  `/etc/contemper/volumes` line by line and never sources it. A script
+  rather than a binary keeps it architecture-independent and readable
+  in the guest; the image must provide `mkfs.ext4`.
 - **Blank means zeros.** The helper formats a disk only if its first and
   last MiB are all zeros. Anything else is left alone and logged, so the
   failure mode is an unformatted volume, never lost data.
 - **Manifest.** Volumes in `contemper.json` become objects (name, path,
-  size, filesystem), with a new format version.
+  size, filesystem), with a new format version. The same change nests
+  the resolved support-image variants inside the `support` object.
 
 ## Providers
 
