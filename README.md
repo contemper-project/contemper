@@ -1,5 +1,13 @@
 # contemper
 
+[![CI](https://github.com/contemper-project/contemper/actions/workflows/ci.yml/badge.svg)](https://github.com/contemper-project/contemper/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/contemper-project/contemper.svg)](https://pkg.go.dev/github.com/contemper-project/contemper)
+[![Go Report Card](https://goreportcard.com/badge/github.com/contemper-project/contemper)](https://goreportcard.com/report/github.com/contemper-project/contemper)
+[![Latest release](https://img.shields.io/github/v/release/contemper-project/contemper)](https://github.com/contemper-project/contemper/releases)
+[![License](https://img.shields.io/github/license/contemper-project/contemper)](LICENSE)
+[![Go version](https://img.shields.io/github/go-mod/go-version/contemper-project/contemper)](go.mod)
+[![Docs](https://img.shields.io/badge/docs-contemper--project.github.io-blue)](https://contemper-project.github.io/contemper/)
+
 Build bootable VM images from container images.
 
 contemper takes an OCI image you already built, merges in what a given
