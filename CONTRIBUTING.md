@@ -69,4 +69,28 @@ PRs must pass CI (build, vet, tests, and the docs build) before merge.
 
 By contributing, you agree your contribution is licensed under the
 Apache License 2.0 (see [LICENSE](LICENSE)), on the same terms as the
-rest of the project. There's no separate CLA to sign.
+rest of the project.
+
+### Developer Certificate of Origin
+
+Every commit must carry a `Signed-off-by` trailer. Signing off certifies
+you wrote the change or otherwise have the right to submit it under the
+project's license, per the
+[Developer Certificate of Origin](https://developercertificate.org/) -
+there's no separate CLA to sign.
+
+Add the trailer by committing with `git commit -s` (or `--signoff`),
+using your configured `user.name` and `user.email`:
+
+```sh
+git commit -s -m "fix(disk): handle sparse files in the ext4 populator"
+```
+
+A CI check rejects any commit in a PR that's missing one, or whose
+trailer doesn't match its author. If that happens, sign off the
+existing commits and force-push:
+
+```sh
+git rebase --signoff origin/main
+git push --force-with-lease
+```
