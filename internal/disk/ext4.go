@@ -7,6 +7,7 @@ package disk
 
 import (
 	"archive/tar"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -69,7 +70,7 @@ func PopulateExt4(rfs *rootfs.Rootfs, imgPath string, opts Ext4Options) ([]strin
 		return nil, fmt.Errorf("creating %s: %w", imgPath, err)
 	}
 	if err := f.Truncate(opts.SizeBytes); err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, fmt.Errorf("sizing %s to %d bytes: %w", imgPath, opts.SizeBytes, err)
 	}
 	if err := f.Close(); err != nil {
@@ -86,7 +87,7 @@ func PopulateExt4(rfs *rootfs.Rootfs, imgPath string, opts Ext4Options) ([]strin
 	if err != nil {
 		return nil, fmt.Errorf("creating payload dir: %w", err)
 	}
-	defer os.RemoveAll(payloadDir)
+	defer func() { _ = os.RemoveAll(payloadDir) }()
 
 	script, warnings, err := buildDebugfsScript(rfs, payloadDir, opts.Stage)
 	if err != nil {
@@ -122,7 +123,7 @@ func PopulateExt4(rfs *rootfs.Rootfs, imgPath string, opts Ext4Options) ([]strin
 
 // runCmd runs an argv-array subprocess and returns its combined output.
 func runCmd(name string, args ...string) (string, error) {
-	cmd := exec.Command(name, args...)
+	cmd := exec.CommandContext(context.Background(), name, args...) //nolint:gosec // G204: name is always one of our own fixed host-tool names, never a shell
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
@@ -130,7 +131,7 @@ func runCmd(name string, args ...string) (string, error) {
 // modeBits returns the ext4 st_mode value (type bits | permission bits)
 // for a tar header, so `sif ... mode ...` never drops the file's type.
 func modeBits(hdr *tar.Header) uint32 {
-	perm := uint32(hdr.Mode) & 07777
+	perm := uint32(hdr.Mode) & 07777 //nolint:gosec // G115: masked to 12 bits, which survive int64->uint32 truncation unchanged regardless of hdr.Mode's range
 	var typeBits uint32
 	switch hdr.Typeflag {
 	case tar.TypeDir:
@@ -374,15 +375,22 @@ func writePayload(rfs *rootfs.Rootfs, e *rootfs.Entry, payloadDir string, n int)
 	if err != nil {
 		return "", err
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	hostPath := path.Join(payloadDir, fmt.Sprintf("f%06d", n))
 	out, err := os.Create(hostPath)
 	if err != nil {
 		return "", err
 	}
-	defer out.Close()
 	if _, err := io.Copy(out, rc); err != nil {
+		_ = out.Close()
+		return "", fmt.Errorf("writing payload for %s: %w", e.Path, err)
+	}
+	// Checked, not deferred-and-ignored: this file becomes part of the
+	// ext4 image via a debugfs script right after we return, so a write
+	// error surfaced only at Close (e.g. a delayed flush failure) must
+	// not be silently swallowed.
+	if err := out.Close(); err != nil {
 		return "", fmt.Errorf("writing payload for %s: %w", e.Path, err)
 	}
 	return hostPath, nil

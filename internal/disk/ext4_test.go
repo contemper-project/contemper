@@ -3,6 +3,7 @@ package disk_test
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -17,19 +18,19 @@ import (
 	"github.com/contemper-project/contemper/internal/rootfs"
 )
 
-func requireExt4Tools(t *testing.T) (mkfs, debugfs, e2fsck string) {
+func requireExt4Tools(t *testing.T) (debugfs, e2fsck string) {
 	t.Helper()
 	for _, name := range []string{"mkfs.ext4", "debugfs", "e2fsck"} {
 		if hostenv.Find(name) == "" {
 			t.Skipf("%s not found; skipping ext4 population test", name)
 		}
 	}
-	return hostenv.Find("mkfs.ext4"), hostenv.Find("debugfs"), hostenv.Find("e2fsck")
+	return hostenv.Find("debugfs"), hostenv.Find("e2fsck")
 }
 
 func debugfsStat(t *testing.T, debugfsPath, img, path string) string {
 	t.Helper()
-	out, err := exec.Command(debugfsPath, "-R", "stat "+path, img).CombinedOutput()
+	out, err := exec.CommandContext(context.Background(), debugfsPath, "-R", "stat "+path, img).CombinedOutput()
 	if err != nil {
 		t.Fatalf("debugfs stat %s: %v\n%s", path, err, out)
 	}
@@ -37,12 +38,12 @@ func debugfsStat(t *testing.T, debugfsPath, img, path string) string {
 }
 
 func TestPopulateExt4(t *testing.T) {
-	_, debugfsPath, e2fsckPath := requireExt4Tools(t)
+	debugfsPath, e2fsckPath := requireExt4Tools(t)
 
 	files := []imgtest.File{
-		{Path: "etc/", Typeflag: tar.TypeDir, Mode: 0o750, Uid: 0, Gid: 0},
-		{Path: "etc/hostname", Data: []byte("test-vm\n"), Mode: 0o644, Uid: 0, Gid: 0},
-		{Path: "etc/owned", Data: []byte("mine\n"), Mode: 0o600, Uid: 1000, Gid: 1000},
+		{Path: "etc/", Typeflag: tar.TypeDir, Mode: 0o750, UID: 0, GID: 0},
+		{Path: "etc/hostname", Data: []byte("test-vm\n"), Mode: 0o644, UID: 0, GID: 0},
+		{Path: "etc/owned", Data: []byte("mine\n"), Mode: 0o600, UID: 1000, GID: 1000},
 		{Path: "etc/link-to-hostname", Typeflag: tar.TypeSymlink, Linkname: "hostname"},
 		{Path: "etc/hardlink-to-hostname", Typeflag: tar.TypeLink, Linkname: "etc/hostname"},
 		{Path: "dev/", Typeflag: tar.TypeDir},
@@ -57,7 +58,7 @@ func TestPopulateExt4(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rootfs.Build: %v", err)
 	}
-	defer rfs.Close()
+	defer func() { _ = rfs.Close() }()
 
 	imgPath := t.TempDir() + "/root.img"
 	warnings, err := disk.PopulateExt4(rfs, imgPath, disk.Ext4Options{
@@ -72,7 +73,7 @@ func TestPopulateExt4(t *testing.T) {
 	}
 
 	// e2fsck -fn is the authoritative correctness check.
-	out, err := exec.Command(e2fsckPath, "-fn", imgPath).CombinedOutput()
+	out, err := exec.CommandContext(context.Background(), e2fsckPath, "-fn", imgPath).CombinedOutput()
 	if err != nil {
 		t.Fatalf("e2fsck -fn reported problems: %v\n%s", err, out)
 	}
@@ -110,7 +111,7 @@ func TestPopulateExt4(t *testing.T) {
 // returns its combined output.
 func debugfsRun(t *testing.T, debugfsPath, img, request string) string {
 	t.Helper()
-	out, err := exec.Command(debugfsPath, "-R", request, img).CombinedOutput()
+	out, err := exec.CommandContext(context.Background(), debugfsPath, "-R", request, img).CombinedOutput()
 	if err != nil {
 		t.Fatalf("debugfs %s: %v\n%s", request, err, out)
 	}
@@ -122,7 +123,7 @@ func debugfsRun(t *testing.T, debugfsPath, img, request string) string {
 // capabilities (e.g. on ping) - survive both the layer merge and ext4
 // population, rather than being silently dropped.
 func TestPopulateExt4Xattrs(t *testing.T) {
-	_, debugfsPath, e2fsckPath := requireExt4Tools(t)
+	debugfsPath, e2fsckPath := requireExt4Tools(t)
 
 	// A realistic security.capability value: VFS_CAP_REVISION_2 with the
 	// effective flag set, granting CAP_NET_RAW - what
@@ -160,7 +161,7 @@ func TestPopulateExt4Xattrs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rootfs.Build: %v", err)
 	}
-	defer rfs.Close()
+	defer func() { _ = rfs.Close() }()
 
 	// The merge (layer -> flattened rootfs tar) must keep the xattrs
 	// before ext4 population even runs.
@@ -185,7 +186,7 @@ func TestPopulateExt4Xattrs(t *testing.T) {
 	}
 
 	// e2fsck -fn is the authoritative correctness check.
-	if out, err := exec.Command(e2fsckPath, "-fn", imgPath).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(context.Background(), e2fsckPath, "-fn", imgPath).CombinedOutput(); err != nil {
 		t.Fatalf("e2fsck -fn reported problems: %v\n%s", err, out)
 	}
 
@@ -204,7 +205,7 @@ func TestPopulateExt4Xattrs(t *testing.T) {
 
 	// Round-trip the binary value exactly, not just its length.
 	capOut := t.TempDir() + "/cap.bin"
-	if out, err := exec.Command(debugfsPath, "-R", fmt.Sprintf("ea_get -f %s /usr/bin/ping security.capability", capOut), imgPath).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(context.Background(), debugfsPath, "-R", fmt.Sprintf("ea_get -f %s /usr/bin/ping security.capability", capOut), imgPath).CombinedOutput(); err != nil {
 		t.Fatalf("ea_get: %v\n%s", err, out)
 	}
 	got, err := os.ReadFile(capOut)

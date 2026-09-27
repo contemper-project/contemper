@@ -6,6 +6,7 @@ package imgtest
 import (
 	"archive/tar"
 	"bytes"
+	"io"
 	"time"
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
@@ -19,7 +20,7 @@ type File struct {
 	Path               string
 	Typeflag           byte // defaults to tar.TypeReg
 	Mode               int64
-	Uid, Gid           int
+	UID, GID           int
 	Data               []byte
 	Linkname           string
 	Devmajor, Devminor int64
@@ -53,8 +54,8 @@ func Layer(files []File) (v1.Layer, error) {
 			Name:     f.Path,
 			Typeflag: typeflag,
 			Mode:     mode,
-			Uid:      f.Uid,
-			Gid:      f.Gid,
+			Uid:      f.UID,
+			Gid:      f.GID,
 			Linkname: f.Linkname,
 			Devmajor: f.Devmajor,
 			Devminor: f.Devminor,
@@ -80,7 +81,14 @@ func Layer(files []File) (v1.Layer, error) {
 	if err := tw.Close(); err != nil {
 		return nil, err
 	}
-	return tarball.LayerFromReader(bytes.NewReader(buf.Bytes()))
+	// LayerFromReader is deprecated because a plain io.Reader can only be
+	// consumed once, which breaks callers that read a layer's contents
+	// more than once (e.g. to hash it, then to write it). Opener reopens
+	// buf's already-built bytes on every call instead.
+	data := buf.Bytes()
+	return tarball.LayerFromOpener(func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(data)), nil
+	})
 }
 
 // Image builds a v1.Image for platform with the given labels, from one
@@ -116,7 +124,7 @@ func Image(platform v1.Platform, labels map[string]string, layers ...[]File) (v1
 // WhiteoutFile returns a File that whites out name in a higher layer.
 func WhiteoutFile(name string) File {
 	dir, base := splitPath(name)
-	p := base
+	var p string
 	if dir != "" {
 		p = dir + "/.wh." + base
 	} else {

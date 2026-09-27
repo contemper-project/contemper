@@ -60,7 +60,7 @@ func RootPartitionSize(contentBytes int64) int64 {
 // image fills the partition exactly, and the partition spans whole
 // sectors, so a size that isn't sector-aligned can't be written.
 func AlignRootSize(size int64) int64 {
-	return int64(alignUp64(uint64(size), alignmentBytes))
+	return int64(alignUp64(uint64(size), alignmentBytes)) //nolint:gosec // G115: real disk sizes never approach the int64/uint64 boundary
 }
 
 // BuildOptions configures BuildGPTImage.
@@ -112,11 +112,19 @@ func BuildGPTImage(rawPath string, opts BuildOptions) (*Layout, error) {
 		return nil, fmt.Errorf("removing existing %s: %w", rawPath, err)
 	}
 
-	d, err := diskfs.Create(rawPath, int64(totalBytes), diskfs.SectorSizeDefault)
+	d, err := diskfs.Create(rawPath, int64(totalBytes), diskfs.SectorSizeDefault) //nolint:gosec // G115: real disk sizes never approach the uint64/int64 boundary
 	if err != nil {
 		return nil, fmt.Errorf("creating disk image %s: %w", rawPath, err)
 	}
-	defer d.Close()
+	// d.Close resets *d to its zero value, so calling it twice (this
+	// defer plus the checked call on the success path below) would call
+	// Close on a nil Backend and panic; closed guards against that.
+	closed := false
+	defer func() {
+		if !closed {
+			_ = d.Close()
+		}
+	}()
 
 	table := &gpt.Table{
 		ProtectiveMBR: true,
@@ -135,6 +143,14 @@ func BuildGPTImage(rawPath string, opts BuildOptions) (*Layout, error) {
 
 	if err := writeRootPartition(d, opts.RootImgPath); err != nil {
 		return nil, err
+	}
+
+	// Checked, not deferred-and-ignored: a flush failure surfaced only
+	// at Close must not leave callers thinking a corrupt disk image is
+	// good.
+	closed = true
+	if err := d.Close(); err != nil {
+		return nil, fmt.Errorf("finalizing disk image %s: %w", rawPath, err)
 	}
 
 	return &Layout{
@@ -169,7 +185,7 @@ func writeRootPartition(d *diskpkg.Disk, rootImgPath string) error {
 	if err != nil {
 		return fmt.Errorf("opening %s: %w", rootImgPath, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, err := d.WritePartitionContents(2, f); err != nil {
 		return fmt.Errorf("writing root partition contents: %w", err)
 	}

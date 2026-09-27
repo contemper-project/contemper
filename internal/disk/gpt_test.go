@@ -62,7 +62,7 @@ func testBuildGPTImage(t *testing.T, arch, wantBootFile string, wantRootType gpt
 	if err != nil {
 		t.Fatalf("re-opening %s: %v", rawPath, err)
 	}
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 
 	table, err := d.GetPartitionTable()
 	if err != nil {
