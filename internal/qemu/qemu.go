@@ -257,6 +257,9 @@ func Deploy(opts Options) error {
 		}
 		opts.SerialLogPath = f.Name()
 		_ = f.Close()
+		// Nothing reports this path to the user, so it is scratch: the
+		// console has already been streamed to the progress output.
+		defer func() { _ = os.Remove(f.Name()) }()
 	}
 
 	if opts.WorkDir == "" {
