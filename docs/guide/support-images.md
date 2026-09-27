@@ -73,10 +73,32 @@ merges only `support-openrc`, reporting which variant it picked and why:
 
 ```console
 🧩  support image · ghcr.io/example/support:v5
-    ✔ rootfs                                      3 layers
+    ✔ rootfs                                      3 layers · 640 KiB download
     ✔ branch init-system → openrc                  matched /sbin/openrc-init
-      └ ghcr.io/example/support-openrc:v5 linux/arm64
+      └ ghcr.io/example/support-openrc:v5 linux/arm64 · 210 KiB download
 ```
+
+The download size comes straight from the manifest's layer descriptors,
+so it's known - and shown - before anything is pulled; a losing variant's
+size is never shown, because it's never fetched. Once the layers are
+actually merged, `convert` also reports what each piece added to the
+root filesystem:
+
+```console
+🧬  merging 12 + 4 layers
+    ✔ support image                                +9 files · 580 KiB
+    ✔ variant init-system=openrc                    +3 files · 60 KiB
+```
+
+That's a count of the filesystem entries and regular-file bytes each
+piece writes on its own terms - reading only that image's own layers,
+never the (often much larger) base image or anything else it's merged
+onto - plus a "N removed" note when it carries a whiteout or opaque
+directory marker. It answers "what does this image write", not "how
+much did the merged filesystem grow by"; a path this image writes that
+also happened to already exist is still counted; a removal is counted
+whether or not there was ever anything at that path to remove. Both
+numbers are purely informational and aren't recorded in the bundle.
 
 The full annotation schema, the resolution algorithm, and a worked
 example with two branches are in [Support image
