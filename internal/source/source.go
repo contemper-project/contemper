@@ -28,7 +28,17 @@ const ReadyLabel = "io.contemper.ready"
 // RefNameAnnotation is the OCI annotation that records the original
 // "name:tag" a layout or archive source was saved from (written by
 // tools like `podman save`/`buildah push` under this well-known key).
+// Docker's containerd image store instead sets this to a bare tag (see
+// ContainerdNameAnnotation), so it is only trusted as a bundle name when
+// it looks like "repo:tag" or "repo".
 const RefNameAnnotation = "org.opencontainers.image.ref.name"
+
+// ContainerdNameAnnotation is the annotation containerd-backed image
+// stores (including Docker with the containerd image store, and `ctr
+// images export`) set to the full reference an image was named with,
+// e.g. "docker.io/library/example:dev". It is preferred over
+// RefNameAnnotation, which those same tools set to just the tag.
+const ContainerdNameAnnotation = "io.containerd.image.name"
 
 // maxIndexDepth bounds how many levels of nested image index
 // resolveDescriptor will follow before giving up. Real layouts nest at
@@ -145,7 +155,7 @@ func Load(ref Ref, platform v1.Platform) (*Image, error) {
 	case KindOCIArchive:
 		return loadOCIArchive(ref, platform)
 	case KindOCILayout:
-		return loadOCILayout(ref, platform)
+		return loadOCILayout(ref, platform, archiveBaseName(ref.Value))
 	case KindDockerArchive:
 		return loadDockerArchive(ref, platform)
 	default:
@@ -202,7 +212,7 @@ func loadOCIArchive(ref Ref, platform v1.Platform) (*Image, error) {
 		return nil, fmt.Errorf("extracting oci-archive %q: %w", ref.Value, err)
 	}
 
-	img, err := loadOCILayout(Ref{Kind: KindOCILayout, Value: tmpDir}, platform)
+	img, err := loadOCILayout(Ref{Kind: KindOCILayout, Value: tmpDir}, platform, archiveBaseName(ref.Value))
 	if err != nil {
 		cleanup()
 		return nil, err
@@ -212,7 +222,12 @@ func loadOCIArchive(ref Ref, platform v1.Platform) (*Image, error) {
 	return img, nil
 }
 
-func loadOCILayout(ref Ref, platform v1.Platform) (*Image, error) {
+// loadOCILayout resolves ref (an OCI layout directory) to a
+// platform-selected image. fallbackBase names the bundle when no naming
+// annotation is found on the resolved manifest's lineage of index
+// descriptors; callers pass a name derived from the archive/directory
+// path they loaded ref from.
+func loadOCILayout(ref Ref, platform v1.Platform, fallbackBase string) (*Image, error) {
 	idx, err := layout.ImageIndexFromPath(ref.Value)
 	if err != nil {
 		return nil, fmt.Errorf("reading OCI layout %q: %w", ref.Value, err)
@@ -228,10 +243,7 @@ func loadOCILayout(ref Ref, platform v1.Platform) (*Image, error) {
 		return nil, fmt.Errorf("reading image %s from %q: %w", leaf.Digest, ref.Value, err)
 	}
 
-	base, tag := "image", "latest"
-	if refName := refNameOf(topDescs, topDesc); refName != "" {
-		base, tag = splitRepoTag(refName)
-	}
+	base, tag := bundleName(topDescs, topDesc, fallbackBase)
 
 	return &Image{
 		Image:        img,
@@ -479,16 +491,59 @@ func isAttestationManifest(d v1.Descriptor) bool {
 	return d.Platform != nil && d.Platform.OS == "unknown" && d.Platform.Architecture == "unknown"
 }
 
-func refNameOf(descs []v1.Descriptor, desc v1.Descriptor) string {
-	if v, ok := desc.Annotations[RefNameAnnotation]; ok {
+// bundleName derives (base, tag) for naming the bundle directory from
+// the naming annotations tools set on an index descriptor: it prefers
+// ContainerdNameAnnotation, always a full reference, over
+// RefNameAnnotation, which Docker's containerd image store (and other
+// containerd-backed tools) sets to a bare tag when the full reference is
+// already in ContainerdNameAnnotation. It checks selected's own
+// annotations first, then every descriptor in descs, since some tools
+// only set the annotation on one entry of an otherwise-unannotated
+// list. fallbackBase names the bundle when neither annotation is found
+// anywhere in descs.
+func bundleName(descs []v1.Descriptor, selected v1.Descriptor, fallbackBase string) (base, tag string) {
+	if name := annotationOf(descs, selected, ContainerdNameAnnotation); name != "" {
+		return splitRepoTag(name)
+	}
+	if name := annotationOf(descs, selected, RefNameAnnotation); name != "" {
+		if !strings.ContainsAny(name, "/:") {
+			// A bare tag, not "repo:tag" or "repo": Docker's containerd
+			// image store sets RefNameAnnotation this way when it has
+			// already recorded the full reference under
+			// ContainerdNameAnnotation, so treat it as the tag alone
+			// rather than as a repo name with an implied "latest" tag.
+			return fallbackBase, name
+		}
+		return splitRepoTag(name)
+	}
+	return fallbackBase, "latest"
+}
+
+func annotationOf(descs []v1.Descriptor, selected v1.Descriptor, key string) string {
+	if v, ok := selected.Annotations[key]; ok {
 		return v
 	}
 	for _, d := range descs {
-		if v, ok := d.Annotations[RefNameAnnotation]; ok {
+		if v, ok := d.Annotations[key]; ok {
 			return v
 		}
 	}
 	return ""
+}
+
+// archiveBaseName derives a fallback bundle-name base from the path of
+// an archive or layout directory a source was loaded from, for the
+// (Docker/buildx-produced) sources that carry no naming annotation at
+// all: "a/b/example.tar" and "a/b/example.tar.gz" both give "example",
+// as does the layout directory "a/b/example".
+func archiveBaseName(p string) string {
+	base := filepath.Base(filepath.Clean(p))
+	for _, ext := range []string{".tar.gz", ".tar.zst", ".tgz", ".tar"} {
+		if trimmed := strings.TrimSuffix(base, ext); trimmed != base {
+			return trimmed
+		}
+	}
+	return base
 }
 
 // splitRepoTag splits a "repo:tag" or "repo" string into a bundle-naming

@@ -1,6 +1,10 @@
 package source_test
 
 import (
+	"archive/tar"
+	"io"
+	"os"
+	"path/filepath"
 	"testing"
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
@@ -245,6 +249,122 @@ func buildNestedLayout(t *testing.T, dir string, outerAnnotations map[string]str
 		t.Fatal(err)
 	}
 	return arm64Digest, amd64Digest
+}
+
+// tarLayout tars the OCI layout directory dir into a new archive file
+// named base (e.g. "example.tar") in a fresh temp dir, and returns its
+// path - the oci-archive: form of a layout tests otherwise exercise
+// directly as oci:.
+func tarLayout(t *testing.T, dir, base string) string {
+	t.Helper()
+
+	archivePath := filepath.Join(t.TempDir(), base)
+	out, err := os.Create(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+
+	tw := tar.NewWriter(out)
+	defer tw.Close()
+
+	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		hdr, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return err
+		}
+		hdr.Name = filepath.ToSlash(rel)
+		if info.IsDir() {
+			hdr.Name += "/"
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		_, err = io.Copy(tw, f)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("tarring layout: %v", err)
+	}
+	return archivePath
+}
+
+func TestLoadOCILayoutNestedIndexPrefersContainerdName(t *testing.T) {
+	dir := t.TempDir()
+	_, amd64Digest := buildNestedLayout(t, dir, map[string]string{
+		source.ContainerdNameAnnotation: "docker.io/library/contemper-example:dev",
+		// Docker's containerd image store sets this to the bare tag,
+		// which must not override the full name above and must not be
+		// misread as a repo name with an implied "latest" tag.
+		source.RefNameAnnotation: "dev",
+	})
+
+	img, err := source.Load(source.Ref{Kind: source.KindOCILayout, Value: dir},
+		v1.Platform{OS: "linux", Architecture: "amd64"})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if img.Digest != amd64Digest {
+		t.Errorf("Load selected digest %s, want %s", img.Digest, amd64Digest)
+	}
+	if img.RepoBase != "contemper-example" || img.Tag != "dev" {
+		t.Errorf("RepoBase/Tag = %s/%s, want contemper-example/dev", img.RepoBase, img.Tag)
+	}
+}
+
+func TestLoadOCIArchiveNestedIndexBareRefNameFallsBackToArchiveName(t *testing.T) {
+	dir := t.TempDir()
+	_, amd64Digest := buildNestedLayout(t, dir, map[string]string{
+		// No io.containerd.image.name here: only the bare tag Docker
+		// sets on org.opencontainers.image.ref.name.
+		source.RefNameAnnotation: "dev",
+	})
+	archivePath := tarLayout(t, dir, "myimage-save.tar")
+
+	img, err := source.Load(source.Ref{Kind: source.KindOCIArchive, Value: archivePath},
+		v1.Platform{OS: "linux", Architecture: "amd64"})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if img.Digest != amd64Digest {
+		t.Errorf("Load selected digest %s, want %s", img.Digest, amd64Digest)
+	}
+	if img.RepoBase != "myimage-save" || img.Tag != "dev" {
+		t.Errorf("RepoBase/Tag = %s/%s, want myimage-save/dev", img.RepoBase, img.Tag)
+	}
+}
+
+func TestLoadOCIArchiveNoAnnotationsFallsBackToArchiveName(t *testing.T) {
+	dir := t.TempDir()
+	buildNestedLayout(t, dir, nil) // buildx --output type=oci: no naming annotation at all
+	archivePath := tarLayout(t, dir, "example.tar")
+
+	img, err := source.Load(source.Ref{Kind: source.KindOCIArchive, Value: archivePath},
+		v1.Platform{OS: "linux", Architecture: "amd64"})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if img.RepoBase != "example" || img.Tag != "latest" {
+		t.Errorf("RepoBase/Tag = %s/%s, want example/latest", img.RepoBase, img.Tag)
+	}
 }
 
 func TestLoadOCILayoutNestedIndexSelectsPlatformAndIgnoresAttestation(t *testing.T) {
