@@ -41,19 +41,23 @@ type Rootfs struct {
 	tmpDir string
 }
 
-// Build flattens base (with support's layers appended on top, if support
-// is non-nil) into a single tar stream, writes it to a temp file, and
-// indexes every path it contains. The caller must call Close when done.
-func Build(base v1.Image, support v1.Image) (*Rootfs, error) {
+// Build flattens base (with each overlay's layers appended on top, in
+// order, skipping any nil overlay) into a single tar stream, writes it to
+// a temp file, and indexes every path it contains. The caller must call
+// Close when done.
+func Build(base v1.Image, overlays ...v1.Image) (*Rootfs, error) {
 	img := base
-	if support != nil {
-		layers, err := support.Layers()
-		if err != nil {
-			return nil, fmt.Errorf("reading support image layers: %w", err)
+	for _, overlay := range overlays {
+		if overlay == nil {
+			continue
 		}
-		img, err = mutate.AppendLayers(base, layers...)
+		layers, err := overlay.Layers()
 		if err != nil {
-			return nil, fmt.Errorf("appending support layers: %w", err)
+			return nil, fmt.Errorf("reading overlay image layers: %w", err)
+		}
+		img, err = mutate.AppendLayers(img, layers...)
+		if err != nil {
+			return nil, fmt.Errorf("appending overlay layers: %w", err)
 		}
 	}
 
