@@ -41,18 +41,18 @@ func TestRenderBuildSupportAndVolumeHelper(t *testing.T) {
 			{Branch: "init-system", Variant: "openrc", Ref: "ghcr.io/example/support-openrc:v1", Digest: "sha256:ccc"},
 			{Branch: "extras", Variant: "none"}, // no-op: must not appear
 		},
-		VolumeHelper: &guestmeta.ImageRef{Ref: "ghcr.io/contemper-project/volume-helper:v1", Digest: "sha256:ddd"},
+		VolumeHelper: &guestmeta.ImageRef{Ref: "ghcr.io/contemper-project/volumes-support:v1", Digest: "sha256:ddd"},
 		VolumeHelperVariants: []guestmeta.VariantRef{
-			{Branch: "init-system", Variant: "systemd", Ref: "ghcr.io/contemper-project/volume-helper-systemd:v1", Digest: "sha256:eee"},
+			{Branch: "init-system", Variant: "systemd", Ref: "ghcr.io/contemper-project/volumes-support-init-system-systemd:v1", Digest: "sha256:eee"},
 		},
 	}))
 	for _, want := range []string{
 		"support.ref=ghcr.io/example/support:v1\n",
 		"support.digest=sha256:bbb\n",
 		"support.variant.init-system=ghcr.io/example/support-openrc:v1@sha256:ccc\n",
-		"volume-helper.ref=ghcr.io/contemper-project/volume-helper:v1\n",
+		"volume-helper.ref=ghcr.io/contemper-project/volumes-support:v1\n",
 		"volume-helper.digest=sha256:ddd\n",
-		"volume-helper.variant.init-system=ghcr.io/contemper-project/volume-helper-systemd:v1@sha256:eee\n",
+		"volume-helper.variant.init-system=ghcr.io/contemper-project/volumes-support-init-system-systemd:v1@sha256:eee\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q; got:\n%s", want, out)

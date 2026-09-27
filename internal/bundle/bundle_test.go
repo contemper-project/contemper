@@ -54,8 +54,8 @@ func TestWriteNestsSupportAndVolumeHelperVariants(t *testing.T) {
 			Variants: []bundle.SupportVariant{{Branch: "init-system", Variant: "openrc", Ref: "ghcr.io/example/support-openrc:v1", Digest: "sha256:ccc"}},
 		},
 		VolumeHelper: &bundle.SupportRef{
-			Ref: "ghcr.io/contemper-project/volume-helper:v1", Digest: "sha256:ddd",
-			Variants: []bundle.SupportVariant{{Branch: "init-system", Variant: "systemd", Ref: "ghcr.io/contemper-project/volume-helper-systemd:v1", Digest: "sha256:eee"}},
+			Ref: "ghcr.io/contemper-project/volumes-support:v1", Digest: "sha256:ddd",
+			Variants: []bundle.SupportVariant{{Branch: "init-system", Variant: "systemd", Ref: "ghcr.io/contemper-project/volumes-support-init-system-systemd:v1", Digest: "sha256:eee"}},
 		},
 		Target:       "qemu-qcow2",
 		Arch:         "arm64",
