@@ -277,12 +277,18 @@ func Deploy(opts Options) error {
 		return err
 	}
 
-	exited := make(chan error, 1)
-	go func() { exited <- cmd.Wait() }()
-	waitErr := waitForExpect(opts.SerialLogPath, opts.Expect, opts.Timeout, exited)
+	// exited is closed once QEMU has exited and been reaped; exitErr is
+	// its result, safe to read after that.
+	exited := make(chan struct{})
+	var exitErr error
+	go func() { exitErr = cmd.Wait(); close(exited) }()
+	waitErr := waitForExpect(opts.SerialLogPath, opts.Expect, opts.Timeout, exited, func() error { return exitErr })
 	if cmd.Process != nil {
 		_ = cmd.Process.Kill()
 	}
+	// Reap QEMU before returning: until it has exited it still holds its
+	// disk images' locks, and an immediate redeploy would fail.
+	<-exited
 	stopTail()
 	if errors.Is(waitErr, errExitedEarly) {
 		rep.Fail("deploy", waitErr.Error(), toolErr.String())
@@ -333,8 +339,9 @@ func tailToWriter(path string, w io.Writer) (stop func()) {
 var errExitedEarly = errors.New("qemu exited before the expected output appeared")
 
 // waitForExpect polls the serial log for expect until it appears, the
-// timeout passes, or QEMU exits (a value on exited).
-func waitForExpect(logPath, expect string, timeout time.Duration, exited <-chan error) error {
+// timeout passes, or QEMU exits (exited is closed; exitErr then returns
+// its result).
+func waitForExpect(logPath, expect string, timeout time.Duration, exited <-chan struct{}, exitErr func() error) error {
 	if timeout <= 0 {
 		timeout = 60 * time.Second
 	}
@@ -345,7 +352,8 @@ func waitForExpect(logPath, expect string, timeout time.Duration, exited <-chan 
 			return nil
 		}
 		select {
-		case err := <-exited:
+		case <-exited:
+			err := exitErr()
 			// One last look: the match may have been written just
 			// before QEMU exited.
 			data, _ = os.ReadFile(logPath)

@@ -8,8 +8,10 @@
 package localqemu
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -146,9 +148,12 @@ func qcow2VirtualSize(path string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	out, err := exec.Command(qemuImgPath, "info", "--output=json", path).Output()
+	cmd := exec.Command(qemuImgPath, "info", "--output=json", path)
+	var stderr bytes.Buffer
+	cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
+	out, err := cmd.Output()
 	if err != nil {
-		return 0, fmt.Errorf("qemu-img info %s: %w", path, err)
+		return 0, fmt.Errorf("qemu-img info %s: %w\n%s", path, err, strings.TrimSpace(stderr.String()))
 	}
 	var info struct {
 		VirtualSize int64 `json:"virtual-size"`

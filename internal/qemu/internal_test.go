@@ -136,10 +136,10 @@ func TestWaitForExpectStopsWhenQemuExits(t *testing.T) {
 	if err := os.WriteFile(log, []byte("booting\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	exited := make(chan error, 1)
-	exited <- errors.New("exit status 1")
+	exited := make(chan struct{})
+	close(exited)
 	start := time.Now()
-	err := waitForExpect(log, "never-printed", time.Minute, exited)
+	err := waitForExpect(log, "never-printed", time.Minute, exited, func() error { return errors.New("exit status 1") })
 	if !errors.Is(err, errExitedEarly) {
 		t.Fatalf("waitForExpect = %v, want errExitedEarly", err)
 	}
@@ -153,9 +153,9 @@ func TestWaitForExpectMatchBeatsExit(t *testing.T) {
 	if err := os.WriteFile(log, []byte("boot-ok\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	exited := make(chan error, 1)
-	exited <- nil
-	if err := waitForExpect(log, "boot-ok", time.Minute, exited); err != nil {
+	exited := make(chan struct{})
+	close(exited)
+	if err := waitForExpect(log, "boot-ok", time.Minute, exited, func() error { return nil }); err != nil {
 		t.Fatalf("waitForExpect = %v, want a match", err)
 	}
 }
