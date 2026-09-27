@@ -247,3 +247,20 @@ jobs:
           name: e2e-volumes-serial-logs-${{ matrix.example }}
           path: _out/volumes/serial-*.log
           if-no-files-found: ignore
+
+  ci-result:
+    # The one check to mark required in branch protection instead of any
+    # job above. A matrix job skipped by its own `if:` reports a single
+    # check named after the job with no matrix values (e.g. "e2e", not
+    # "e2e (alpine)") - a rule requiring "e2e (alpine)" or
+    # "build (linux, amd64)" by name would then wait forever on a
+    # docs-only PR, since that exact check never gets created. This job
+    # always runs and always has a stable name, and succeeds whenever
+    # every job it depends on is either "success" or "skipped".
+    needs: [changes, lint, test, build, e2e, e2e-variants, e2e-volumes]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check whether any required job failed or was cancelled
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1

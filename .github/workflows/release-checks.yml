@@ -123,3 +123,18 @@ jobs:
         run: goreleaser check
       - name: goreleaser snapshot build
         run: goreleaser release --snapshot --clean
+
+  release-checks-result:
+    # The one check to mark required in branch protection, mirroring
+    # ci.yml's ci-result: neither commit-checks nor goreleaser is a
+    # matrix job, so their own skip already reports under their own name,
+    # but this keeps one stable required check per workflow rather than
+    # two names to track, and matches the pattern if either job ever
+    # grows a matrix.
+    needs: [changes, commit-checks, goreleaser]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check whether any required job failed or was cancelled
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
