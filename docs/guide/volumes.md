@@ -170,13 +170,25 @@ hot-plugging — has had its boot-time ("coldplug") event replayed for udev to
 process, without the (deprecated) full `udevadm settle`. Device discovery
 itself needs no udev at all — `/sys/block/*/serial` is a sysfs attribute the
 kernel populates at probe time — but formatting a blank disk does rely on
-udev relabelling it afterwards, and that happens without any extra
-`udevadm trigger` call: the kernel raises its own "change" event when an
-exclusively-opened block device (how `mkfs.ext4` opens its target) is
-closed, the same mechanism `parted` and `fdisk` rely on, and the
-`LABEL=<name>` mount unit systemd generates from fstab is bound to the
-resulting udev-created device unit rather than attempted once and given up
-on, so it simply waits for the label to appear.
+udev to make the new label visible as `/dev/disk/by-label/<name>`. udev
+normally relabels a freshly formatted disk through the "watch" rule in
+`60-block.rules`, an inotify watch on the block device that fires a
+synthetic "change" event when a writer (`mkfs.ext4` included) closes it —
+the kernel itself raises no such event on close — and that watch is only
+armed once udev has already processed the device's own add/change event.
+`systemd-udev-trigger.service` having run only guarantees those events were
+queued, not that udev finished processing them before `format-volumes`
+runs, so the watch may not exist yet when `mkfs.ext4` closes the device and
+no relabel ever happens. `format-volumes` closes that gap itself: right
+after a successful `mkfs.ext4` it runs `udevadm trigger --action=change` on
+the device (and `udevadm settle` to wait for the label), rather than
+relying on the watch. `udevadm` is optional — an image without it (Alpine's
+mdev-based one) simply skips this, since OpenRC's `localmount` mounts by
+`LABEL` through `blkid` at mount time and never needs a udev-created
+symlink. The `LABEL=<name>` mount unit systemd generates from fstab is
+bound to the resulting udev-created device unit rather than attempted once
+and given up on, so it simply waits for the label to appear once
+`format-volumes` has triggered it.
 
 `convert` also writes `/etc/contemper/volumes`, one line per declared
 volume (`name serial-pattern fs mountpoint`), which the script reads with
