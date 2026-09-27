@@ -38,17 +38,63 @@ type Rootfs struct {
 	TarPath string
 	// Index maps an absolute, cleaned path ("/etc/os-release") to its entry.
 	Index map[string]*Entry
+	// OverlayStats reports, for each overlay Build was given (same
+	// index, same length, a zero value for a nil overlay), what that
+	// overlay contributed to the merged filesystem. See OverlayStats's
+	// doc comment for exactly what is and isn't counted.
+	OverlayStats []OverlayStats
 
 	tmpDir string
+}
+
+// OverlayStats reports what one overlay itself writes, independent of
+// whatever it's merged onto - the base image or any other overlay is
+// never read to compute it. It exists purely to drive convert's progress
+// output - how much a support image, its variants and the volume helper
+// each add - and is never recorded in the bundle.
+//
+// Files and Bytes describe the overlay's own flattened view: its layers,
+// with its own internal overwrites resolved (the same
+// whiteout/opaque-directory rules the real merge uses, applied only
+// within this overlay - a path two of the overlay's own layers both
+// write counts once, from the layer that wins). Files counts every
+// surviving tar entry (regular files, directories, symlinks, device
+// nodes, ...); a whiteout or opaque-directory marker is never itself a
+// surviving entry, so it is excluded from Files. Bytes is the
+// regular-file subset: the sum of Size for entries with
+// Typeflag == tar.TypeReg.
+//
+// Removed is a raw count of the whiteout (".wh.<name>") and opaque
+// directory (".wh..wh..opq") marker entries the overlay's own layers
+// carry, shown only when nonzero. It is not resolved against what
+// existed before this overlay: the overlay may be whiting out a path
+// from the base image, from an earlier overlay, or a path nothing ever
+// had - Removed does not distinguish these, it simply reports how many
+// deletions the overlay's own layers declare.
+//
+// In short, this line means "this image writes N files, X bytes" - not
+// "the merged filesystem grew by N files, X bytes", which would require
+// reading the (potentially much larger) base image and every earlier
+// overlay to answer.
+type OverlayStats struct {
+	Files   int
+	Bytes   int64
+	Removed int
 }
 
 // Build flattens base (with each overlay's layers appended on top, in
 // order, skipping any nil overlay) into a single tar stream, writes it to
 // a temp file, and indexes every path it contains. The caller must call
 // Close when done.
+//
+// Along the way it also computes each overlay's OverlayStats by
+// flattening that overlay alone - never base, never any other overlay -
+// so the cost is proportional to the overlay's own (typically small)
+// size, not the base image's.
 func Build(base v1.Image, overlays ...v1.Image) (*Rootfs, error) {
 	img := base
-	for _, overlay := range overlays {
+	stats := make([]OverlayStats, len(overlays))
+	for i, overlay := range overlays {
 		if overlay == nil {
 			continue
 		}
@@ -60,6 +106,12 @@ func Build(base v1.Image, overlays ...v1.Image) (*Rootfs, error) {
 		if err != nil {
 			return nil, fmt.Errorf("appending overlay layers: %w", err)
 		}
+
+		st, err := overlayStats(overlay)
+		if err != nil {
+			return nil, fmt.Errorf("computing overlay stats: %w", err)
+		}
+		stats[i] = st
 	}
 
 	tmpDir, err := os.MkdirTemp("", "contemper-rootfs-")
@@ -84,7 +136,93 @@ func Build(base v1.Image, overlays ...v1.Image) (*Rootfs, error) {
 		return nil, fmt.Errorf("flattening rootfs: %w", err)
 	}
 
-	return &Rootfs{TarPath: tarPath, Index: index, tmpDir: tmpDir}, nil
+	return &Rootfs{TarPath: tarPath, Index: index, OverlayStats: stats, tmpDir: tmpDir}, nil
+}
+
+// whiteoutPrefix marks a tar entry (mirroring
+// mutate.Extract's own unexported constant of the same name) as either a
+// per-file tombstone (".wh.<name>") or, when the rest of the basename is
+// itself "..wh..opq", an opaque-directory marker. overlayStats only needs
+// to recognize and count these, not interpret them the way Build's own
+// final flatten (via mutate.Extract) does.
+const whiteoutPrefix = ".wh."
+
+// overlayStats computes overlay's OverlayStats: Files/Bytes from its own
+// flattened view (mutate.Extract applied to overlay alone, so only its
+// own layers are read - never base, never any other overlay), and
+// Removed from a raw scan of its own layers' tar entries for whiteout
+// and opaque-directory markers. See OverlayStats's doc comment for
+// exactly what each field means.
+func overlayStats(overlay v1.Image) (OverlayStats, error) {
+	var st OverlayStats
+
+	layers, err := overlay.Layers()
+	if err != nil {
+		return st, fmt.Errorf("reading overlay image layers: %w", err)
+	}
+	for _, l := range layers {
+		n, err := countWhiteouts(l)
+		if err != nil {
+			return st, fmt.Errorf("scanning overlay layer for whiteouts: %w", err)
+		}
+		st.Removed += n
+	}
+
+	rc := mutate.Extract(overlay)
+	defer rc.Close()
+	tr := tar.NewReader(rc)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return st, err
+		}
+		if _, err := io.Copy(io.Discard, tr); err != nil {
+			return st, fmt.Errorf("reading content of %s: %w", hdr.Name, err)
+		}
+		if normalizePath(hdr.Name) == "/" {
+			continue
+		}
+		st.Files++
+		if hdr.Typeflag == tar.TypeReg {
+			st.Bytes += hdr.Size
+		}
+	}
+	return st, nil
+}
+
+// countWhiteouts returns the number of whiteout/opaque-directory marker
+// entries in l's own tar stream - a plain scan, with no whiteout
+// resolution or cross-layer bookkeeping (that's what mutate.Extract does
+// for the entries that survive; this just counts the markers themselves,
+// which Extract never emits).
+func countWhiteouts(l v1.Layer) (int, error) {
+	r, err := l.Uncompressed()
+	if err != nil {
+		return 0, fmt.Errorf("reading layer contents: %w", err)
+	}
+	defer r.Close()
+
+	tr := tar.NewReader(r)
+	n := 0
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return 0, err
+		}
+		if _, err := io.Copy(io.Discard, tr); err != nil {
+			return 0, fmt.Errorf("reading content of %s: %w", hdr.Name, err)
+		}
+		if strings.HasPrefix(path.Base(path.Clean(hdr.Name)), whiteoutPrefix) {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // countingWriter tracks the number of bytes written through it.

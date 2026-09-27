@@ -142,6 +142,114 @@ func TestResolveMergedUsr(t *testing.T) {
 	}
 }
 
+// TestOverlayStatsOwnLayersLastWriteWins checks that OverlayStats is
+// computed from the overlay's own flattened view: when the overlay's own
+// two layers both write etc/a.conf, only the winning (upper) layer's
+// version is counted, not both - and the base image's own content (here,
+// etc/keep.conf) plays no part in the numbers at all, since it belongs
+// to a different image entirely.
+func TestOverlayStatsOwnLayersLastWriteWins(t *testing.T) {
+	baseImg, err := imgtest.Image(linuxAMD64, nil, []imgtest.File{
+		{Path: "etc/keep.conf", Data: []byte("0123456789")}, // 10 bytes, irrelevant to the overlay's own stats
+	})
+	if err != nil {
+		t.Fatalf("building base image: %v", err)
+	}
+	overlay, err := imgtest.Image(linuxAMD64, nil,
+		[]imgtest.File{
+			{Path: "etc/a.conf", Data: []byte("hello")},  // 5 bytes, overwritten below
+			{Path: "etc/b.conf", Data: []byte("world!")}, // 6 bytes, survives untouched
+		},
+		[]imgtest.File{
+			{Path: "etc/a.conf", Data: []byte("HI")}, // 2 bytes, this overlay's own upper layer wins
+		},
+	)
+	if err != nil {
+		t.Fatalf("building overlay: %v", err)
+	}
+
+	rfs, err := rootfs.Build(baseImg, overlay)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer rfs.Close()
+
+	if len(rfs.OverlayStats) != 1 {
+		t.Fatalf("OverlayStats has %d entries, want 1", len(rfs.OverlayStats))
+	}
+	// etc/a.conf (2 bytes, upper layer's version) + etc/b.conf (6 bytes) = 8.
+	if got := rfs.OverlayStats[0]; got.Files != 2 || got.Bytes != 8 || got.Removed != 0 {
+		t.Errorf("overlay stats = %+v, want {Files:2 Bytes:8 Removed:0}", got)
+	}
+
+	got, err := rfs.ReadFile("/etc/a.conf")
+	if err != nil || string(got) != "HI" {
+		t.Errorf("etc/a.conf = %q, %v, want %q", got, err, "HI")
+	}
+}
+
+// TestOverlayStatsWhiteoutsCounted checks that a whiteout or opaque
+// directory marker in the overlay's own layers is excluded from Files
+// (it's never a surviving entry) and counted in Removed instead - a raw
+// count of markers, independent of whether the paths they name ever
+// existed in the base image or an earlier overlay.
+func TestOverlayStatsWhiteoutsCounted(t *testing.T) {
+	baseImg, err := imgtest.Image(linuxAMD64, nil, []imgtest.File{
+		{Path: "etc/keep.conf", Data: []byte("x")},
+	})
+	if err != nil {
+		t.Fatalf("building base image: %v", err)
+	}
+	overlay, err := imgtest.Image(linuxAMD64, nil, []imgtest.File{
+		{Path: "etc/new.conf", Data: []byte("hi!!")}, // 4 bytes
+		imgtest.WhiteoutFile("etc/keep.conf"),
+		{Path: "var/lib/.wh..wh..opq", Data: nil},
+	})
+	if err != nil {
+		t.Fatalf("building overlay: %v", err)
+	}
+
+	rfs, err := rootfs.Build(baseImg, overlay)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer rfs.Close()
+
+	if len(rfs.OverlayStats) != 1 {
+		t.Fatalf("OverlayStats has %d entries, want 1", len(rfs.OverlayStats))
+	}
+	if got := rfs.OverlayStats[0]; got.Files != 1 || got.Bytes != 4 || got.Removed != 2 {
+		t.Errorf("overlay stats = %+v, want {Files:1 Bytes:4 Removed:2}", got)
+	}
+}
+
+func TestOverlayStatsEmptyAndNil(t *testing.T) {
+	baseImg, err := imgtest.Image(linuxAMD64, nil, []imgtest.File{
+		{Path: "etc/keep.conf", Data: []byte("x")},
+	})
+	if err != nil {
+		t.Fatalf("building base image: %v", err)
+	}
+
+	rfs, err := rootfs.Build(baseImg)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer rfs.Close()
+	if len(rfs.OverlayStats) != 0 {
+		t.Errorf("OverlayStats = %+v, want empty (no overlays given)", rfs.OverlayStats)
+	}
+
+	rfsNil, err := rootfs.Build(baseImg, nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer rfsNil.Close()
+	if len(rfsNil.OverlayStats) != 1 || rfsNil.OverlayStats[0] != (rootfs.OverlayStats{}) {
+		t.Errorf("OverlayStats = %+v, want one zero-value entry for the nil overlay", rfsNil.OverlayStats)
+	}
+}
+
 func TestHardlinksAndDeviceNodes(t *testing.T) {
 	layer := []imgtest.File{
 		{Path: "bin/", Typeflag: tar.TypeDir},
