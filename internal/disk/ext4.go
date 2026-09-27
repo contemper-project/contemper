@@ -121,10 +121,8 @@ func PopulateExt4(rfs *rootfs.Rootfs, imgPath string, opts Ext4Options) ([]strin
 	debugfsArgs := []string{"-w", "-f", scriptPath, imgPath}
 	opts.Progress.VerboseCmd(debugfsPath, debugfsArgs)
 	out, runErr := runCmd(payloadDir, debugfsPath, debugfsArgs...)
-	for _, marker := range debugfsErrorMarkers {
-		if strings.Contains(out, marker) {
-			return nil, fmt.Errorf("debugfs reported an error while populating %s (matched %q):\n%s", imgPath, marker, out)
-		}
+	if marker := findErrorMarker(script, out); marker != "" {
+		return nil, fmt.Errorf("debugfs reported an error while populating %s (matched %q):\n%s", imgPath, marker, out)
 	}
 	if runErr != nil {
 		return nil, fmt.Errorf("debugfs: %w\n%s", runErr, out)
@@ -416,6 +414,29 @@ func writePayload(rfs *rootfs.Rootfs, e *rootfs.Entry, payloadDir string, n int)
 		return "", fmt.Errorf("writing payload for %s: %w", e.Path, err)
 	}
 	return name, nil
+}
+
+// findErrorMarker returns the first debugfsErrorMarkers entry found in
+// debugfs's output, or "" if there is none. debugfs echoes every script
+// line it runs as "debugfs: <line>", and those lines carry image paths,
+// so they are skipped: otherwise a file named, say, "already exists"
+// would read as a failure.
+func findErrorMarker(script, out string) string {
+	echoed := map[string]bool{}
+	for _, line := range strings.Split(script, "\n") {
+		echoed["debugfs: "+line] = true
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if echoed[strings.TrimRight(line, "\r")] {
+			continue
+		}
+		for _, marker := range debugfsErrorMarkers {
+			if strings.Contains(line, marker) {
+				return marker
+			}
+		}
+	}
+	return ""
 }
 
 // checkScriptLines fails if any line of script is longer than

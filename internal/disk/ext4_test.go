@@ -284,3 +284,27 @@ func TestPopulateExt4LongPathWithinLimit(t *testing.T) {
 		t.Fatalf("e2fsck -fn reported problems: %v\n%s", err, out)
 	}
 }
+
+// TestPopulateExt4MarkerTextInPath checks that a file whose name happens
+// to contain one of the debugfs error markers still converts.
+func TestPopulateExt4MarkerTextInPath(t *testing.T) {
+	requireExt4Tools(t)
+
+	img, err := imgtest.Image(v1.Platform{OS: "linux", Architecture: "amd64"}, nil,
+		[]imgtest.File{{Path: "srv/already exists", Data: []byte("x")}, {Path: "srv/Usage: notes", Data: []byte("y")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rfs, err := rootfs.Build(img)
+	if err != nil {
+		t.Fatalf("rootfs.Build: %v", err)
+	}
+	defer func() { _ = rfs.Close() }()
+
+	if _, err := disk.PopulateExt4(rfs, t.TempDir()+"/root.img", disk.Ext4Options{
+		Label:     "contemper-root",
+		SizeBytes: 64 * 1024 * 1024,
+	}); err != nil {
+		t.Fatalf("PopulateExt4: %v", err)
+	}
+}
