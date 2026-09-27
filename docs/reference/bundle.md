@@ -27,6 +27,7 @@ tool.
 | `createdAt` | build time, UTC |
 | `source.ref`, `source.digest` | the source reference as given, and the digest of the image used |
 | `support.ref`, `support.digest` | the support image, if one was merged |
+| `support.variants` | each branch's resolved variant: `branch`, `variant`, and (unless it was a no-op) `ref`/`digest` for the image that won |
 | `target` | the canonical target name, for example `qemu-qcow2`, never the alias |
 | `arch` | the image architecture (`arm64`, `amd64`) |
 | `disk.file`, `disk.format`, `disk.sizeBytes`, `disk.sha256` | the disk file and its checksum |
@@ -34,8 +35,8 @@ tool.
 | `hints.exposedPorts`, `hints.healthcheck` | from `EXPOSE` and `HEALTHCHECK`; inputs for deployment, not used for the disk |
 | `reproducible` | `false` when the source was a local archive or layout |
 
-`support`, `volumes` and the entries under `hints` are left out when
-empty; `hints` itself is always present.
+`support`, `support.variants`, `volumes` and the entries under `hints`
+are left out when empty; `hints` itself is always present.
 
 ## Example
 

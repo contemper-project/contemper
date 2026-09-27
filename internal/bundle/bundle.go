@@ -47,19 +47,29 @@ type Hints struct {
 	Healthcheck  *Healthcheck `json:"healthcheck,omitempty"`
 }
 
+// SupportVariant records one branch's resolved variant: which variant won,
+// and (unless it was a no-op) the image its layers came from.
+type SupportVariant struct {
+	Branch  string `json:"branch"`
+	Variant string `json:"variant"`
+	Ref     string `json:"ref,omitempty"`
+	Digest  string `json:"digest,omitempty"`
+}
+
 // Manifest is the top-level contemper.json document.
 type Manifest struct {
-	FormatVersion    int       `json:"formatVersion"`
-	ContemperVersion string    `json:"contemperVersion"`
-	CreatedAt        time.Time `json:"createdAt"`
-	Source           ImageRef  `json:"source"`
-	Support          *ImageRef `json:"support,omitempty"`
-	Target           string    `json:"target"`
-	Arch             string    `json:"arch"`
-	Disk             DiskInfo  `json:"disk"`
-	Volumes          []string  `json:"volumes,omitempty"`
-	Hints            Hints     `json:"hints"`
-	Reproducible     bool      `json:"reproducible"`
+	FormatVersion    int              `json:"formatVersion"`
+	ContemperVersion string           `json:"contemperVersion"`
+	CreatedAt        time.Time        `json:"createdAt"`
+	Source           ImageRef         `json:"source"`
+	Support          *ImageRef        `json:"support,omitempty"`
+	SupportVariants  []SupportVariant `json:"support.variants,omitempty"`
+	Target           string           `json:"target"`
+	Arch             string           `json:"arch"`
+	Disk             DiskInfo         `json:"disk"`
+	Volumes          []string         `json:"volumes,omitempty"`
+	Hints            Hints            `json:"hints"`
+	Reproducible     bool             `json:"reproducible"`
 }
 
 // Read parses <dir>/contemper.json.
