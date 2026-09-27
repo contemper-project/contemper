@@ -42,6 +42,13 @@ fails the conversion, naming the offending key.
 A variant needs a `.requires.files` predicate unless it is the branch's
 declared default.
 
+When the support image comes from a registry, each `.image` must be a
+registry reference too: a local `oci-archive:`, `oci:` or
+`docker-archive:` reference fails the conversion, so an image's
+annotations can never point contemper at files on the build host. A
+support image loaded from a local archive or layout may name local
+variant images.
+
 ## Resolution
 
 1. Predicates are checked against the **source image's merged filesystem

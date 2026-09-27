@@ -162,7 +162,7 @@ func Merge(ref string, srcImg v1.Image, platform v1.Platform) (*Result, error) {
 		for _, r := range resolved {
 			sv := bundle.SupportVariant{Branch: r.Branch, Variant: r.Variant}
 			if r.Image != "" {
-				vref, err := source.ParseRef(r.Image)
+				vref, err := source.ParseVariantRef(parsedRef, r.Image)
 				if err != nil {
 					return nil, fmt.Errorf("branch %s: variant %s: %w", r.Branch, r.Variant, err)
 				}

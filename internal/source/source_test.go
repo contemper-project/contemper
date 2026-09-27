@@ -439,3 +439,21 @@ func TestRefStringCleansLocalPaths(t *testing.T) {
 		}
 	}
 }
+
+func TestParseVariantRef(t *testing.T) {
+	registry := source.Ref{Kind: source.KindRegistry, Value: "ghcr.io/example/support:v1"}
+	local := source.Ref{Kind: source.KindOCIArchive, Value: "support.tar"}
+
+	for _, raw := range []string{"oci-archive:/home/user/private.tar", "oci:/var/lib/layouts/x", "docker-archive:/tmp/x.tar"} {
+		if _, err := source.ParseVariantRef(registry, raw); err == nil {
+			t.Errorf("ParseVariantRef(registry parent, %q) succeeded, want an error", raw)
+		}
+		if ref, err := source.ParseVariantRef(local, raw); err != nil || ref.Kind == source.KindRegistry {
+			t.Errorf("ParseVariantRef(local parent, %q) = %+v, %v; want a local ref", raw, ref, err)
+		}
+	}
+	ref, err := source.ParseVariantRef(registry, "ghcr.io/example/support-openrc:v1")
+	if err != nil || ref.Kind != source.KindRegistry {
+		t.Errorf("ParseVariantRef(registry parent, registry ref) = %+v, %v", ref, err)
+	}
+}

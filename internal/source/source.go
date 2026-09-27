@@ -98,6 +98,23 @@ func ParseRef(raw string) (Ref, error) {
 	return Ref{Kind: KindRegistry, Value: raw}, nil
 }
 
+// ParseVariantRef parses raw, a variant image reference read from the
+// annotations of the image parent was loaded from. Annotations are
+// image content: a support image pulled from a registry must not be able
+// to point contemper at files on the build host, so when parent is a
+// registry reference, raw must be one too. A local parent (an archive or
+// layout the user supplied) may name local variants.
+func ParseVariantRef(parent Ref, raw string) (Ref, error) {
+	ref, err := ParseRef(raw)
+	if err != nil {
+		return Ref{}, err
+	}
+	if parent.Kind == KindRegistry && ref.Kind != KindRegistry {
+		return Ref{}, fmt.Errorf("variant image %q is a local %s reference, but the image declaring it came from a registry; only registry references are allowed there", raw, ref.Kind)
+	}
+	return ref, nil
+}
+
 // String returns the reference in the form ParseRef accepts, with local
 // paths cleaned (so "a/../b.tar" is recorded as "b.tar").
 func (r Ref) String() string {

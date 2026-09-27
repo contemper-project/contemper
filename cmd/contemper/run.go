@@ -189,7 +189,7 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 		rep.Sub("✔", "rootfs", fmt.Sprintf("%d %s · %s download", len(supportLayers), pluralize(len(supportLayers), "layer"), progress.HumanBytes(manifestDownloadSize(supportManifest))))
 
 		if len(schema.Branches) > 0 {
-			vr, err := resolveVariants(schema, img, platform, rep)
+			vr, err := resolveVariants(schema, supportRef, img, platform, rep)
 			if err != nil {
 				rep.Fail("support image", err.Error(), "")
 				return err
@@ -490,7 +490,7 @@ type variantResolution struct {
 // On error, everything opened so far (the layer cache directory, any
 // variant images already loaded) is cleaned up before returning; on
 // success that cleanup is the caller's responsibility.
-func resolveVariants(schema *support.Schema, img *source.Image, platform v1.Platform, rep *progress.Reporter) (*variantResolution, error) {
+func resolveVariants(schema *support.Schema, supportRef source.Ref, img *source.Image, platform v1.Platform, rep *progress.Reporter) (*variantResolution, error) {
 	cacheDir, err := os.MkdirTemp("", "contemper-layer-cache-")
 	if err != nil {
 		return nil, fmt.Errorf("creating layer cache dir: %w", err)
@@ -535,7 +535,7 @@ func resolveVariants(schema *support.Schema, img *source.Image, platform v1.Plat
 
 		sv := bundle.SupportVariant{Branch: r.Branch, Variant: r.Variant}
 		if r.Image != "" {
-			variantRef, err := source.ParseRef(r.Image)
+			variantRef, err := source.ParseVariantRef(supportRef, r.Image)
 			if err != nil {
 				return nil, fmt.Errorf("branch %s: variant %s: %w", r.Branch, r.Variant, err)
 			}
