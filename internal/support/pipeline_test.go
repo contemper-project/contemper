@@ -127,7 +127,7 @@ func resolveAndMerge(t *testing.T, srcImg v1.Image, supportRef string, platform 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer srcRfs.Close()
+	defer func() { _ = srcRfs.Close() }()
 
 	resolved, err := support.Resolve(schema, func(p string) bool {
 		_, err := srcRfs.Resolve(p)
@@ -201,7 +201,7 @@ func TestPipelineIgnoresVariantImageOwnAnnotations(t *testing.T) {
 	supportRef := pushImage(t, host, "support:v1", supportImg)
 
 	rfs, resolved := resolveAndMerge(t, src, supportRef, linuxAMD64)
-	defer rfs.Close()
+	defer func() { _ = rfs.Close() }()
 
 	if len(resolved) != 1 || resolved[0].Variant != "openrc" {
 		t.Fatalf("unexpected resolution: %+v", resolved)
@@ -255,7 +255,7 @@ func TestPipelineNeverFetchesLosingVariant(t *testing.T) {
 	tracker.reset()
 
 	rfs, resolved := resolveAndMerge(t, src, supportRef, linuxAMD64)
-	defer rfs.Close()
+	defer func() { _ = rfs.Close() }()
 
 	if len(resolved) != 1 || resolved[0].Variant != "openrc" {
 		t.Fatalf("unexpected resolution: %+v", resolved)
@@ -325,7 +325,7 @@ func TestPipelineMergeOrder(t *testing.T) {
 	supportRef := pushImage(t, host, "support:v1", supportImg)
 
 	rfs, resolved := resolveAndMerge(t, src, supportRef, linuxAMD64)
-	defer rfs.Close()
+	defer func() { _ = rfs.Close() }()
 
 	if len(resolved) != 2 {
 		t.Fatalf("expected 2 branches resolved, got %+v", resolved)

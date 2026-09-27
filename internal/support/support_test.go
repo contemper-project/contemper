@@ -24,7 +24,7 @@ func TestCheckRequiresSatisfied(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rfs.Close()
+	defer func() { _ = rfs.Close() }()
 
 	schema, err := support.Parse(map[string]string{
 		support.RequiresFilesAnnotation: "/usr/bin/cloud-init",
@@ -48,7 +48,7 @@ func TestCheckRequiresMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rfs.Close()
+	defer func() { _ = rfs.Close() }()
 
 	schema, err := support.Parse(map[string]string{
 		support.RequiresFilesAnnotation: "/usr/bin/cloud-init, /etc/hostname",
@@ -82,7 +82,7 @@ func TestMergeAppliesSupportOverlay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	defer rfs.Close()
+	defer func() { _ = rfs.Close() }()
 
 	if _, ok := rfs.Lookup("/etc/hostname"); !ok {
 		t.Errorf("base file should survive the overlay")
