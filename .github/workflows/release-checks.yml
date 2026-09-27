@@ -4,7 +4,8 @@ name: Release checks
 # - the GoReleaser config is validated and dry-run built (no publishing).
 # - every commit on the PR (not just its title) is checked against
 #   Conventional Commits, since PRs are rebase-merged and release-please
-#   parses each commit individually.
+#   parses each commit individually, and against the DCO (see
+#   CONTRIBUTING.md).
 on:
   pull_request:
 
@@ -16,7 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  conventional-commits:
+  commit-checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -39,6 +40,37 @@ jobs:
               status=1
             fi
           done < <(git rev-list "origin/${BASE_REF}..HEAD")
+          exit "$status"
+      - name: Check commits are signed off (DCO)
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+          status=0
+          while IFS= read -r sha; do
+            name="$(git log -1 --format=%an "$sha")"
+            email="$(git log -1 --format=%ae "$sha")"
+            subject="$(git log -1 --format=%s "$sha")"
+
+            # Bot-authored commits (dependabot, release-please via
+            # GITHUB_TOKEN) can't sign off on their own account; skip them.
+            if [[ "$email" == *"[bot]@users.noreply.github.com" ]]; then
+              echo "skip (bot author): $sha $email"
+              continue
+            fi
+
+            trailers="$(git log -1 --format=%B "$sha" | git interpret-trailers --parse)"
+            expected="Signed-off-by: ${name} <${email}>"
+            if grep -qF "$expected" <<<"$trailers"; then
+              echo "ok:                $sha $expected"
+            else
+              echo "::error::commit $sha ($subject) has no '$expected' trailer"
+              status=1
+            fi
+          done < <(git rev-list "origin/${BASE_REF}..HEAD")
+          if [ "$status" -ne 0 ]; then
+            echo "::error::fix with: git rebase --signoff origin/${BASE_REF}, then force-push"
+          fi
           exit "$status"
 
   goreleaser:
