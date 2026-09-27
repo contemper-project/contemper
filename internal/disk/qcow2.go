@@ -18,7 +18,7 @@ func ConvertToQcow2(rawPath, qcow2Path string, rep *progress.Reporter) error {
 	}
 	args := []string{"convert", "-O", "qcow2", rawPath, qcow2Path}
 	rep.VerboseCmd(qemuImg, args)
-	out, err := runCmd(qemuImg, args...)
+	out, err := runCmd("", qemuImg, args...)
 	if err != nil {
 		return fmt.Errorf("qemu-img convert: %w\n%s", err, out)
 	}

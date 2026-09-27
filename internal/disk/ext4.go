@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -36,6 +37,14 @@ var debugfsErrorMarkers = []string{
 	"Filename too long",
 	"ea_set:",
 }
+
+// maxScriptLine is the longest debugfs script line, in bytes and
+// excluding the newline, that PopulateExt4 will emit. debugfs reads its
+// -f script with fgets into a BUFSIZ buffer, so a longer line is split
+// and the remainder is parsed as a separate command. BUFSIZ is 8192 with
+// glibc but 1024 with musl and on macOS, so the limit is set for the
+// smallest: 1024 minus the newline and the terminating NUL.
+const maxScriptLine = 1022
 
 // Ext4Options configures PopulateExt4.
 type Ext4Options struct {
@@ -65,6 +74,13 @@ func PopulateExt4(rfs *rootfs.Rootfs, imgPath string, opts Ext4Options) ([]strin
 		return nil, err
 	}
 
+	// debugfs runs with payloadDir as its working directory (see
+	// below), so the image path must not depend on the caller's.
+	imgPath, err = filepath.Abs(imgPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolving image path: %w", err)
+	}
+
 	f, err := os.Create(imgPath)
 	if err != nil {
 		return nil, fmt.Errorf("creating %s: %w", imgPath, err)
@@ -79,7 +95,7 @@ func PopulateExt4(rfs *rootfs.Rootfs, imgPath string, opts Ext4Options) ([]strin
 
 	mkfsArgs := []string{"-F", "-L", opts.Label, "-E", "root_owner=0:0", imgPath}
 	opts.Progress.VerboseCmd(mkfsPath, mkfsArgs)
-	if out, err := runCmd(mkfsPath, mkfsArgs...); err != nil {
+	if out, err := runCmd("", mkfsPath, mkfsArgs...); err != nil {
 		return nil, fmt.Errorf("mkfs.ext4: %w\n%s", err, out)
 	}
 
@@ -93,6 +109,9 @@ func PopulateExt4(rfs *rootfs.Rootfs, imgPath string, opts Ext4Options) ([]strin
 	if err != nil {
 		return nil, err
 	}
+	if err := checkScriptLines(script); err != nil {
+		return nil, err
+	}
 
 	scriptPath := path.Join(payloadDir, "script.debugfs")
 	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
@@ -101,7 +120,7 @@ func PopulateExt4(rfs *rootfs.Rootfs, imgPath string, opts Ext4Options) ([]strin
 
 	debugfsArgs := []string{"-w", "-f", scriptPath, imgPath}
 	opts.Progress.VerboseCmd(debugfsPath, debugfsArgs)
-	out, runErr := runCmd(debugfsPath, debugfsArgs...)
+	out, runErr := runCmd(payloadDir, debugfsPath, debugfsArgs...)
 	for _, marker := range debugfsErrorMarkers {
 		if strings.Contains(out, marker) {
 			return nil, fmt.Errorf("debugfs reported an error while populating %s (matched %q):\n%s", imgPath, marker, out)
@@ -113,7 +132,7 @@ func PopulateExt4(rfs *rootfs.Rootfs, imgPath string, opts Ext4Options) ([]strin
 
 	fsckArgs := []string{"-fn", imgPath}
 	opts.Progress.VerboseCmd(e2fsckPath, fsckArgs)
-	fsckOut, fsckErr := runCmd(e2fsckPath, fsckArgs...)
+	fsckOut, fsckErr := runCmd("", e2fsckPath, fsckArgs...)
 	if fsckErr != nil {
 		return nil, fmt.Errorf("e2fsck -fn found problems in %s:\n%s", imgPath, fsckOut)
 	}
@@ -121,9 +140,11 @@ func PopulateExt4(rfs *rootfs.Rootfs, imgPath string, opts Ext4Options) ([]strin
 	return warnings, nil
 }
 
-// runCmd runs an argv-array subprocess and returns its combined output.
-func runCmd(name string, args ...string) (string, error) {
+// runCmd runs an argv-array subprocess, in dir if it is not empty, and
+// returns its combined output.
+func runCmd(dir, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(context.Background(), name, args...) //nolint:gosec // G204: name is always one of our own fixed host-tool names, never a shell
+	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
@@ -350,12 +371,12 @@ func writeXattrs(b *strings.Builder, payloadDir string, xattrN *int, quotedPath 
 	sort.Strings(names)
 
 	for _, name := range names {
-		hostPath := path.Join(payloadDir, fmt.Sprintf("x%06d", *xattrN))
+		hostName := fmt.Sprintf("x%06d", *xattrN)
 		*xattrN++
-		if err := os.WriteFile(hostPath, []byte(attrs[name]), 0o600); err != nil {
+		if err := os.WriteFile(path.Join(payloadDir, hostName), []byte(attrs[name]), 0o600); err != nil {
 			return fmt.Errorf("xattr %s: writing value payload: %w", name, err)
 		}
-		qh, err := quoteArg(hostPath)
+		qh, err := quoteArg(hostName)
 		if err != nil {
 			return err
 		}
@@ -369,7 +390,8 @@ func writeXattrs(b *strings.Builder, payloadDir string, xattrN *int, quotedPath 
 }
 
 // writePayload copies a regular file's content to payloadDir under an
-// index-numbered name, never its real name, and returns that host path.
+// index-numbered name, never its real name, and returns that name
+// (relative to payloadDir, which is debugfs's working directory).
 func writePayload(rfs *rootfs.Rootfs, e *rootfs.Entry, payloadDir string, n int) (string, error) {
 	rc, err := rfs.Open(e)
 	if err != nil {
@@ -377,8 +399,8 @@ func writePayload(rfs *rootfs.Rootfs, e *rootfs.Entry, payloadDir string, n int)
 	}
 	defer func() { _ = rc.Close() }()
 
-	hostPath := path.Join(payloadDir, fmt.Sprintf("f%06d", n))
-	out, err := os.Create(hostPath)
+	name := fmt.Sprintf("f%06d", n)
+	out, err := os.Create(path.Join(payloadDir, name))
 	if err != nil {
 		return "", err
 	}
@@ -393,7 +415,21 @@ func writePayload(rfs *rootfs.Rootfs, e *rootfs.Entry, payloadDir string, n int)
 	if err := out.Close(); err != nil {
 		return "", fmt.Errorf("writing payload for %s: %w", e.Path, err)
 	}
-	return hostPath, nil
+	return name, nil
+}
+
+// checkScriptLines fails if any line of script is longer than
+// maxScriptLine. Paths, symlink targets and xattr names come from the
+// image, so without this bound a long enough one would be split by
+// debugfs into lines it parses as commands of their own.
+func checkScriptLines(script string) error {
+	for i, line := range strings.Split(script, "\n") {
+		if len(line) > maxScriptLine {
+			return fmt.Errorf("debugfs script line %d is %d bytes, longer than the %d-byte limit; an image path, symlink target or xattr name is too long (line starts %.120q)",
+				i+1, len(line), maxScriptLine, line)
+		}
+	}
+	return nil
 }
 
 // quoteArg quotes s for a debugfs script. debugfs supports double-quoted

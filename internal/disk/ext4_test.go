@@ -216,3 +216,71 @@ func TestPopulateExt4Xattrs(t *testing.T) {
 		t.Errorf("security.capability value mismatch: got % x, want % x", got, capValue)
 	}
 }
+
+// longPath returns a relative tar path of n bytes made of short
+// directory components, ending in a file name.
+func longPath(n int) string {
+	var b strings.Builder
+	for b.Len() < n-len("file") {
+		b.WriteString("d/")
+	}
+	return b.String()[:n-len("/file")] + "/file"
+}
+
+// TestPopulateExt4RejectsOverlongScriptLines checks that a path too long
+// for one debugfs script line fails the conversion before debugfs runs,
+// rather than being split into separate lines that debugfs would parse
+// as commands of their own.
+func TestPopulateExt4RejectsOverlongScriptLines(t *testing.T) {
+	requireExt4Tools(t)
+
+	img, err := imgtest.Image(v1.Platform{OS: "linux", Architecture: "amd64"}, nil,
+		[]imgtest.File{{Path: longPath(3000), Data: []byte("x")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rfs, err := rootfs.Build(img)
+	if err != nil {
+		t.Fatalf("rootfs.Build: %v", err)
+	}
+	defer func() { _ = rfs.Close() }()
+
+	_, err = disk.PopulateExt4(rfs, t.TempDir()+"/root.img", disk.Ext4Options{
+		Label:     "contemper-root",
+		SizeBytes: 64 * 1024 * 1024,
+	})
+	if err == nil || !strings.Contains(err.Error(), "longer than the") {
+		t.Fatalf("PopulateExt4 error = %v, want an over-long script line error", err)
+	}
+	if strings.Contains(err.Error(), "debugfs reported") {
+		t.Fatalf("debugfs ran on an over-long script: %v", err)
+	}
+}
+
+// TestPopulateExt4LongPathWithinLimit checks that a long path still fits
+// once payloads are referenced relative to debugfs's working directory.
+func TestPopulateExt4LongPathWithinLimit(t *testing.T) {
+	_, e2fsckPath := requireExt4Tools(t)
+
+	img, err := imgtest.Image(v1.Platform{OS: "linux", Architecture: "amd64"}, nil,
+		[]imgtest.File{{Path: longPath(900), Data: []byte("x")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rfs, err := rootfs.Build(img)
+	if err != nil {
+		t.Fatalf("rootfs.Build: %v", err)
+	}
+	defer func() { _ = rfs.Close() }()
+
+	imgPath := t.TempDir() + "/root.img"
+	if _, err := disk.PopulateExt4(rfs, imgPath, disk.Ext4Options{
+		Label:     "contemper-root",
+		SizeBytes: 64 * 1024 * 1024,
+	}); err != nil {
+		t.Fatalf("PopulateExt4: %v", err)
+	}
+	if out, err := exec.CommandContext(context.Background(), e2fsckPath, "-fn", imgPath).CombinedOutput(); err != nil {
+		t.Fatalf("e2fsck -fn reported problems: %v\n%s", err, out)
+	}
+}
