@@ -3,7 +3,7 @@ BIN      ?= bin/contemper
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS  := -X main.version=$(VERSION)
 
-.PHONY: build test vet stubs example e2e clean
+.PHONY: build test vet stubs example e2e e2e-variants clean
 
 build:
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/contemper
@@ -23,6 +23,9 @@ example:
 
 e2e:
 	./hack/e2e.sh
+
+e2e-variants:
+	./hack/e2e-variants.sh
 
 clean:
 	rm -rf bin _out

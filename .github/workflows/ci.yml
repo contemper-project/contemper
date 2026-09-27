@@ -104,3 +104,39 @@ jobs:
           name: e2e-serial-log
           path: _out/serial.log
           if-no-files-found: ignore
+
+  e2e-variants:
+    # Support-image variant resolution end to end: a dummy support image
+    # with two branches pushed to a local registry (localhost:5555),
+    # convert --support, asserting the resolved variants in
+    # contemper.json, then the same boot as the `e2e` job but waiting for
+    # the winning variant's own marker; plus two non-booting failure
+    # cases (an ambiguous branch, and one with no match and no default).
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      # The runner has /dev/kvm, but not accessible to the runner user.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      # podman and e2fsprogs are preinstalled on ubuntu-latest.
+      - name: Install qemu and UEFI firmware
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils ovmf
+      - name: Boot test with a dummy variant support image
+        run: ./hack/e2e-variants.sh --timeout 300s
+      - name: Upload serial log
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-variants-serial-log
+          path: _out/variants/serial.log
+          if-no-files-found: ignore
