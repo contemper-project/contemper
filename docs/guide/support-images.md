@@ -35,14 +35,8 @@ something it cannot install itself.
 
 ## Variants
 
-!!! warning "Planned"
-    Variants are designed but not implemented yet. Today a support image
-    is merged as a plain root filesystem, plus the requirements check
-    above.
-
-A support image will be able to declare **variants** of itself, each
-selected by file-existence conditions, grouped into independent
-**branches**:
+A support image can declare **variants** of itself, each selected by
+file-existence conditions, grouped into independent **branches**:
 
 - `init-system` picks the agent's service definition, an OpenRC init
   script or a systemd unit, by which init binary is actually present.
@@ -64,5 +58,28 @@ examined for annotations; an image pulled in because it won a branch is
 merged as-is. That rules out cycles and unbounded resolution chains by
 construction.
 
-The full mechanics, and why they look the way they do, are in
-[Design: support image resolution](../design/support-images.md).
+A support image declares a branch with annotations on its own manifest,
+naming the branch and variant in the key:
+
+```text
+io.contemper.branch.init-system.openrc.requires.files=/sbin/openrc-init
+io.contemper.branch.init-system.openrc.image=ghcr.io/example/support-openrc:v5
+io.contemper.branch.init-system.systemd.requires.files=/usr/lib/systemd/systemd
+io.contemper.branch.init-system.systemd.image=ghcr.io/example/support-systemd:v5
+```
+
+Given an image with `/sbin/openrc-init` present, `convert` fetches and
+merges only `support-openrc`, reporting which variant it picked and why:
+
+```console
+🧩  support image · ghcr.io/example/support:v5
+    ✔ rootfs                                      3 layers
+    ✔ branch init-system → openrc                  matched /sbin/openrc-init
+      └ ghcr.io/example/support-openrc:v5 linux/arm64
+```
+
+The full annotation schema, the resolution algorithm, and a worked
+example with two branches are in [Support image
+annotations](../reference/support-image-annotations.md); why the
+mechanism looks the way it does is in [Design: support image
+resolution](../design/support-images.md).

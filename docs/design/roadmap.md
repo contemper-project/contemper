@@ -16,11 +16,11 @@ What exists, and the rough shape of what's left before a v1.
 - [x] `deploy --to local-qemu`, with boot tests in CI
 - [x] Preserve extended attributes and file capabilities in the root
       filesystem
+- [x] Support-image annotation schema (branch and variant declarations,
+      default variants) and variant resolution
 
 ## Next
 
-- [ ] Finalize the support-image annotation schema (branch and variant
-      declarations, default variants) and implement variants
 - [ ] Publish the Incus support image
 - [ ] Build, publish and deploy adapters, one backend each (buildx for
       build, incus for publish and deploy)
