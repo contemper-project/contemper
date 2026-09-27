@@ -1,50 +1,13 @@
 #!/bin/sh
-# hack/e2e-volumes.sh's boot check: prints whether /data is mounted with
-# the label the volume helper should have given it, then prints
-# contemper-volume-fresh (and leaves a marker behind) on a volume's first
-# boot, or contemper-volume-persisted if that marker is already there.
+# hack/e2e-volumes.sh's OpenRC integration: the actual check is
+# check-volume.sh (shared with the systemd integration), copied
+# alongside this file into the image by hack/e2e-volumes/Containerfile;
+# this script is only the OpenRC-specific part - running it as a
+# local.d script.
 #
 # The "zzz-" filename prefix sorts after examples/alpine's own
 # contemper.start in OpenRC's local.d run order (the same trick
 # hack/e2e-variants/files/openrc-local.start uses), so
 # hack/e2e-volumes.sh can rely on contemper-boot-ok always having been
 # printed first.
-dev=$(awk '$2 == "/data" { print $1; exit }' /proc/mounts)
-if [ -n "$dev" ]; then
-	# e2label lives in e2fsprogs-extra, which this image doesn't install
-	# (only plain e2fsprogs, for fsck.ext4 - see examples/alpine's
-	# Containerfile), so read the label straight out of the ext2/3/4
-	# superblock instead, the same way
-	# support/volumes-support/base/usr/lib/contemper/format-volumes does:
-	# s_volume_name is 16 bytes, NUL-padded, at offset 1024+120.
-	hex=$(dd if="$dev" bs=1 skip=1144 count=16 2>/dev/null | od -An -tx1 | tr -d ' \t\n')
-	label=
-	rest=$hex
-	while [ -n "$rest" ]; do
-		byte=${rest%"${rest#??}"}
-		rest=${rest#??}
-		label="$label\\$(printf '%03o' "0x$byte")"
-	done
-	label=$(printf '%b' "$label")
-	echo "contemper-volume-mounted label=${label:-<none>} dev=$dev" >/dev/console
-else
-	echo "contemper-volume-not-mounted" >/dev/console
-	# Diagnostics for a failed run: is the helper installed and enabled,
-	# and did OpenRC start it?
-	{
-		ls -la /etc/runlevels/boot/ /etc/init.d/contemper-volumes /usr/lib/contemper/ 2>&1
-		rc-status boot 2>&1
-		cat /etc/contemper/volumes /etc/fstab 2>&1
-		ls -la /dev/vd* /sys/block/*/serial 2>&1
-		for s in /sys/block/*/serial; do echo "$s: $(cat "$s")"; done
-	} | sed 's/^/diag: /' >/dev/console
-fi
-
-marker=/data/marker
-if [ -e "$marker" ]; then
-	echo contemper-volume-persisted >/dev/console
-else
-	echo contemper-volume-fresh >/dev/console
-	: >"$marker"
-	sync
-fi
+exec /usr/local/lib/contemper/e2e-check-volume

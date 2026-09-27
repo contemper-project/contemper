@@ -1,9 +1,19 @@
-# Derived from the Alpine example (built by hack/e2e.sh's own build
-# step; this Containerfile is never built standalone) purely to declare
-# one volume and add a boot-time check for it, so examples/alpine itself
-# stays volume-free and the plain e2e test never needs the volume
-# helper. See hack/e2e-volumes.sh.
-FROM contemper-example:dev
+# Derived from either contemper-ready example (hack/e2e-volumes.sh picks
+# which with --example alpine|debian, passing it in as BASE_IMAGE; this
+# Containerfile is never built standalone) purely to declare one volume
+# and add a boot-time check for it, so the examples themselves stay
+# volume-free and the plain e2e tests never need the volume helper. See
+# hack/e2e-volumes.sh.
+#
+# The boot check itself (files/check-volume.sh) is shared between init
+# systems; only its two thin integrations differ -
+# files/zzz-contemper-volume-test.start for OpenRC,
+# files/contemper-volume-test.service for systemd. Both are copied into
+# every derived image regardless of which example it's built from:
+# whichever one the base image's init system can't run is simply never
+# read.
+ARG BASE_IMAGE=contemper-example:dev
+FROM ${BASE_IMAGE}
 
 LABEL io.contemper.volume./data.size="64MiB"
 VOLUME /data
@@ -14,5 +24,17 @@ VOLUME /data
 ARG REVISION=1
 RUN echo "revision=${REVISION}" >/etc/contemper-e2e-volumes-revision
 
+COPY files/check-volume.sh /usr/local/lib/contemper/e2e-check-volume
+RUN chmod +x /usr/local/lib/contemper/e2e-check-volume
+
+# OpenRC integration: inert if this base has no OpenRC.
 COPY files/zzz-contemper-volume-test.start /etc/local.d/zzz-contemper-volume-test.start
 RUN chmod +x /etc/local.d/zzz-contemper-volume-test.start
+
+# systemd integration: inert if this base has no systemd. Enabled with a
+# pre-created .wants symlink, same as support/volumes-support/systemd and
+# examples/debian's own boot marker - fine to create at build time since
+# this runs inside the image build, never at boot.
+COPY files/contemper-volume-test.service /etc/systemd/system/contemper-volume-test.service
+RUN mkdir -p /etc/systemd/system/multi-user.target.wants && \
+    ln -sf ../contemper-volume-test.service /etc/systemd/system/multi-user.target.wants/contemper-volume-test.service

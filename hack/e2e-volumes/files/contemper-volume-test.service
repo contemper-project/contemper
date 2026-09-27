@@ -1,0 +1,22 @@
+[Unit]
+Description=contemper e2e: check the /data volume
+# The systemd counterpart of zzz-contemper-volume-test.start. It runs
+# once boot has finished, like examples/debian's boot marker: ordered
+# after multi-user.target explicitly, which also keeps the target from
+# ordering itself after this unit (a unit it wants) - without that, the
+# two orderings form a cycle and systemd drops this job. local-fs.target
+# only becomes active once every fstab mount, /data's LABEL=data one
+# included, has been attempted (nofail doesn't change the ordering), so
+# the check sees the volume's final state.
+After=multi-user.target local-fs.target contemper-boot-ok.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/contemper/e2e-check-volume
+# The test watches the serial console, not the journal.
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target
