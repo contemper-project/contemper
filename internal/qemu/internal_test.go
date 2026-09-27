@@ -159,3 +159,34 @@ func TestWaitForExpectMatchBeatsExit(t *testing.T) {
 		t.Fatalf("waitForExpect = %v, want a match", err)
 	}
 }
+
+func TestBuildArgsEscapesCommas(t *testing.T) {
+	pflash := writeFakeFile(t, "edk2-fake.fd")
+	info := archInfo{machine: "virt", pflashCandidates: []firmware{{code: pflash}}}
+	args, err := buildArgs(info, Options{
+		DiskPath:      "/tmp/app,snapshot=off-latest.aarch64/disk.qcow2",
+		DiskFormat:    "qcow2",
+		SerialLogPath: "/tmp/serial.log",
+		Volumes:       []VolumeAttachment{{Name: "data", Path: "/state/a,b/data.qcow2"}},
+	})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
+	joined := strings.Join(args, " ")
+	for _, want := range []string{
+		"file=/tmp/app,,snapshot=off-latest.aarch64/disk.qcow2,if=virtio,format=qcow2,snapshot=on",
+		"file=/state/a,,b/data.qcow2,if=none,id=vol0,format=qcow2",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("args %q missing %q", joined, want)
+		}
+	}
+}
+
+func TestBuildArgsRejectsUnknownDiskFormat(t *testing.T) {
+	pflash := writeFakeFile(t, "edk2-fake.fd")
+	info := archInfo{machine: "virt", pflashCandidates: []firmware{{code: pflash}}}
+	if _, err := buildArgs(info, Options{DiskPath: "/tmp/d", DiskFormat: "qcow2,file=/etc/x", SerialLogPath: "/tmp/s"}); err == nil {
+		t.Fatal("buildArgs accepted an unknown disk format")
+	}
+}

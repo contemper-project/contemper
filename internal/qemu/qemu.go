@@ -171,13 +171,13 @@ func buildArgs(info archInfo, opts Options) (args []string, err error) {
 	args = append(args, "-m", "1G", "-smp", "2")
 
 	if fw, ok := firstExistingFirmware(info.pflashCandidates); ok {
-		args = append(args, "-drive", fmt.Sprintf("if=pflash,format=raw,unit=0,readonly=on,file=%s", fw.code))
+		args = append(args, "-drive", fmt.Sprintf("if=pflash,format=raw,unit=0,readonly=on,file=%s", optValue(fw.code)))
 		if fw.vars != "" && opts.WorkDir != "" && firstExisting([]string{fw.vars}) != "" {
 			vars := filepath.Join(opts.WorkDir, "efivars.fd")
 			if err := copyFile(fw.vars, vars); err != nil {
 				return nil, fmt.Errorf("copying UEFI variable store: %w", err)
 			}
-			args = append(args, "-drive", fmt.Sprintf("if=pflash,format=raw,unit=1,file=%s", vars))
+			args = append(args, "-drive", fmt.Sprintf("if=pflash,format=raw,unit=1,file=%s", optValue(vars)))
 		}
 	} else if bios := firstExisting(info.biosCandidates); bios != "" {
 		args = append(args, "-bios", bios)
@@ -189,20 +189,31 @@ func buildArgs(info archInfo, opts Options) (args []string, err error) {
 	if format == "" {
 		format = "qcow2"
 	}
-	args = append(args, "-drive", fmt.Sprintf("file=%s,if=virtio,format=%s,snapshot=on", opts.DiskPath, format))
+	if format != "qcow2" && format != "raw" {
+		return nil, fmt.Errorf("unsupported disk format %q (want qcow2 or raw)", format)
+	}
+	args = append(args, "-drive", fmt.Sprintf("file=%s,if=virtio,format=%s,snapshot=on", optValue(opts.DiskPath), format))
 	// serial= is a property of the virtio-blk device, not of -drive
 	// (current QEMU rejects it there), so each volume is a backend-only
 	// drive plus an explicit device carrying the serial.
 	for i, v := range opts.Volumes {
 		id := fmt.Sprintf("vol%d", i)
 		args = append(args,
-			"-drive", fmt.Sprintf("file=%s,if=none,id=%s,format=qcow2", v.Path, id),
-			"-device", fmt.Sprintf("virtio-blk-pci,drive=%s,serial=%s", id, v.Name))
+			"-drive", fmt.Sprintf("file=%s,if=none,id=%s,format=qcow2", optValue(v.Path), id),
+			"-device", fmt.Sprintf("virtio-blk-pci,drive=%s,serial=%s", id, optValue(v.Name)))
 	}
 	args = append(args, "-netdev", "user,id=net0", "-device", "virtio-net-pci,netdev=net0")
 	args = append(args, "-nographic", "-monitor", "none", "-serial", "file:"+opts.SerialLogPath)
 
 	return args, nil
+}
+
+// optValue escapes s for use as a value in a qemu option string such as
+// -drive's, where a comma separates options and a literal comma is
+// written as two. Without this, a comma in a path (a bundle directory
+// named after an image, say) would end the value and start a new option.
+func optValue(s string) string {
+	return strings.ReplaceAll(s, ",", ",,")
 }
 
 // copyFile copies the UEFI variable store template (src, one of a fixed
