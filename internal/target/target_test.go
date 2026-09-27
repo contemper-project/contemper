@@ -119,7 +119,7 @@ func syntheticRootfs(t *testing.T) (*rootfs.Rootfs, *validate.Result) {
 	if err != nil {
 		t.Fatalf("rootfs.Build: %v", err)
 	}
-	t.Cleanup(func() { rfs.Close() })
+	t.Cleanup(func() { _ = rfs.Close() })
 
 	val, err := validate.Validate(rfs)
 	if err != nil {

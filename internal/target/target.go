@@ -159,6 +159,7 @@ func SerialPattern(canonicalTarget, volumeName string) string {
 // use it; the targets differ only in their support image.
 type UEFIQcow2 struct{}
 
+// Assemble implements the Assembler interface documented on UEFIQcow2.
 func (UEFIQcow2) Assemble(rfs *rootfs.Rootfs, val *validate.Result, arch string, outDir string, opts Options) (*DiskInfo, []string, error) {
 	var warnings []string
 
@@ -188,7 +189,7 @@ func (UEFIQcow2) Assemble(rfs *rootfs.Rootfs, val *validate.Result, arch string,
 		stage.Fail("assemble", err.Error(), "")
 		return nil, nil, fmt.Errorf("creating work dir: %w", err)
 	}
-	defer os.RemoveAll(workDir)
+	defer func() { _ = os.RemoveAll(workDir) }()
 
 	contentBytes := int64(0)
 	if fi, err := os.Stat(rfs.TarPath); err == nil {
@@ -267,7 +268,7 @@ func diskInfoFor(path, format string) (*DiskInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	h := sha256.New()
 	size, err := io.Copy(h, f)
@@ -288,12 +289,17 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	out, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
-	_, err = io.Copy(out, in)
-	return err
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	// Checked, not deferred-and-ignored: dst is a bundle artifact
+	// (disk.raw), so a write error surfaced only at Close (e.g. a
+	// delayed flush failure) must not be silently swallowed.
+	return out.Close()
 }
