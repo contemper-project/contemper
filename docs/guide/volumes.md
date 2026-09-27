@@ -115,10 +115,15 @@ before any support layers are merged, `systemd` wins if
 `/usr/lib/systemd/systemd` does, and neither existing fails the
 conversion — naming the branch and pointing at `--no-volume-helper` — so
 a build never silently produces unprepared volumes. This also means an
-image needs `mkfs.ext4`, `e2label` (both from e2fsprogs — the same
-package that provides the boot-time `fsck.ext4` most images already
-need) and `cmp`/`dd` (from busybox or coreutils) available for the helper
-to do its job; `convert` checks and fails naming whatever's missing.
+image needs `mkfs.ext4` (from e2fsprogs — the same package that provides
+the boot-time `fsck.ext4` most images already need) and `cmp`/`dd`/`od`
+(from busybox or coreutils) available for the helper to do its job;
+`convert` checks and fails naming whatever's missing. Unlike `fsck.ext4`,
+`e2label`/`tune2fs`/`dumpe2fs` live in a separate `e2fsprogs-extra`
+package on Alpine, so the helper deliberately doesn't use them: it reads
+the label it needs straight out of the ext2/3/4 superblock with `dd` and
+`od` instead (see the script itself,
+`support/volumes-support/base/usr/lib/contemper/format-volumes`, for how).
 `/sbin/openrc` matches equally whether your image keeps `/sbin` as a
 real directory or, as on a merged-`/usr` distro (Fedora, Arch, current
 Debian/Ubuntu), a symlink to `/usr/sbin`: predicate resolution follows a
