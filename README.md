@@ -2,7 +2,6 @@
 
 [![CI](https://github.com/contemper-project/contemper/actions/workflows/ci.yml/badge.svg)](https://github.com/contemper-project/contemper/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/contemper-project/contemper.svg)](https://pkg.go.dev/github.com/contemper-project/contemper)
-[![Go Report Card](https://goreportcard.com/badge/github.com/contemper-project/contemper)](https://goreportcard.com/report/github.com/contemper-project/contemper)
 [![Latest release](https://img.shields.io/github/v/release/contemper-project/contemper)](https://github.com/contemper-project/contemper/releases)
 [![License](https://img.shields.io/github/license/contemper-project/contemper)](LICENSE)
 [![Go version](https://img.shields.io/github/go-mod/go-version/contemper-project/contemper)](go.mod)
