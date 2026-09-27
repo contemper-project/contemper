@@ -138,9 +138,15 @@ func RenderVolumes(lines []VolumeLine) []byte {
 }
 
 // FstabLine renders the fstab line contemper appends for one volume.
+// The mount point is escaped the way fstab(5) requires, so a path with a
+// space or tab stays one field.
 func FstabLine(name, path string) string {
-	return fmt.Sprintf("LABEL=%s %s ext4 defaults,nofail 0 2", name, path)
+	return fmt.Sprintf("LABEL=%s %s ext4 defaults,nofail 0 2", name, fstabEscaper.Replace(path))
 }
+
+// fstabEscaper octal-escapes the characters fstab(5) treats as field
+// separators or escapes (space, tab, newline, backslash).
+var fstabEscaper = strings.NewReplacer(`\`, `\134`, " ", `\040`, "\t", `\011`, "\n", `\012`)
 
 // AppendFstab returns fstab's new full content with any line in lines
 // that isn't already present appended, preserving existing content

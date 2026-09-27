@@ -58,6 +58,9 @@ contemper appends one line per volume to `/etc/fstab`:
 LABEL=data /data ext4 defaults,nofail 0 2
 ```
 
+A space, tab or backslash in the mount point is written as an octal
+escape (`\040`, `\011`, `\134`), as fstab(5) requires.
+
 `nofail` means a missing or not-yet-formatted volume doesn't block boot;
 that only actually happens if you skip the volume helper (below) on an
 image with no other way to prepare the disk. Opt out of the fstab lines

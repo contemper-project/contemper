@@ -160,3 +160,14 @@ func TestAppendFstabAddsMissingTrailingNewline(t *testing.T) {
 		t.Errorf("updated = %q, want %q", updated, want)
 	}
 }
+
+func TestFstabLineEscapesMountPoint(t *testing.T) {
+	got := guestmeta.FstabLine("my-data", "/srv/my data\\x\tz")
+	want := `LABEL=my-data /srv/my\040data\134x\011z ext4 defaults,nofail 0 2`
+	if got != want {
+		t.Errorf("FstabLine = %q, want %q", got, want)
+	}
+	if n := len(strings.Fields(got)); n != 6 {
+		t.Errorf("FstabLine has %d fields, want 6: %q", n, got)
+	}
+}
