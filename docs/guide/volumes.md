@@ -132,12 +132,13 @@ symlink anywhere in the path, not only at the very end.
 **What lands in the guest.** The base image contributes the script
 itself, at `/usr/lib/contemper/format-volumes`. The winning variant adds
 just its integration: OpenRC gets `/etc/init.d/contemper-volumes`
-(`depend() { before localmount }`, enabled by convention in the `boot`
-runlevel); systemd gets `/etc/systemd/system/contemper-volumes.service`
+(`depend() { before fsck localmount }`) and its enablement symlink
+`/etc/runlevels/boot/contemper-volumes`; systemd gets `/etc/systemd/system/contemper-volumes.service`
 (`Before=local-fs-pre.target`) and its enablement symlink under
 `local-fs-pre.target.wants/` — pre-created in the image, since a support
 image only ever drops in files and never runs `systemctl enable` or
-anything else. Either way it runs before local filesystems mount, so the
+anything else. Either way it runs before local filesystems are checked
+and mounted, so the
 label is right by the time `/etc/fstab`'s `LABEL=` lines are resolved.
 `convert` also writes `/etc/contemper/volumes`, one line per declared
 volume (`name serial-pattern fs mountpoint`), which the script reads with

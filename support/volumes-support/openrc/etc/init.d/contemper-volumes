@@ -10,7 +10,7 @@
 description="contemper: prepare declared volumes"
 
 depend() {
-	before localmount
+	before fsck localmount
 	after modules
 	need dev
 }
