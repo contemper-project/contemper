@@ -16,6 +16,16 @@ go test ./...
 
 `make build`, `make vet` and `make test` do the same.
 
+Run the linter with [golangci-lint](https://golangci-lint.run/) (see
+`.golangci.yml` for the enabled linters and formatters) before opening a
+PR - CI runs the same check:
+
+```sh
+golangci-lint run ./...
+```
+
+`make lint` does the same.
+
 ### Boot tests
 
 `make e2e` and `make e2e-variants` build the Alpine example image,
@@ -63,7 +73,7 @@ versions or write changelog entries by hand.
 
 ## Pull requests
 
-PRs must pass CI (build, vet, tests, and the docs build) before merge.
+PRs must pass CI (build, lint, tests, and the docs build) before merge.
 
 ## License
 
