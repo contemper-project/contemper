@@ -179,7 +179,7 @@ func filesFromDir(dir string) ([]imgtest.File, error) {
 			return nil
 		}
 
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) //nolint:gosec // G122: walks a fixed local fixture dir this dev tool controls, not an adversarial or attacker-writable tree
 		if err != nil {
 			return fmt.Errorf("reading %s: %w", path, err)
 		}
