@@ -7,13 +7,55 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  changes:
+    # Decides which of the jobs below can possibly be affected by this
+    # change, so docs-only PRs don't pay for the whole Go pipeline. A job
+    # skipped by its `if:` still reports as "skipped", which satisfies a
+    # required status check; a workflow that never runs at all (e.g. via
+    # on.<event>.paths) does not, and blocks merges forever instead.
+    #
+    # Filter groups (add new directories to whichever applies):
+    #   go: anything that can affect building, testing, linting, or
+    #       booting the CLI - Go sources and modules, the Makefile, the
+    #       goreleaser config, the hack/ scripts and helper images the
+    #       e2e jobs build and run, the example images they boot, the
+    #       support images the volumes e2e job installs, the embedded
+    #       systemd-stub checksums, and this workflow file itself.
+    #
+    # Pushes to main and manual runs always report "go" as changed:
+    # running the full pipeline there is cheap enough (it already does,
+    # today) that a path-filtered skip isn't worth the extra logic.
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ github.event_name != 'pull_request' || steps.filter.outputs.go == 'true' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          filters: |
+            go:
+              - '**/*.go'
+              - go.mod
+              - go.sum
+              - Makefile
+              - '.goreleaser.y*ml'
+              - 'hack/**'
+              - 'examples/**'
+              - 'support/**'
+              - 'internal/uki/stubs/**'
+              - '.github/workflows/ci.yml'
+
   lint:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -41,6 +83,8 @@ jobs:
             hack/e2e-volumes/files/zzz-contemper-volume-test.start
 
   test:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -64,6 +108,8 @@ jobs:
         run: go test ./...
 
   build:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -85,6 +131,8 @@ jobs:
     # Boots each example end to end: podman build → convert --target
     # qemu → deploy --to local-qemu, waiting for the boot marker. One
     # matrix leg per init system: alpine/OpenRC, debian/systemd.
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -125,6 +173,8 @@ jobs:
     # contemper.json, then the same boot as the `e2e` job but waiting for
     # the winning variant's own marker; plus two non-booting failure
     # cases (an ambiguous branch, and one with no match and no default).
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -163,6 +213,8 @@ jobs:
     # per init system - alpine/OpenRC, debian/systemd - so the helper's
     # systemd integration gets the same boot coverage the OpenRC one
     # already has. See hack/e2e-volumes.sh.
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
