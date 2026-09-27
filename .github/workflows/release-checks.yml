@@ -11,12 +11,42 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  changes:
+    # Mirrors ci.yml's "go" filter group, so "go changed" means the same
+    # thing in both workflows: Go sources and modules, the Makefile, the
+    # goreleaser config, and this workflow file. (hack/**, examples/** and
+    # support/** are part of ci.yml's group too, but don't affect what
+    # GoReleaser packages; left in here anyway since the snapshot build
+    # is cheap and a second, narrower list would be one more place to
+    # keep in sync.)
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          filters: |
+            go:
+              - '**/*.go'
+              - go.mod
+              - go.sum
+              - Makefile
+              - '.goreleaser.y*ml'
+              - 'hack/**'
+              - 'examples/**'
+              - 'support/**'
+              - 'internal/uki/stubs/**'
+              - .github/workflows/release-checks.yml
+
   commit-checks:
     runs-on: ubuntu-latest
     steps:
@@ -76,6 +106,8 @@ jobs:
           exit "$status"
 
   goreleaser:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
