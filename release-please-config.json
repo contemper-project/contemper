@@ -9,6 +9,8 @@
     { "type": "perf", "section": "Performance Improvements" },
     { "type": "deps", "section": "Dependencies" },
     { "type": "docs", "section": "Documentation" },
+    { "type": "revert", "section": "Reverts" },
+    { "type": "refactor", "section": "Code Refactoring", "hidden": true },
     { "type": "chore", "section": "Miscellaneous Chores", "hidden": true },
     { "type": "ci", "section": "Continuous Integration", "hidden": true },
     { "type": "test", "section": "Tests", "hidden": true },
