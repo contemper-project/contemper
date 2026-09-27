@@ -1,15 +1,17 @@
 # Open questions
 
-**Deployment and volume metadata, the largest open item.** Volume support
-needs metadata to travel with the image, and something has to act on it.
-Leaving that to cloud providers can't bootstrap, since it asks a provider
-to support a format with no users; a `contemper deploy` with provider
-glue can, at the cost of scope. These aren't really alternatives: the
-metadata format has to be designed either way, and only its first
-consumer differs. The [bundle manifest](../reference/bundle.md) is that
-format's starting point, anchored on primitives that already exist
-(`VOLUME`, `EXPOSE`, `HEALTHCHECK`), with new declarations only for what
-those can't express, such as size, filesystem and persistence.
+**Deployment metadata, the largest open item.** How volumes are declared,
+formatted and mounted is settled (see
+[volumes and providers](volumes-and-providers.md#planned-design)). What
+remains is the deployment side: which metadata a provider acts on, and
+what does the acting. Leaving that to cloud providers can't bootstrap,
+since it asks a provider to support a format with no users; a
+`contemper deploy` with provider glue can, at the cost of scope. These
+aren't really alternatives: the metadata format has to be designed either
+way, and only its first consumer differs. The
+[bundle manifest](../reference/bundle.md) is that format's starting
+point, anchored on primitives that already exist (`VOLUME`, `EXPOSE`,
+`HEALTHCHECK`), with new declarations only for what those can't express.
 
 Whether OpenTofu is involved is undecided. Embedding it has a hard
 blocker (its core lives under `internal/`, so it can't be imported as a

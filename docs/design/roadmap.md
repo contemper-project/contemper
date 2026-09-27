@@ -25,6 +25,8 @@ What exists, and the rough shape of what's left before a v1.
 - [ ] Build, publish and deploy adapters, one backend each (buildx for
       build, incus for publish and deploy)
 - [ ] Project configuration file for phase defaults
-- [ ] Resolve the deployment and volume questions
+- [ ] Volumes: guest-side formatting on first boot, fstab entries,
+      volume and root disk sizes
+- [ ] Resolve the deployment metadata question
 - [ ] Tool vendoring strategy for release builds
 - [ ] Decide on blessed base images
