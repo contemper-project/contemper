@@ -126,6 +126,33 @@ func ResolveSupport(defaultRef, flagRef string) (ref string, origin SupportOrigi
 	return "", SupportNone
 }
 
+// serialPatterns maps a canonical target name to the function that turns
+// a volume's name into the serial-matching pattern
+// /etc/contemper/volumes records for it - the hook a future target (in
+// particular Incus, whose own device-identification scheme is not yet
+// decided) can override independently of qemu's. Every target currently
+// in table attaches volumes as virtio-blk with serial=<name>, so the
+// guest looks the disk up by that same name; a target not listed here
+// falls back to the same identity function in SerialPattern.
+var serialPatterns = map[string]func(volumeName string) string{
+	"qemu-qcow2":  identitySerialPattern,
+	"incus-qcow2": identitySerialPattern,
+}
+
+func identitySerialPattern(volumeName string) string { return volumeName }
+
+// SerialPattern returns the string /etc/contemper/volumes records as a
+// volume's serial-matching pattern for canonicalTarget, so a first-boot
+// helper can find the right disk under /sys/block/*/serial (qemu:
+// virtio-blk's serial=<name>, the same as the ext4 label and fstab
+// LABEL=).
+func SerialPattern(canonicalTarget, volumeName string) string {
+	if f, ok := serialPatterns[canonicalTarget]; ok {
+		return f(volumeName)
+	}
+	return identitySerialPattern(volumeName)
+}
+
 // UEFIQcow2 assembles a UEFI-bootable UKI on a GPT disk with a FAT32 ESP
 // and an ext4 root, converted to qcow2. qemu-qcow2 (the reference case,
 // no support image) and incus-qcow2 (Incus runs VMs on QEMU/OVMF) both

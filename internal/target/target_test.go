@@ -69,6 +69,14 @@ func TestResolveSupport(t *testing.T) {
 	}
 }
 
+func TestSerialPattern(t *testing.T) {
+	for _, canonical := range []string{"qemu-qcow2", "incus-qcow2", "some-future-target"} {
+		if got := target.SerialPattern(canonical, "data"); got != "data" {
+			t.Errorf("SerialPattern(%s, data) = %q, want %q", canonical, got, "data")
+		}
+	}
+}
+
 func TestKernelCmdline(t *testing.T) {
 	for author, want := range map[string]string{
 		"console=ttyAMA0 rw":          "root=LABEL=contemper-root console=ttyAMA0 rw",
