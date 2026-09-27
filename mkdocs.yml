@@ -74,6 +74,7 @@ nav:
       - CLI: reference/cli.md
       - Source references: reference/sources.md
       - Bundle manifest: reference/bundle.md
+      - Support image annotations: reference/support-image-annotations.md
       - Host tools: reference/host-tools.md
   - Design:
       - Framing: design/index.md
