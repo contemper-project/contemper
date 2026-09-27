@@ -128,8 +128,8 @@ func TestUEFIQcow2Assemble(t *testing.T) {
 	info, warnings, err := asm.Assemble(rfs, val, "arm64", outDir, target.Options{})
 
 	if target.QemuImgMissing() {
-		// qemu-img isn't available in this environment (see the MVP
-		// plan's M4 notes); the disk.raw step is exercised directly by
+		// qemu-img isn't available in this environment; the disk.raw
+		// step is exercised directly by
 		// internal/disk's own tests, so just confirm the assembler fails
 		// clearly rather than silently producing a bad bundle.
 		if err == nil {

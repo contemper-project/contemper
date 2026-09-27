@@ -8,8 +8,8 @@ import (
 )
 
 // ConvertToQcow2 runs `qemu-img convert -O qcow2 rawPath qcow2Path`.
-// Callers that want the M3 "skip qcow2 and assert on the raw image when
-// qemu-img is missing" behavior should check hostenv.Find("qemu-img")
+// Callers that want to skip qcow2 conversion and work with the raw image
+// when qemu-img is missing should check hostenv.Find("qemu-img")
 // themselves before calling this.
 func ConvertToQcow2(rawPath, qcow2Path string, rep *progress.Reporter) error {
 	qemuImg, err := hostenv.Required("qemu-img")
