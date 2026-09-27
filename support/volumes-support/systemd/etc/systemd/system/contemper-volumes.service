@@ -24,15 +24,23 @@
 # Finding a disk by serial (see format-volumes) reads /sys/block/*/serial
 # directly, a sysfs attribute the kernel populates at device-probe time,
 # so device discovery here needs no udev involvement at all. Formatting
-# a blank disk (mkfs.ext4 -F) does rely on udev, though not
-# synchronously: the kernel raises its own block-device "change" uevent
-# once an exclusively-opened device (which is how mkfs opens its target)
-# is closed - the same mechanism parted and fdisk rely on - and udev
-# (already running, per above) relabels it on its own from there. The
-# LABEL=<name> mount unit systemd generates from fstab is bound to a
-# udev-created device unit rather than attempted once and given up on,
-# so it simply waits for the label to appear; no explicit `udevadm
-# trigger` or `settle` call is needed here or in format-volumes itself.
+# a blank disk (mkfs.ext4 -F) does rely on udev to make the resulting
+# label visible as /dev/disk/by-label/<name>, and not just on udev being
+# active: udev's own relabelling of a freshly-written disk normally comes
+# from the "watch" rule in 60-block.rules, an inotify watch on the block
+# device that fires a synthetic "change" uevent when a writer (mkfs.ext4
+# included) closes it - the kernel itself raises no such event on close.
+# That watch is only armed once udev has processed the device's own
+# add/change event, and udev-trigger having run only guarantees those
+# events were queued, not that udev finished processing them before this
+# unit's ExecStart runs. So format-volumes cannot rely on the watch
+# existing yet; instead format-volumes itself explicitly runs `udevadm
+# trigger --action=change` (and `udevadm settle`) right after a
+# successful mkfs.ext4, rather than depending on this unit's ordering to
+# guarantee it indirectly. The LABEL=<name> mount unit systemd generates
+# from fstab is bound to the resulting udev-created device unit rather
+# than attempted once and given up on, so it simply waits for the label
+# to appear once format-volumes has triggered it.
 [Unit]
 Description=contemper: prepare declared volumes
 DefaultDependencies=no

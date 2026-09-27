@@ -136,6 +136,43 @@ ext4_label() {
 	printf '%b' "$label"
 }
 
+# reprobe_disk asks udev to re-probe device $1, just labelled $2 by
+# mkfs.ext4, so /dev/disk/by-label/$2 exists before this script returns
+# instead of depending on udev's own doing so on its own schedule. udev
+# normally relabels a freshly formatted disk through the "watch" rule in
+# 60-block.rules (OPTIONS+="watch"), which arms an inotify watch on the
+# block device and fires a synthetic "change" uevent when a writer -
+# mkfs.ext4 included - closes it; the kernel itself raises no such event
+# on close. That watch is only armed once udev has processed the
+# device's own add/change event, and systemd-udev-trigger.service (see
+# the comment on After= in the systemd unit) only guarantees those
+# events were queued before this script runs, not that udev finished
+# processing them. So a coldplug race is possible: mkfs.ext4 can close
+# the device before the watch exists, no change event ever fires, and
+# /dev/disk/by-label/$2 never appears - the failure this function exists
+# to close by re-probing explicitly instead of relying on that race.
+#
+# Without udevadm - Alpine ships mdev, not udev, so there's nothing to
+# trigger - this is a no-op: OpenRC's localmount mounts by LABEL through
+# blkid at mount time, never through a udev-created symlink, so no
+# by-label device is needed there in the first place (confirmed by the
+# Alpine e2e boot passing with no udevadm on PATH at all).
+#
+# Never fails the boot: any udevadm error is logged and ignored, and
+# this always returns 0.
+reprobe_disk() {
+	dev=$1
+	label=$2
+	command -v udevadm >/dev/null 2>&1 || return 0
+	if ! out=$(udevadm trigger --action=change "$dev" 2>&1); then
+		log "volume $label: udevadm trigger --action=change $dev failed: $out"
+	fi
+	if ! out=$(udevadm settle --timeout=10 --exit-if-exists="/dev/disk/by-label/$label" 2>&1); then
+		log "volume $label: udevadm settle for $label failed: $out"
+	fi
+	return 0
+}
+
 if [ ! -f "$VOLUMES_FILE" ]; then
 	exit 0
 fi
@@ -160,6 +197,11 @@ while IFS=' ' read -r vol_name vol_serial vol_fs vol_mount; do
 
 	existing_label=$(ext4_label "$dev")
 	if [ -n "$existing_label" ] && [ "$existing_label" = "$vol_name" ]; then
+		# No reprobe needed here: the label was already there when this
+		# script started, so udev's ordinary coldplug handling (see the
+		# systemd unit's After=systemd-udev-trigger.service comment)
+		# already covers it, the same as it does for every other disk
+		# this script never touches.
 		log "volume $vol_name: $dev is already ext4 labelled '$vol_name', reusing for $vol_mount"
 		continue
 	fi
@@ -172,6 +214,7 @@ while IFS=' ' read -r vol_name vol_serial vol_fs vol_mount; do
 	if is_blank "$dev" "$size"; then
 		if mkfs_out=$(mkfs.ext4 -F -L "$vol_name" "$dev" 2>&1); then
 			log "volume $vol_name: $dev was blank, formatted ext4 (label $vol_name) for $vol_mount"
+			reprobe_disk "$dev" "$vol_name"
 		else
 			log "volume $vol_name: $dev was blank but mkfs.ext4 failed for $vol_mount: $mkfs_out"
 		fi
