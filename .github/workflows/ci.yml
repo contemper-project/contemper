@@ -32,7 +32,12 @@ jobs:
         working-directory: internal/uki/stubs
         run: sha256sum -c SHA256SUMS
       - name: shellcheck
-        run: shellcheck -s sh support/volumes-support/base/usr/lib/contemper/format-volumes support/volumes-support/openrc/etc/init.d/contemper-volumes
+        run: |
+          shellcheck -s sh \
+            support/volumes-support/base/usr/lib/contemper/format-volumes \
+            support/volumes-support/openrc/etc/init.d/contemper-volumes \
+            hack/e2e-volumes/files/check-volume.sh \
+            hack/e2e-volumes/files/zzz-contemper-volume-test.start
 
   test:
     strategy:
@@ -76,10 +81,15 @@ jobs:
         run: go build -o /dev/null ./cmd/contemper
 
   e2e:
-    # Boots the Alpine example end to end: podman build → convert
-    # --target qemu → deploy --to local-qemu, waiting for the boot marker.
+    # Boots each example end to end: podman build → convert --target
+    # qemu → deploy --to local-qemu, waiting for the boot marker. One
+    # matrix leg per init system: alpine/OpenRC, debian/systemd.
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        example: [alpine, debian]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -98,12 +108,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils ovmf
       - name: Boot test
-        run: ./hack/e2e.sh --timeout 300s
+        run: ./hack/e2e.sh --example ${{ matrix.example }} --timeout 300s
       - name: Upload serial log
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: e2e-serial-log
+          name: e2e-serial-log-${{ matrix.example }}
           path: _out/serial.log
           if-no-files-found: ignore
 
@@ -144,14 +154,20 @@ jobs:
           if-no-files-found: ignore
 
   e2e-volumes:
-    # Volumes end to end: a derived image (FROM the Alpine example)
+    # Volumes end to end: a derived image (FROM one of the examples)
     # declaring one volume, converted with a locally-built
     # volumes-support helper (--volume-helper), deployed to check the
     # volume is formatted, labelled and mounted on first boot and its
-    # data survives both a redeploy and an image update. See
-    # hack/e2e-volumes.sh.
+    # data survives both a redeploy and an image update. One matrix leg
+    # per init system - alpine/OpenRC, debian/systemd - so the helper's
+    # systemd integration gets the same boot coverage the OpenRC one
+    # already has. See hack/e2e-volumes.sh.
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        example: [alpine, debian]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -170,11 +186,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils ovmf
       - name: Boot test with volumes
-        run: ./hack/e2e-volumes.sh --timeout 300s
+        run: ./hack/e2e-volumes.sh --example ${{ matrix.example }} --timeout 300s
       - name: Upload serial logs
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: e2e-volumes-serial-logs
+          name: e2e-volumes-serial-logs-${{ matrix.example }}
           path: _out/volumes/serial-*.log
           if-no-files-found: ignore
