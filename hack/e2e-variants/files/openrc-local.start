@@ -1,0 +1,5 @@
+#!/bin/sh
+# Contributed by the openrc variant of hack/e2e-variants.sh's dummy
+# support image. Runs as an OpenRC local.d script, same mechanism as
+# examples/alpine/Containerfile's own contemper-boot-ok marker.
+echo contemper-variant-openrc > /dev/console
