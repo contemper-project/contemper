@@ -42,8 +42,10 @@ func alignUp64(v, align uint64) uint64 {
 	return v + (align - v%align)
 }
 
-// RootPartitionSize implements the MVP's default sizing rule:
-// max(1 GiB, 1.5 x contentBytes + 256 MiB).
+// RootPartitionSize computes the default root partition size, leaving
+// headroom for the image to grow without the caller specifying a size
+// explicitly: max(1 GiB, 1.5 x contentBytes + 256 MiB). See
+// docs/guide/disk.md for the rationale.
 func RootPartitionSize(contentBytes int64) int64 {
 	const oneGiB = 1 << 30
 	const twoFiftySixMiB = 256 << 20

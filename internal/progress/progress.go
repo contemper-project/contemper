@@ -1,7 +1,7 @@
 // Package progress renders the convert/deploy pipelines' progress
-// output, in the icon-and-two-column style sketched in the design docs
-// (design/README.md's "Example", design/HANDOVER.md §5's worked
-// examples) - illustrative there, made concrete here.
+// output: one icon-and-two-column line per stage (name on the left,
+// status/timing on the right). See docs/guide/how-it-works.md for the
+// --progress flag and what each mode looks like.
 //
 // Two renderers share one API: a TTY renderer that updates the running
 // stage in place with a spinner and elapsed timer, and a plain renderer

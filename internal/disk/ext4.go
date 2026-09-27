@@ -22,8 +22,9 @@ import (
 
 // debugfs error markers: debugfs exits 0 even when an individual scripted
 // command fails, so a failure is detected by scanning its output for one
-// of these (found empirically: see hack notes in the MVP plan) - and,
-// authoritatively, by running e2fsck -fn on the result afterward.
+// of these (found empirically, by exercising debugfs against the error
+// cases below) - and, authoritatively, by running e2fsck -fn on the
+// result afterward.
 var debugfsErrorMarkers = []string{
 	"File not found",
 	"not found by ext2_lookup",

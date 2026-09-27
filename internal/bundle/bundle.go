@@ -1,6 +1,7 @@
 // Package bundle writes contemper.json, the manifest that accompanies a
-// bundle's disk file. Fields follow the design handover's "contemper
-// bundle" section (HANDOVER.md §5).
+// bundle's disk file: which image it came from, which target was
+// resolved, and what the image declared (volumes, ports, ...). See
+// docs/reference/bundle.md for the on-disk layout and field reference.
 package bundle
 
 import (

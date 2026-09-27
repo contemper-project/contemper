@@ -7,8 +7,9 @@
 # Requires: curl, dpkg-deb (or ar + tar), sha256sum.
 set -euo pipefail
 
-# Pinned package version (systemd >= 256, per the MVP contract). Bump this
-# deliberately - and re-run this script - to pick up a newer stub.
+# Pinned package version (needs systemd >= 256, for its UEFI stub).
+# Bump this deliberately - and re-run this script - to pick up a newer
+# stub.
 SYSTEMD_BOOT_EFI_VERSION="257.13-1~deb13u1"
 MIRROR="http://ftp.debian.org/debian/pool/main/s/systemd"
 
