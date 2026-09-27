@@ -6,7 +6,9 @@ your usual container tooling, convert it, and boot it under QEMU.
 
 ## Install
 
-contemper is a single Go binary. Build it from a checkout:
+contemper is a single Go binary. Download one for your platform from the
+[releases page](https://github.com/contemper-project/contemper/releases),
+or build it from a checkout:
 
 ```console
 $ go build -o contemper ./cmd/contemper
