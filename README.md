@@ -15,11 +15,15 @@ virtualization target needs, and writes out a bootable disk. Authoring a
 VM image becomes an ordinary container build.
 
 ```console
-$ podman build -t my-appliance:dev .
-$ podman save --format oci-archive -o my-appliance.tar my-appliance:dev
-$ contemper convert --target qemu oci-archive:my-appliance.tar
+$ <tool> build -t registry.example.com/my-appliance:dev .
+$ <tool> push registry.example.com/my-appliance:dev
+$ contemper convert --target qemu registry.example.com/my-appliance:dev
 $ contemper deploy --to local-qemu my-appliance-dev.aarch64/
 ```
+
+`<tool>` is `podman` or `docker`; the two commands above are identical
+either way. See [Getting started](docs/getting-started.md) for a
+walkthrough that also covers building without a registry.
 
 ## Why
 

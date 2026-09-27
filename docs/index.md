@@ -7,17 +7,21 @@ in what a given virtualization target needs, and writes out a bootable
 disk. Authoring a VM image becomes an ordinary container build.
 
 ```console
-$ podman build -t my-appliance:dev .
-$ podman save --format oci-archive -o my-appliance.tar my-appliance:dev
-$ contemper convert --target qemu oci-archive:my-appliance.tar
+$ <tool> build -t registry.example.com/my-appliance:dev .
+$ <tool> push registry.example.com/my-appliance:dev
+$ contemper convert --target qemu registry.example.com/my-appliance:dev
 $ contemper deploy --to local-qemu my-appliance-dev.aarch64/
 ```
 
+`<tool>` is `podman` or `docker`; the two commands above are identical
+either way.
+
 !!! info "Status"
-    contemper is early. `convert` and `deploy --to local-qemu` work end to
-    end: CI boots a converted image on every change. Features that are
-    designed but not built yet are marked **Planned** throughout these
-    docs. See the [roadmap](design/roadmap.md).
+    contemper is pre-1.0, and the CLI and bundle format may still change.
+    `convert` and `deploy --to local-qemu` work end to end: CI boots a
+    converted image on every change. Features that are designed but not
+    built yet are marked **Planned** throughout these docs. See the
+    [roadmap](design/roadmap.md).
 
 ## What contemper is
 
