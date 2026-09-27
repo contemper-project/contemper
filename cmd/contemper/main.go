@@ -7,10 +7,9 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-)
 
-// version is set at build time via -ldflags "-X main.version=...".
-var version = "dev"
+	"github.com/contemper-project/contemper/internal/buildinfo"
+)
 
 func main() {
 	if err := newRootCmd().Execute(); err != nil {
@@ -40,7 +39,7 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print the contemper version",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Fprintln(cmd.OutOrStdout(), version)
+			fmt.Fprintln(cmd.OutOrStdout(), buildinfo.Get().String())
 			return nil
 		},
 	}

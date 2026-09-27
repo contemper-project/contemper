@@ -12,6 +12,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/cache"
 	"github.com/spf13/cobra"
 
+	"github.com/contemper-project/contemper/internal/buildinfo"
 	"github.com/contemper-project/contemper/internal/bundle"
 	"github.com/contemper-project/contemper/internal/progress"
 	"github.com/contemper-project/contemper/internal/qemu"
@@ -236,7 +237,7 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 
 	manifest := &bundle.Manifest{
 		FormatVersion:    bundle.FormatVersion,
-		ContemperVersion: version,
+		ContemperVersion: buildinfo.Get().Version,
 		CreatedAt:        time.Now().UTC(),
 		Source: bundle.ImageRef{
 			Ref:    ref.String(),

@@ -1,7 +1,10 @@
-GO       ?= go
-BIN      ?= bin/contemper
-VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS  := -X main.version=$(VERSION)
+GO         ?= go
+BIN        ?= bin/contemper
+PKG        := github.com/contemper-project/contemper/internal/buildinfo
+VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT     ?= $(shell git rev-parse --short HEAD 2>/dev/null)
+DATE       ?= $(shell git log -1 --format=%cI 2>/dev/null)
+LDFLAGS    := -X $(PKG).version=$(VERSION) -X $(PKG).commit=$(COMMIT) -X $(PKG).date=$(DATE)
 
 .PHONY: build test vet stubs example e2e e2e-variants clean
 
