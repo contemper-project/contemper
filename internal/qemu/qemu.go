@@ -139,11 +139,15 @@ func BuildArgs(opts Options) (args []string, err error) {
 	return buildArgs(info, opts)
 }
 
-// accelInfo picks the acceleration backend: HVF on darwin, KVM if
-// /dev/kvm can be opened (existing isn't enough: CI runners often have the
-// device without granting access to it), TCG otherwise.
-func accelInfo() (accel, cpu string) {
+// accelInfo picks the acceleration backend for a guest of arch: TCG
+// whenever arch is not the host's own (neither HVF nor KVM can run a
+// foreign architecture), otherwise HVF on darwin, KVM if /dev/kvm can be
+// opened (existing isn't enough: CI runners often have the device
+// without granting access to it), TCG otherwise.
+func accelInfo(arch string) (accel, cpu string) {
 	switch {
+	case arch != runtime.GOARCH:
+		return "tcg", "max"
 	case runtime.GOOS == "darwin":
 		return "hvf", "host"
 	case kvmUsable():
@@ -165,7 +169,7 @@ func kvmUsable() bool {
 func buildArgs(info archInfo, opts Options) (args []string, err error) {
 	args = append(args, "-M", info.machine)
 
-	accel, cpu := accelInfo()
+	accel, cpu := accelInfo(opts.Arch)
 	args = append(args, "-accel", accel, "-cpu", cpu)
 
 	args = append(args, "-m", "1G", "-smp", "2")
@@ -270,7 +274,7 @@ func Deploy(opts Options) error {
 		return err
 	}
 
-	accel, _ := accelInfo()
+	accel, _ := accelInfo(opts.Arch)
 	rep.Line("🚀", "booting "+filepath.Base(opts.DiskPath), fmt.Sprintf("UEFI/%s · 1 GiB", strings.ToUpper(accel)))
 	rep.VerboseCmd(binPath, args)
 

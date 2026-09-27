@@ -12,7 +12,9 @@ $ contemper deploy --to local-qemu _out/my-appliance-dev.aarch64/
   overlay, so the bundle stays unchanged and can be booted again from
   scratch.
 - Acceleration is picked automatically: HVF on macOS, KVM on Linux when
-  `/dev/kvm` can be opened, software emulation otherwise.
+  `/dev/kvm` can be opened, software emulation otherwise. A bundle for
+  another architecture than the host's always runs under software
+  emulation.
 - UEFI firmware is found in Homebrew's qemu and in the usual distro
   packages (OVMF, AAVMF, `qemu-efi-aarch64`). Where a distro ships a
   variable-store template, the VM gets a writable copy of it.

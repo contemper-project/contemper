@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -188,5 +189,15 @@ func TestBuildArgsRejectsUnknownDiskFormat(t *testing.T) {
 	info := archInfo{machine: "virt", pflashCandidates: []firmware{{code: pflash}}}
 	if _, err := buildArgs(info, Options{DiskPath: "/tmp/d", DiskFormat: "qcow2,file=/etc/x", SerialLogPath: "/tmp/s"}); err == nil {
 		t.Fatal("buildArgs accepted an unknown disk format")
+	}
+}
+
+func TestAccelInfoForeignArchUsesTCG(t *testing.T) {
+	foreign := "arm64"
+	if runtime.GOARCH == "arm64" {
+		foreign = "amd64"
+	}
+	if accel, cpu := accelInfo(foreign); accel != "tcg" || cpu != "max" {
+		t.Errorf("accelInfo(%s) on %s = %s, %s; want tcg, max", foreign, runtime.GOARCH, accel, cpu)
 	}
 }
