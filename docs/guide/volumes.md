@@ -119,6 +119,10 @@ image needs `mkfs.ext4`, `e2label` (both from e2fsprogs — the same
 package that provides the boot-time `fsck.ext4` most images already
 need) and `cmp`/`dd` (from busybox or coreutils) available for the helper
 to do its job; `convert` checks and fails naming whatever's missing.
+`/sbin/openrc` matches equally whether your image keeps `/sbin` as a
+real directory or, as on a merged-`/usr` distro (Fedora, Arch, current
+Debian/Ubuntu), a symlink to `/usr/sbin`: predicate resolution follows a
+symlink anywhere in the path, not only at the very end.
 
 **What lands in the guest.** The base image contributes the script
 itself, at `/usr/lib/contemper/format-volumes`. The winning variant adds

@@ -46,7 +46,11 @@ declared default.
 
 1. Predicates are checked against the **source image's merged filesystem
    only**, before any support layers are merged. A support image can't
-   satisfy its own predicates, or a sibling variant's.
+   satisfy its own predicates, or a sibling variant's. A path is
+   resolved the way a real filesystem would: a symlink anywhere along
+   it, not only at the very end, is followed - `/sbin/openrc-init`
+   matches equally whether `/sbin` is a real directory or, as on a
+   merged-`/usr` distro, a symlink to `/usr/sbin`.
 2. Each branch resolves independently:
    - Exactly one variant matches → that variant wins.
    - No variant matches → the branch's declared default wins; if none is
