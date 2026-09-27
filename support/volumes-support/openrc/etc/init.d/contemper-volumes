@@ -1,0 +1,22 @@
+#!/sbin/openrc-run
+# contemper-volumes: prepares declared volumes (reuse an already-
+# formatted one, format a blank one, leave anything else alone) before
+# local filesystems are mounted. The actual logic is
+# /usr/lib/contemper/format-volumes, from the base volume-formatting
+# support image; this script is only the OpenRC integration that runs
+# it at the right point in boot.
+
+# shellcheck disable=SC2034 # read by the openrc-run framework, not this script
+description="contemper: prepare declared volumes"
+
+depend() {
+	before localmount
+	after modules
+	need dev
+}
+
+start() {
+	ebegin "Preparing contemper volumes"
+	/usr/lib/contemper/format-volumes
+	eend 0
+}

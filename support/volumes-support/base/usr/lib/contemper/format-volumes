@@ -1,0 +1,152 @@
+#!/bin/sh
+# contemper-format-volumes: first-boot (and every-boot) volume
+# preparation. Reads /etc/contemper/volumes, a data file with one line
+# per declared volume ("name serial-pattern fs mountpoint", mount point
+# last since it may contain spaces), and for each volume's disk - found
+# by matching /sys/block/*/serial against the serial pattern - applies
+# one rule:
+#
+#   - an ext4 filesystem already carrying the expected label is REUSED
+#     as-is (this is what lets a new image version run on the data a
+#     previous version left behind);
+#   - a disk whose first and last MiB are all zero is BLANK and gets
+#     formatted (mkfs.ext4, labelled with the volume's name);
+#   - anything else is LEFT ALONE and logged as a mismatch, so the
+#     failure mode is an unformatted, unmounted volume, never lost data.
+#
+# Mounting itself is left to the ordinary fstab-driven mount step (the
+# LABEL=<name> lines contemper appends to /etc/fstab): this script only
+# makes sure the filesystem those lines expect is present and correctly
+# labelled before that mount step runs.
+#
+# POSIX sh, and meant to be shellcheck-clean. /etc/contemper/volumes is
+# read line by line with `read`, never sourced. Never fails the boot:
+# every problem is logged (to the console, and to syslog if a logger is
+# available) and skipped, and the script always exits 0.
+#
+# Identical across every image; only the per-init-system integration
+# that calls it (an OpenRC init script, a systemd unit) differs, and that
+# lives in the helper's variant images, not here.
+set -u
+
+VOLUMES_FILE=/etc/contemper/volumes
+PROG=contemper-volumes
+
+log() {
+	msg="$PROG: $*"
+	echo "$msg" >/dev/console 2>/dev/null || true
+	if command -v logger >/dev/null 2>&1; then
+		logger -t "$PROG" "$*" 2>/dev/null || true
+	fi
+}
+
+# find_device prints the block device name (e.g. "vda") whose
+# /sys/block/*/serial equals $1, or nothing if none matches.
+find_device() {
+	pattern=$1
+	for serial_file in /sys/block/*/serial; do
+		[ -e "$serial_file" ] || continue
+		serial=$(cat "$serial_file" 2>/dev/null)
+		if [ "$serial" = "$pattern" ]; then
+			basename "$(dirname "$serial_file")"
+			return 0
+		fi
+	done
+	return 1
+}
+
+# device_size_bytes prints the size in bytes of the whole-disk block
+# device named $1 (e.g. "vda"), read from sysfs (always present for a
+# block device, so this needs no extra host tool beyond what's already
+# required).
+device_size_bytes() {
+	devname=$1
+	sectors=$(cat "/sys/block/$devname/size" 2>/dev/null) || return 1
+	[ -n "$sectors" ] || return 1
+	echo $((sectors * 512))
+}
+
+# is_blank tests whether device $1, of size $2 bytes, has its first and
+# last MiB all zero. Both chunks are extracted with dd into temporary
+# files and compared with cmp against a same-sized zero-filled
+# reference file (rather than /dev/zero directly, which never reaches
+# EOF and so would always compare as "different" against a finite file).
+is_blank() {
+	dev=$1
+	size=$2
+	mib=1048576
+
+	zero_ref=$(mktemp /tmp/contemper-volumes.XXXXXX) || return 1
+	chunk=$(mktemp /tmp/contemper-volumes.XXXXXX) || {
+		rm -f "$zero_ref"
+		return 1
+	}
+
+	result=1
+	if [ "$size" -lt "$mib" ]; then
+		dd if=/dev/zero of="$zero_ref" bs="$size" count=1 >/dev/null 2>&1
+		dd if="$dev" of="$chunk" bs="$size" count=1 >/dev/null 2>&1
+		if cmp -s "$chunk" "$zero_ref"; then
+			result=0
+		fi
+	else
+		dd if=/dev/zero of="$zero_ref" bs=1M count=1 >/dev/null 2>&1
+		dd if="$dev" of="$chunk" bs=1M count=1 >/dev/null 2>&1
+		if cmp -s "$chunk" "$zero_ref"; then
+			skip_mib=$(((size - mib) / mib))
+			dd if="$dev" of="$chunk" bs=1M skip="$skip_mib" count=1 >/dev/null 2>&1
+			if cmp -s "$chunk" "$zero_ref"; then
+				result=0
+			fi
+		fi
+	fi
+
+	rm -f "$zero_ref" "$chunk"
+	return $result
+}
+
+if [ ! -f "$VOLUMES_FILE" ]; then
+	exit 0
+fi
+
+while IFS=' ' read -r vol_name vol_serial vol_fs vol_mount; do
+	[ -n "$vol_name" ] || continue
+
+	if [ "$vol_fs" != "ext4" ]; then
+		log "volume $vol_name: unsupported filesystem '$vol_fs', leaving $vol_mount alone"
+		continue
+	fi
+
+	devname=$(find_device "$vol_serial") || {
+		log "volume $vol_name: no disk found with serial '$vol_serial' for $vol_mount, skipping"
+		continue
+	}
+	dev="/dev/$devname"
+	if [ ! -b "$dev" ]; then
+		log "volume $vol_name: $dev is not a block device, skipping $vol_mount"
+		continue
+	fi
+
+	existing_label=$(e2label "$dev" 2>/dev/null)
+	if [ -n "$existing_label" ] && [ "$existing_label" = "$vol_name" ]; then
+		log "volume $vol_name: $dev is already ext4 labelled '$vol_name', reusing for $vol_mount"
+		continue
+	fi
+
+	size=$(device_size_bytes "$devname") || {
+		log "volume $vol_name: could not read the size of $dev, leaving $vol_mount alone"
+		continue
+	}
+
+	if is_blank "$dev" "$size"; then
+		if mkfs_out=$(mkfs.ext4 -F -L "$vol_name" "$dev" 2>&1); then
+			log "volume $vol_name: $dev was blank, formatted ext4 (label $vol_name) for $vol_mount"
+		else
+			log "volume $vol_name: $dev was blank but mkfs.ext4 failed for $vol_mount: $mkfs_out"
+		fi
+	else
+		log "volume $vol_name: $dev is neither blank nor ext4 labelled '$vol_name' (found label '${existing_label:-<none>}'); leaving $vol_mount alone"
+	fi
+done <"$VOLUMES_FILE"
+
+exit 0

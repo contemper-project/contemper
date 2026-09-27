@@ -1,0 +1,14 @@
+[Unit]
+Description=contemper: prepare declared volumes
+DefaultDependencies=no
+Conflicts=shutdown.target
+After=systemd-udev-trigger.service
+Before=local-fs-pre.target shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/contemper/format-volumes
+
+[Install]
+WantedBy=local-fs-pre.target
