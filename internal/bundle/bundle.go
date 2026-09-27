@@ -15,10 +15,19 @@ import (
 // FormatVersion is the current contemper.json schema version.
 const FormatVersion = 1
 
-// ImageRef identifies a source or support image by reference and digest.
+// ImageRef identifies a source image by reference and digest.
 type ImageRef struct {
 	Ref    string `json:"ref"`
 	Digest string `json:"digest"`
+}
+
+// SupportRef identifies the support image that was merged in, and where
+// its reference came from: "target" when the target's own default
+// applied, or "flag" when --support replaced it.
+type SupportRef struct {
+	Ref    string `json:"ref"`
+	Digest string `json:"digest"`
+	Origin string `json:"origin"`
 }
 
 // DiskInfo describes the bundle's disk file.
@@ -62,7 +71,7 @@ type Manifest struct {
 	ContemperVersion string           `json:"contemperVersion"`
 	CreatedAt        time.Time        `json:"createdAt"`
 	Source           ImageRef         `json:"source"`
-	Support          *ImageRef        `json:"support,omitempty"`
+	Support          *SupportRef      `json:"support,omitempty"`
 	SupportVariants  []SupportVariant `json:"support.variants,omitempty"`
 	Target           string           `json:"target"`
 	Arch             string           `json:"arch"`

@@ -119,8 +119,10 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 	var resolvedVariants []bundle.SupportVariant
 	baseImg := img.Image
 
-	if opts.supportRef != "" {
-		supportRef, err := source.ParseRef(opts.supportRef)
+	resolvedSupportRef, supportOrigin := target.ResolveSupport(target.DefaultSupport(canonicalTarget), opts.supportRef)
+
+	if resolvedSupportRef != "" {
+		supportRef, err := source.ParseRef(resolvedSupportRef)
 		if err != nil {
 			return err
 		}
@@ -151,7 +153,11 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 		if err != nil {
 			return fmt.Errorf("reading support image layers: %w", err)
 		}
-		rep.Line("🧩", "support image · "+opts.supportRef, "")
+		originLabel := "target default"
+		if supportOrigin == target.SupportFromFlag {
+			originLabel = "--support"
+		}
+		rep.Line("🧩", "support image · "+resolvedSupportRef, "("+originLabel+")")
 		rep.Sub("✔", "rootfs", fmt.Sprintf("%d layers", len(supportLayers)))
 
 		if len(schema.Branches) > 0 {
@@ -249,7 +255,11 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 		Reproducible: img.Reproducible,
 	}
 	if supportImg != nil {
-		manifest.Support = &bundle.ImageRef{Ref: supportRefStr, Digest: supportImg.Digest.String()}
+		manifest.Support = &bundle.SupportRef{
+			Ref:    supportRefStr,
+			Digest: supportImg.Digest.String(),
+			Origin: string(supportOrigin),
+		}
 		manifest.SupportVariants = resolvedVariants
 	}
 

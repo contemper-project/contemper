@@ -38,7 +38,7 @@ func newConvertCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&target, "target", "", "conversion target (qemu, incus; or canonical qemu-qcow2, incus-qcow2)")
-	cmd.Flags().StringVar(&supportRef, "support", "", "optional support image reference (plain rootfs overlay)")
+	cmd.Flags().StringVar(&supportRef, "support", "", "support image reference; replaces the target's default")
 	cmd.Flags().StringVarP(&outDir, "out", "o", ".", "output directory for the bundle")
 	cmd.Flags().StringVar(&arch, "arch", "", "target architecture (amd64|arm64); defaults to host")
 	cmd.Flags().StringVar(&rootSizeStr, "root-size", "", "override the root partition size (e.g. 2GiB)")
