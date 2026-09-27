@@ -15,10 +15,13 @@ that's the entire mechanism. Everything below is additive. An image that
 needs no conditions and declares no requirements needs no annotations.
 
 **One entry point per target.** contemper's configuration maps a target
-to a single support image reference. That image declares its own
-variants in annotations on its own manifest, rather than contemper
-keeping a list of every candidate. Adding a variant means republishing
-one image, not cutting a contemper release.
+to a single support image reference, its default (see [Default support
+images](../guide/targets.md#default-support-images)). That image
+declares its own variants in annotations on its own manifest, rather
+than contemper keeping a list of every candidate. Adding a variant means
+republishing one image, not cutting a contemper release. `--support`
+replaces a target's default rather than stacking with it, so there is
+still exactly one entry point per build.
 
 **Annotations declare two separate things.** *Requirements* state what
 the authored image must provide, and can be unconditional: a target

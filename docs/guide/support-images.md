@@ -83,3 +83,22 @@ example with two branches are in [Support image
 annotations](../reference/support-image-annotations.md); why the
 mechanism looks the way it does is in [Design: support image
 resolution](../design/support-images.md).
+
+## Naming
+
+contemper's own support images (the ones a target uses by default; see
+[Targets](targets.md#default-support-images)) follow one convention:
+
+- The entry point for `<name>`'s target lives at
+  `ghcr.io/contemper-project/<name>-support`, for example
+  `ghcr.io/contemper-project/incus-support`.
+- A branch's variant image lives at
+  `ghcr.io/contemper-project/<name>-support-<branch>-<variant>`, for
+  example `ghcr.io/contemper-project/incus-support-init-system-openrc`
+  for the `init-system` branch's `openrc` variant.
+
+This is a naming convention for contemper's own images, not a
+requirement the resolution mechanism enforces: a support image's
+`io.contemper.branch.*.image` annotations can point anywhere. Following
+it just keeps a target's own images discoverable and consistently
+named.

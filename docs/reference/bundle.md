@@ -27,6 +27,7 @@ tool.
 | `createdAt` | build time, UTC |
 | `source.ref`, `source.digest` | the source reference as given, and the digest of the image used |
 | `support.ref`, `support.digest` | the support image, if one was merged |
+| `support.origin` | where `support.ref` came from: `"target"` (the resolved target's own default) or `"flag"` (`--support` on the command line) |
 | `support.variants` | each branch's resolved variant: `branch`, `variant`, and (unless it was a no-op) `ref`/`digest` for the image that won |
 | `target` | the canonical target name, for example `qemu-qcow2`, never the alias |
 | `arch` | the image architecture (`arm64`, `amd64`) |
@@ -61,6 +62,20 @@ are left out when empty; `hints` itself is always present.
   "reproducible": false
 }
 ```
+
+A bundle built with a support image records where its reference came
+from:
+
+```json
+  "support": {
+    "ref": "ghcr.io/contemper-project/incus-support:v1",
+    "digest": "sha256:9f2c...",
+    "origin": "target"
+  },
+```
+
+`"origin": "flag"` records the same thing when `--support` on the command
+line replaced the target's default instead.
 
 The manifest doubles as the deployment metadata format and the
 provenance record: the digests linking a disk to its inputs are recorded
