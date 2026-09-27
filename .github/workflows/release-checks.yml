@@ -1,0 +1,59 @@
+name: Release checks
+
+# Keeps the release pipeline honest on every PR, without touching ci.yml:
+# - the GoReleaser config is validated and dry-run built (no publishing).
+# - every commit on the PR (not just its title) is checked against
+#   Conventional Commits, since PRs are rebase-merged and release-please
+#   parses each commit individually.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conventional-commits:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Check commit subjects are Conventional Commits
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+          pattern='^(feat|fix|perf|deps|docs|refactor|test|build|ci|chore|revert)(\([a-z0-9,/ -]+\))?!?: .+'
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          status=0
+          while IFS= read -r sha; do
+            subject="$(git log -1 --format=%s "$sha")"
+            if [[ "$subject" =~ $pattern ]]; then
+              echo "ok:      $sha $subject"
+            else
+              echo "::error::commit $sha is not a Conventional Commit: $subject"
+              status=1
+            fi
+          done < <(git rev-list "origin/${BASE_REF}..HEAD")
+          exit "$status"
+
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          install-only: true
+      - name: goreleaser check
+        run: goreleaser check
+      - name: goreleaser snapshot build
+        run: goreleaser release --snapshot --clean
