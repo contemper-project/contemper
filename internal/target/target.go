@@ -62,15 +62,22 @@ func KernelCmdline(author string) string {
 }
 
 // table maps every accepted spelling (aliases and canonical names alike)
-// to a canonical name and its Assembler.
+// to a canonical name, its Assembler, and its default support image
+// reference (empty for none).
+//
+// TODO(incus-support): once ghcr.io/contemper-project/incus-support is
+// published, set incus-qcow2's defaultSupport to it. Until then, leaving
+// it empty is deliberate: pointing at a reference that doesn't exist yet
+// would make every incus conversion fail.
 var table = map[string]struct {
-	canonical string
-	assembler Assembler
+	canonical      string
+	assembler      Assembler
+	defaultSupport string
 }{
-	"qemu":        {"qemu-qcow2", UEFIQcow2{}},
-	"qemu-qcow2":  {"qemu-qcow2", UEFIQcow2{}},
-	"incus":       {"incus-qcow2", UEFIQcow2{}},
-	"incus-qcow2": {"incus-qcow2", UEFIQcow2{}},
+	"qemu":        {canonical: "qemu-qcow2", assembler: UEFIQcow2{}},
+	"qemu-qcow2":  {canonical: "qemu-qcow2", assembler: UEFIQcow2{}},
+	"incus":       {canonical: "incus-qcow2", assembler: UEFIQcow2{}},
+	"incus-qcow2": {canonical: "incus-qcow2", assembler: UEFIQcow2{}},
 }
 
 // Resolve maps name (an alias or a canonical name) to its canonical
@@ -81,6 +88,42 @@ func Resolve(name string) (canonical string, asm Assembler, err error) {
 		return "", nil, fmt.Errorf("unknown target %q", name)
 	}
 	return e.canonical, e.assembler, nil
+}
+
+// DefaultSupport returns canonical's default support image reference, or
+// "" if the target has none. canonical must already be a canonical
+// target name, as returned by Resolve.
+func DefaultSupport(canonical string) string {
+	return table[canonical].defaultSupport
+}
+
+// SupportOrigin names where a resolved support image reference came from,
+// for progress output and the bundle manifest.
+type SupportOrigin string
+
+const (
+	// SupportNone means no support image applies.
+	SupportNone SupportOrigin = ""
+	// SupportFromFlag means --support named the reference, replacing any
+	// target default.
+	SupportFromFlag SupportOrigin = "flag"
+	// SupportFromTarget means the target's own default applied, because
+	// --support was not given.
+	SupportFromTarget SupportOrigin = "target"
+)
+
+// ResolveSupport decides which support image reference, if any, applies
+// to a build: flagRef, an explicit --support value, always replaces
+// defaultRef, the resolved target's default, rather than stacking with
+// it. It returns "" with SupportNone when neither is set.
+func ResolveSupport(defaultRef, flagRef string) (ref string, origin SupportOrigin) {
+	if flagRef != "" {
+		return flagRef, SupportFromFlag
+	}
+	if defaultRef != "" {
+		return defaultRef, SupportFromTarget
+	}
+	return "", SupportNone
 }
 
 // UEFIQcow2 assembles a UEFI-bootable UKI on a GPT disk with a FAT32 ESP

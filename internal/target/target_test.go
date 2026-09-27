@@ -33,6 +33,42 @@ func TestResolve(t *testing.T) {
 	}
 }
 
+// TestDefaultSupport pins today's target defaults: neither qemu-qcow2 nor
+// incus-qcow2 has one yet (the Incus support image isn't published; see
+// the TODO on the target table).
+func TestDefaultSupport(t *testing.T) {
+	for _, canonical := range []string{"qemu-qcow2", "incus-qcow2"} {
+		if got := target.DefaultSupport(canonical); got != "" {
+			t.Errorf("DefaultSupport(%s) = %q, want none", canonical, got)
+		}
+	}
+	if got := target.DefaultSupport("bogus"); got != "" {
+		t.Errorf("DefaultSupport(bogus) = %q, want none", got)
+	}
+}
+
+func TestResolveSupport(t *testing.T) {
+	cases := []struct {
+		name             string
+		defaultRef, flag string
+		wantRef          string
+		wantOrigin       target.SupportOrigin
+	}{
+		{"neither set", "", "", "", target.SupportNone},
+		{"default only", "ghcr.io/example/target-support:v1", "", "ghcr.io/example/target-support:v1", target.SupportFromTarget},
+		{"flag only", "", "ghcr.io/example/custom:v1", "ghcr.io/example/custom:v1", target.SupportFromFlag},
+		{"flag replaces default, never stacks", "ghcr.io/example/target-support:v1", "ghcr.io/example/custom:v1", "ghcr.io/example/custom:v1", target.SupportFromFlag},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ref, origin := target.ResolveSupport(c.defaultRef, c.flag)
+			if ref != c.wantRef || origin != c.wantOrigin {
+				t.Errorf("ResolveSupport(%q, %q) = %q, %q; want %q, %q", c.defaultRef, c.flag, ref, origin, c.wantRef, c.wantOrigin)
+			}
+		})
+	}
+}
+
 func TestKernelCmdline(t *testing.T) {
 	for author, want := range map[string]string{
 		"console=ttyAMA0 rw":          "root=LABEL=contemper-root console=ttyAMA0 rw",
