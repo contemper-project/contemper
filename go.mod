@@ -6,6 +6,7 @@ require (
 	github.com/diskfs/go-diskfs v1.9.4
 	github.com/google/go-containerregistry v0.22.1
 	github.com/spf13/cobra v1.10.2
+	golang.org/x/term v0.46.0
 )
 
 require (
@@ -26,6 +27,5 @@ require (
 	github.com/ulikunitz/xz v0.5.15 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
-	golang.org/x/term v0.46.0 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
 )

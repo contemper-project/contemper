@@ -26,12 +26,13 @@ func TestCheckRequiresSatisfied(t *testing.T) {
 	}
 	defer rfs.Close()
 
-	manifest := &v1.Manifest{
-		Annotations: map[string]string{
-			support.RequiresFilesAnnotation: "/usr/bin/cloud-init",
-		},
+	schema, err := support.Parse(map[string]string{
+		support.RequiresFilesAnnotation: "/usr/bin/cloud-init",
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err := support.CheckRequires(manifest, rfs); err != nil {
+	if err := schema.CheckRequires(rfs); err != nil {
 		t.Errorf("CheckRequires: %v", err)
 	}
 }
@@ -49,12 +50,13 @@ func TestCheckRequiresMissing(t *testing.T) {
 	}
 	defer rfs.Close()
 
-	manifest := &v1.Manifest{
-		Annotations: map[string]string{
-			support.RequiresFilesAnnotation: "/usr/bin/cloud-init, /etc/hostname",
-		},
+	schema, err := support.Parse(map[string]string{
+		support.RequiresFilesAnnotation: "/usr/bin/cloud-init, /etc/hostname",
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err := support.CheckRequires(manifest, rfs); err == nil {
+	if err := schema.CheckRequires(rfs); err == nil {
 		t.Fatalf("expected an error naming the missing path")
 	}
 }

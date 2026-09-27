@@ -9,6 +9,7 @@ import (
 	"time"
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/google/go-containerregistry/pkg/v1/cache"
 	"github.com/spf13/cobra"
 
 	"github.com/contemper-project/contemper/internal/bundle"
@@ -113,6 +114,11 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 
 	var supportImg *source.Image
 	var supportRefStr string
+	var schema *support.Schema
+	var overlays []v1.Image
+	var resolvedVariants []bundle.SupportVariant
+	baseImg := img.Image
+
 	if opts.supportRef != "" {
 		supportRef, err := source.ParseRef(opts.supportRef)
 		if err != nil {
@@ -125,6 +131,21 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 			return fmt.Errorf("loading support image: %w", err)
 		}
 		defer supportImg.Close()
+		overlays = append(overlays, supportImg.Image)
+
+		supportManifest, err := supportImg.Image.Manifest()
+		if err != nil {
+			return fmt.Errorf("reading support image manifest: %w", err)
+		}
+		indexAnnotations, err := source.IndexAnnotations(supportRef, platform)
+		if err != nil {
+			return fmt.Errorf("reading support image index: %w", err)
+		}
+		schema, err = support.Parse(support.MergeAnnotations(indexAnnotations, supportManifest.Annotations))
+		if err != nil {
+			rep.Fail("support image", err.Error(), "")
+			return err
+		}
 
 		supportLayers, err := supportImg.Image.Layers()
 		if err != nil {
@@ -132,6 +153,21 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 		}
 		rep.Line("🧩", "support image · "+opts.supportRef, "")
 		rep.Sub("✔", "rootfs", fmt.Sprintf("%d layers", len(supportLayers)))
+
+		if len(schema.Branches) > 0 {
+			vr, err := resolveVariants(schema, img, platform, rep)
+			if err != nil {
+				rep.Fail("support image", err.Error(), "")
+				return err
+			}
+			defer os.RemoveAll(vr.cacheDir)
+			for _, vi := range vr.images {
+				defer vi.Close()
+			}
+			overlays = append(overlays, vr.overlays...)
+			resolvedVariants = vr.resolved
+			baseImg = vr.cachedSrc
+		}
 		rep.Blank()
 	}
 
@@ -140,13 +176,17 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 		return fmt.Errorf("reading source image layers: %w", err)
 	}
 	mergeLabel := fmt.Sprintf("merging %d %s", len(sourceLayers), pluralize(len(sourceLayers), "layer"))
-	if supportImg != nil {
-		supportLayers, _ := supportImg.Image.Layers()
-		mergeLabel = fmt.Sprintf("merging %d + %d layers", len(sourceLayers), len(supportLayers))
+	if len(overlays) > 0 {
+		overlayLayers := 0
+		for _, o := range overlays {
+			ls, _ := o.Layers()
+			overlayLayers += len(ls)
+		}
+		mergeLabel = fmt.Sprintf("merging %d + %d layers", len(sourceLayers), overlayLayers)
 	}
 	mergeStage := rep.BeginStage("🧬", mergeLabel)
 
-	rfs, err := buildRootfs(img, supportImg)
+	rfs, err := rootfs.Build(baseImg, overlays...)
 	if err != nil {
 		mergeStage.Fail("merge", err.Error(), "")
 		return err
@@ -154,12 +194,8 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 	defer rfs.Close()
 	mergeStage.Done("🧬", mergeLabel, "")
 
-	if supportImg != nil {
-		manifest, err := supportImg.Image.Manifest()
-		if err != nil {
-			return fmt.Errorf("reading support image manifest: %w", err)
-		}
-		if err := support.CheckRequires(manifest, rfs); err != nil {
+	if schema != nil {
+		if err := schema.CheckRequires(rfs); err != nil {
 			rep.Fail("support image", err.Error(), "")
 			return err
 		}
@@ -214,6 +250,7 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 	}
 	if supportImg != nil {
 		manifest.Support = &bundle.ImageRef{Ref: supportRefStr, Digest: supportImg.Digest.String()}
+		manifest.SupportVariants = resolvedVariants
 	}
 
 	if err := bundle.Write(outBundleDir, manifest); err != nil {
@@ -258,13 +295,95 @@ func reportFixedPaths(rep *progress.Reporter, rfs *rootfs.Rootfs, val *validate.
 	}
 }
 
-// buildRootfs adapts the two source.Image handles to rootfs.Build's
-// v1.Image parameters (a small helper mainly to keep runConvert linear).
-func buildRootfs(img, supportImg *source.Image) (*rootfs.Rootfs, error) {
-	if supportImg == nil {
-		return rootfs.Build(img.Image, nil)
+// variantResolution is what resolveVariants hands back to runConvert: the
+// winning variants' bundle records and layers to merge, the loaded
+// *source.Image handles the caller must Close, the cache directory the
+// caller must remove, and the cache-wrapped source image the final
+// rootfs.Build call should use in place of img.Image, so the source
+// layers already read once for predicate evaluation aren't pulled again
+// from the registry for the final merge.
+type variantResolution struct {
+	resolved  []bundle.SupportVariant
+	overlays  []v1.Image
+	images    []*source.Image
+	cacheDir  string
+	cachedSrc v1.Image
+}
+
+// resolveVariants evaluates schema's branches against img's own merged
+// filesystem - built before any support-image layers are merged, so a
+// support image (or a sibling variant) can never satisfy its own
+// predicates - prints the per-branch progress lines to rep, and loads
+// only the winning variants' images (manifest first, then layers;
+// losing variants are never fetched).
+//
+// On error, everything opened so far (the layer cache directory, any
+// variant images already loaded) is cleaned up before returning; on
+// success that cleanup is the caller's responsibility.
+func resolveVariants(schema *support.Schema, img *source.Image, platform v1.Platform, rep *progress.Reporter) (*variantResolution, error) {
+	cacheDir, err := os.MkdirTemp("", "contemper-layer-cache-")
+	if err != nil {
+		return nil, fmt.Errorf("creating layer cache dir: %w", err)
 	}
-	return rootfs.Build(img.Image, supportImg.Image)
+	vr := &variantResolution{
+		cacheDir:  cacheDir,
+		cachedSrc: cache.Image(img.Image, cache.NewFilesystemCache(cacheDir)),
+	}
+	ok := false
+	defer func() {
+		if !ok {
+			os.RemoveAll(vr.cacheDir)
+			for _, vi := range vr.images {
+				vi.Close()
+			}
+		}
+	}()
+
+	srcRfs, err := rootfs.Build(vr.cachedSrc)
+	if err != nil {
+		return nil, fmt.Errorf("building source rootfs for variant resolution: %w", err)
+	}
+	defer srcRfs.Close()
+
+	branches, err := support.Resolve(schema, func(p string) bool {
+		_, err := srcRfs.Resolve(p)
+		return err == nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	for _, r := range branches {
+		variantLabel := r.Variant
+		detail := ""
+		if r.Default {
+			variantLabel += " (default)"
+		} else {
+			detail = "matched " + strings.Join(r.Matched, ", ")
+		}
+		rep.Sub("✔", fmt.Sprintf("branch %s → %s", r.Branch, variantLabel), detail)
+
+		sv := bundle.SupportVariant{Branch: r.Branch, Variant: r.Variant}
+		if r.Image != "" {
+			variantRef, err := source.ParseRef(r.Image)
+			if err != nil {
+				return nil, fmt.Errorf("branch %s: variant %s: %w", r.Branch, r.Variant, err)
+			}
+			variantImg, err := source.Load(variantRef, platform)
+			if err != nil {
+				return nil, fmt.Errorf("branch %s: variant %s: loading %s: %w", r.Branch, r.Variant, r.Image, err)
+			}
+			vr.images = append(vr.images, variantImg)
+			vr.overlays = append(vr.overlays, variantImg.Image)
+			rep.SubChild("%s %s", variantRef.String(), platform.String())
+			sv.Ref = variantRef.String()
+			sv.Digest = variantImg.Digest.String()
+		}
+		vr.resolved = append(vr.resolved, sv)
+	}
+
+	ok = true
+	return vr, nil
 }
 
 func hintsFrom(cfg *v1.ConfigFile) bundle.Hints {
