@@ -140,6 +140,23 @@ image only ever drops in files and never runs `systemctl enable` or
 anything else. Either way it runs before local filesystems are checked
 and mounted, so the
 label is right by the time `/etc/fstab`'s `LABEL=` lines are resolved.
+
+The systemd unit adds `DefaultDependencies=no` and
+`After=systemd-udev-trigger.service`: by the time that trigger's own oneshot
+has run, udev is already active and every disk already attached — root and
+volumes alike, since every target hands them all over upfront rather than
+hot-plugging — has had its boot-time ("coldplug") event replayed for udev to
+process, without the (deprecated) full `udevadm settle`. Device discovery
+itself needs no udev at all — `/sys/block/*/serial` is a sysfs attribute the
+kernel populates at probe time — but formatting a blank disk does rely on
+udev relabelling it afterwards, and that happens without any extra
+`udevadm trigger` call: the kernel raises its own "change" event when an
+exclusively-opened block device (how `mkfs.ext4` opens its target) is
+closed, the same mechanism `parted` and `fdisk` rely on, and the
+`LABEL=<name>` mount unit systemd generates from fstab is bound to the
+resulting udev-created device unit rather than attempted once and given up
+on, so it simply waits for the label to appear.
+
 `convert` also writes `/etc/contemper/volumes`, one line per declared
 volume (`name serial-pattern fs mountpoint`), which the script reads with
 `while read -r` — never sourced.

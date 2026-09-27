@@ -1,3 +1,38 @@
+# contemper-volumes: prepares declared volumes (reuse an already-
+# formatted one, format a blank one, leave anything else alone) before
+# local filesystems are checked and mounted. The actual logic is
+# /usr/lib/contemper/format-volumes, from the base volume-formatting
+# support image; this unit is only the systemd integration that runs it
+# at the right point in boot - the counterpart of
+# ../../../openrc/etc/init.d/contemper-volumes.
+#
+# Ordering:
+#  - DefaultDependencies=no: this needs to run ahead of the normal
+#    sysinit.target-relative position a service gets by default, the
+#    same reason local-fs-pre.target itself sets it.
+#  - After=systemd-udev-trigger.service: by the time udev-trigger's own
+#    oneshot has run, systemd-udevd is already active and every device
+#    already present in sysfs - which on a VM means every attached disk,
+#    root and volumes alike, since every target hands them all over
+#    upfront rather than hot-plugging - has had its "coldplug" uevent
+#    replayed for udev to process, without waiting on the (deprecated)
+#    full `udevadm settle`.
+#  - Before=local-fs-pre.target: every fstab-generated mount unit,
+#    including a volume's LABEL=<name> one, is implicitly
+#    After=local-fs-pre.target, so this always runs first.
+#
+# Finding a disk by serial (see format-volumes) reads /sys/block/*/serial
+# directly, a sysfs attribute the kernel populates at device-probe time,
+# so device discovery here needs no udev involvement at all. Formatting
+# a blank disk (mkfs.ext4 -F) does rely on udev, though not
+# synchronously: the kernel raises its own block-device "change" uevent
+# once an exclusively-opened device (which is how mkfs opens its target)
+# is closed - the same mechanism parted and fdisk rely on - and udev
+# (already running, per above) relabels it on its own from there. The
+# LABEL=<name> mount unit systemd generates from fstab is bound to a
+# udev-created device unit rather than attempted once and given up on,
+# so it simply waits for the label to appear; no explicit `udevadm
+# trigger` or `settle` call is needed here or in format-volumes itself.
 [Unit]
 Description=contemper: prepare declared volumes
 DefaultDependencies=no
