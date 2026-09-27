@@ -23,6 +23,7 @@ import (
 	"github.com/contemper-project/contemper/internal/target"
 	"github.com/contemper-project/contemper/internal/validate"
 	"github.com/contemper-project/contemper/internal/volume"
+	"github.com/contemper-project/contemper/internal/volumehelper"
 )
 
 type convertOptions struct {
@@ -33,6 +34,8 @@ type convertOptions struct {
 	arch         string
 	rootSize     string
 	noFstab      bool
+	volumeHelper string
+	noVolHelper  bool
 	keepRaw      bool
 	quiet        bool
 	verbose      bool
@@ -62,6 +65,10 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 	rep, err := newReporter(os.Stderr, opts.progressMode, opts.verbose, opts.quiet)
 	if err != nil {
 		return err
+	}
+
+	if opts.noVolHelper && opts.volumeHelper != "" {
+		return fmt.Errorf("--volume-helper and --no-volume-helper are mutually exclusive")
 	}
 
 	canonicalTarget, asm, err := target.Resolve(opts.target)
@@ -195,6 +202,32 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 		rep.Blank()
 	}
 
+	// The volume-formatting helper merges in addition to any --support
+	// image, after it and its resolved variants, so a user's own support
+	// customizations are never shadowed by it.
+	var helperResult *volumehelper.Result
+	switch {
+	case len(specs) == 0 && opts.volumeHelper != "":
+		rep.Warn("volume helper", "--volume-helper given but the image declares no volumes; ignoring")
+	case len(specs) > 0 && !opts.noVolHelper:
+		helperRef := opts.volumeHelper
+		if helperRef == "" {
+			helperRef = volume.DefaultHelperRef
+		}
+		hr, err := mergeVolumeHelper(helperRef, img, platform, rep)
+		if err != nil {
+			rep.Fail("volume helper", err.Error(), "")
+			return err
+		}
+		helperResult = hr
+		defer helperResult.Img.Close()
+		for _, vi := range helperResult.VariantImages {
+			defer vi.Close()
+		}
+		overlays = append(overlays, helperResult.Overlays...)
+		rep.Blank()
+	}
+
 	sourceLayers, err := img.Image.Layers()
 	if err != nil {
 		return fmt.Errorf("reading source image layers: %w", err)
@@ -224,6 +257,12 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 			return err
 		}
 	}
+	if helperResult != nil && helperResult.Schema != nil {
+		if err := helperResult.Schema.CheckRequires(rfs); err != nil {
+			rep.Fail("volume helper", err.Error(), "")
+			return err
+		}
+	}
 
 	buildInfo := guestmeta.BuildInfo{
 		ContemperVersion: buildinfo.Get().Version,
@@ -235,6 +274,17 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 		buildInfo.Support = &guestmeta.ImageRef{Ref: supportRefForBuild, Digest: supportImg.Digest.String()}
 		for _, v := range resolvedVariants {
 			buildInfo.SupportVariants = append(buildInfo.SupportVariants, guestmeta.VariantRef{
+				Branch: v.Branch, Variant: v.Variant, Ref: v.Ref, Digest: v.Digest,
+			})
+		}
+	}
+	if helperResult != nil {
+		buildInfo.VolumeHelper = &guestmeta.ImageRef{
+			Ref:    redactedRefString(helperResult.ParsedRef),
+			Digest: helperResult.Img.Digest.String(),
+		}
+		for _, v := range helperResult.Variants {
+			buildInfo.VolumeHelperVariants = append(buildInfo.VolumeHelperVariants, guestmeta.VariantRef{
 				Branch: v.Branch, Variant: v.Variant, Ref: v.Ref, Digest: v.Digest,
 			})
 		}
@@ -345,6 +395,11 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 			Digest:   supportImg.Digest.String(),
 			Origin:   string(supportOrigin),
 			Variants: resolvedVariants,
+		}
+	}
+	if helperResult != nil {
+		manifest.VolumeHelper = &bundle.SupportRef{
+			Ref: helperResult.ParsedRef.String(), Digest: helperResult.Img.Digest.String(), Variants: helperResult.Variants,
 		}
 	}
 

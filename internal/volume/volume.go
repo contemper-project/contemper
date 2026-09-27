@@ -28,6 +28,13 @@ const RootSizeLabel = "io.contemper.root.size"
 // otherwise append, the same as `convert --no-fstab`.
 const FstabLabel = "io.contemper.fstab"
 
+// DefaultHelperRef is the published support image supplying the
+// first-boot volume-formatting helper (see
+// docs/design/volumes-and-providers.md), merged automatically whenever
+// an image declares volumes unless `--no-volume-helper` is given.
+// `--volume-helper <ref>` overrides it.
+const DefaultHelperRef = "ghcr.io/contemper-project/volumes-support:v1"
+
 // Spec is one declared volume, resolved to a name and (if known at
 // convert time) a size.
 type Spec struct {
