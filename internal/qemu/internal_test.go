@@ -100,8 +100,8 @@ func TestBuildArgsAttachesVolumes(t *testing.T) {
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
 		"file=/tmp/bundle/disk.qcow2,if=virtio,format=qcow2,snapshot=on",
-		"file=/state/data.qcow2,if=virtio,format=qcow2,serial=data",
-		"file=/state/logs.qcow2,if=virtio,format=qcow2,serial=logs",
+		"-drive file=/state/data.qcow2,if=none,id=vol0,format=qcow2 -device virtio-blk-pci,drive=vol0,serial=data",
+		"-drive file=/state/logs.qcow2,if=none,id=vol1,format=qcow2 -device virtio-blk-pci,drive=vol1,serial=logs",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("args %q missing %q", joined, want)

@@ -188,8 +188,14 @@ func buildArgs(info archInfo, opts Options) (args []string, err error) {
 		format = "qcow2"
 	}
 	args = append(args, "-drive", fmt.Sprintf("file=%s,if=virtio,format=%s,snapshot=on", opts.DiskPath, format))
-	for _, v := range opts.Volumes {
-		args = append(args, "-drive", fmt.Sprintf("file=%s,if=virtio,format=qcow2,serial=%s", v.Path, v.Name))
+	// serial= is a property of the virtio-blk device, not of -drive
+	// (current QEMU rejects it there), so each volume is a backend-only
+	// drive plus an explicit device carrying the serial.
+	for i, v := range opts.Volumes {
+		id := fmt.Sprintf("vol%d", i)
+		args = append(args,
+			"-drive", fmt.Sprintf("file=%s,if=none,id=%s,format=qcow2", v.Path, id),
+			"-device", fmt.Sprintf("virtio-blk-pci,drive=%s,serial=%s", id, v.Name))
 	}
 	args = append(args, "-netdev", "user,id=net0", "-device", "virtio-net-pci,netdev=net0")
 	args = append(args, "-nographic", "-monitor", "none", "-serial", "file:"+opts.SerialLogPath)
