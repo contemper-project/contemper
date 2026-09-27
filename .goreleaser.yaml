@@ -1,0 +1,55 @@
+version: 2
+
+project_name: contemper
+
+# release-please owns the changelog and the GitHub Release itself (see
+# .github/workflows/release.yml): it merges a release PR, tags the version,
+# and creates the release with its own conventional-commit-derived notes
+# before GoReleaser ever runs. GoReleaser's job here is narrower: build and
+# attach the binaries to that already-existing release.
+changelog:
+  disable: true
+
+release:
+  # Keep release-please's release notes as-is; only upload artifacts.
+  mode: keep-existing
+
+builds:
+  - id: contemper
+    main: ./cmd/contemper
+    binary: contemper
+    # Reproducible builds: derive the binary's embedded mtime from the
+    # commit being built rather than wall-clock build time.
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    flags:
+      - -trimpath
+    ldflags:
+      - -X github.com/contemper-project/contemper/internal/buildinfo.version={{ .Version }}
+      - -X github.com/contemper-project/contemper/internal/buildinfo.commit={{ .FullCommit }}
+      - -X github.com/contemper-project/contemper/internal/buildinfo.date={{ .CommitDate }}
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: contemper
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - LICENSE
+      - NOTICE
+      - README.md
+      # internal/uki embeds the systemd-stub UEFI loaders; that binary's own
+      # license (LGPL-2.1-or-later) travels with every archive that carries
+      # it. See internal/uki/stubs/LICENSE.LGPL-2.1 and NOTICE.
+      - src: internal/uki/stubs/LICENSE.LGPL-2.1
+        dst: LICENSE.LGPL-2.1
+
+checksum:
+  name_template: "checksums.txt"
