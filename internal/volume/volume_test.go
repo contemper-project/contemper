@@ -82,8 +82,10 @@ func TestParseSize(t *testing.T) {
 			t.Errorf("ParseSize(%q) = %d, want %d", c.in, got, c.want)
 		}
 	}
-	if _, err := volume.ParseSize("not-a-size"); err == nil {
-		t.Errorf("expected an error for an invalid size")
+	for _, bad := range []string{"not-a-size", "-1", "-5GiB", "NaNGiB", "InfMiB", "1e30GiB"} {
+		if got, err := volume.ParseSize(bad); err == nil {
+			t.Errorf("ParseSize(%q) = %d, want an error", bad, got)
+		}
 	}
 }
 

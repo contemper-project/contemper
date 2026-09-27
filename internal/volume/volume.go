@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -236,12 +237,21 @@ func ParseSize(s string) (int64, error) {
 			if err != nil {
 				return 0, fmt.Errorf("invalid size %q", s)
 			}
-			return int64(n * float64(sfx.mult)), nil
+			bytes := n * float64(sfx.mult)
+			// NaN fails every comparison, so this also rejects "NaNGiB";
+			// the upper bound keeps the int64 conversion from overflowing.
+			if !(bytes >= 0 && bytes < math.MaxInt64) {
+				return 0, fmt.Errorf("invalid size %q: must be between 0 and %d bytes", s, int64(math.MaxInt64))
+			}
+			return int64(bytes), nil
 		}
 	}
 	n, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("invalid size %q", s)
+	}
+	if n < 0 {
+		return 0, fmt.Errorf("invalid size %q: must not be negative", s)
 	}
 	return n, nil
 }
