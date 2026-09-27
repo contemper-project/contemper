@@ -139,7 +139,10 @@ func Write(dir string, m *Manifest) error {
 	}
 	data = append(data, '\n')
 	path := filepath.Join(dir, "contemper.json")
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	// contemper.json is part of the bundle deliverable, meant to be read
+	// by whatever deploys it - same reasoning as the bundle directory
+	// itself (see the MkdirAll call that creates dir, in cmd/contemper).
+	if err := os.WriteFile(path, data, 0o644); err != nil { //nolint:gosec // G306: manifest is a bundle output meant to stay world-readable
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
 	return nil
