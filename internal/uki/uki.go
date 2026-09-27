@@ -18,6 +18,12 @@ var stubARM64 []byte
 //go:embed stubs/linuxx64.efi.stub
 var stubAMD64 []byte
 
+// maxKernelSize bounds a decompressed kernel. The UKI has to fit on the
+// 128 MiB ESP, so nothing larger could be used, and the bound keeps a
+// small compressed file in an image from expanding without limit in
+// memory.
+const maxKernelSize = 128 << 20
+
 // Sections holds the content for each UKI section. OSRelease may be nil,
 // in which case no .osrel section is added (it's optional per the fixed
 // -path contract). Cmdline, Initrd and Linux must be non-empty.
@@ -90,9 +96,12 @@ func PrepareKernel(data []byte) (out []byte, warning string, err error) {
 			return nil, "", fmt.Errorf("decompressing gzip kernel: %w", err)
 		}
 		defer func() { _ = zr.Close() }()
-		decompressed, err := io.ReadAll(zr)
+		decompressed, err := io.ReadAll(io.LimitReader(zr, maxKernelSize+1))
 		if err != nil {
 			return nil, "", fmt.Errorf("decompressing gzip kernel: %w", err)
+		}
+		if len(decompressed) > maxKernelSize {
+			return nil, "", fmt.Errorf("decompressed kernel is larger than %d bytes", maxKernelSize)
 		}
 		return decompressed, "", nil
 	}

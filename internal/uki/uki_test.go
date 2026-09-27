@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"debug/pe"
+	"strings"
 	"testing"
 
 	"github.com/contemper-project/contemper/internal/uki"
@@ -134,5 +135,22 @@ func TestBuildUnknownArch(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("expected an error for an unknown arch")
+	}
+}
+
+func TestPrepareKernelBoundsDecompression(t *testing.T) {
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	zeros := make([]byte, 1<<20)
+	for i := 0; i < 129; i++ {
+		if _, err := zw.Write(zeros); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := uki.PrepareKernel(buf.Bytes()); err == nil || !strings.Contains(err.Error(), "larger than") {
+		t.Fatalf("PrepareKernel of a 129 MiB kernel: err = %v, want a size error", err)
 	}
 }
