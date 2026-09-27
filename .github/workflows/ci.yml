@@ -47,6 +47,7 @@ jobs:
               - go.sum
               - Makefile
               - '.goreleaser.y*ml'
+              - '.golangci.y*ml'
               - 'hack/**'
               - 'examples/**'
               - 'support/**'
@@ -62,14 +63,14 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - name: gofmt
-        run: |
-          unformatted="$(gofmt -l .)"
-          if [ -n "$unformatted" ]; then
-            echo "Files need gofmt:"; echo "$unformatted"; exit 1
-          fi
-      - name: go vet
-        run: go vet ./...
+      # Runs the linters and formatters configured in .golangci.yml
+      # (gofmt and goimports included - "run", unlike "fmt", reports
+      # formatting diffs rather than applying them) against the whole
+      # module. This also covers go vet: golangci-lint's govet linter is
+      # part of the enabled default set and runs the same analysis.
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.14.0
       - name: Verify embedded systemd-stub checksums
         working-directory: internal/uki/stubs
         run: sha256sum -c SHA256SUMS
