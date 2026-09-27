@@ -20,9 +20,17 @@ Volumes are the next milestone. The decisions so far:
   block devices, including Incus, which also offers filesystem volumes.
   Block devices are what every provider can offer, so one mechanism
   covers all of them.
-- **The guest formats on first boot.** Only a local hypervisor lets
-  contemper create disks itself; real providers hand the VM a blank
-  device. So formatting always happens in the guest, never on the host.
+- **The guest prepares its volumes on every boot.** Only a local
+  hypervisor lets contemper create disks itself; real providers hand the
+  VM a blank device. So volumes are always handled in the guest, never
+  on the host, by one rule:
+  - an ext4 filesystem carrying the expected label is **reused** as-is
+    and mounted, which is what lets a new image version run on the data
+    of the previous one;
+  - a disk whose first and last MiB are all zeros is **blank** and gets
+    formatted;
+  - anything else is **left alone** and logged as a mismatch, so the
+    failure mode is an unmounted volume, never lost data.
 - **Declaration.** `VOLUME` in the image, plus labels
   `io.contemper.volume.<path>.size`, an optional
   `io.contemper.volume.<path>.name`, and `io.contemper.root.size` for
@@ -53,23 +61,14 @@ Volumes are the next milestone. The decisions so far:
   written whenever volumes are declared, even with the fstab opt-out:
   one volume per line as `name serial-pattern fs mountpoint`, with the
   mount path last so it may contain spaces.
-- **A shell-script helper.** First-boot formatting is a POSIX `sh`
-  script, identical in every image. It ships as a published support
-  image built from this repository, with one variant per init system
-  (OpenRC and systemd), and is merged only when an image declares
-  volumes. A flag replaces it with another image or leaves it out. An
-  image with volumes but neither init system fails the conversion
-  rather than silently getting unformatted volumes. The helper reads
-  `/etc/contemper/volumes` line by line and never sources it. A script
-  rather than a binary keeps it architecture-independent and readable
-  in the guest; the image must provide `mkfs.ext4`.
-- **Reuse first, format only blank disks.** On every boot the helper
-  checks each volume. An ext4 filesystem carrying the expected label is
-  reused as-is and mounted, which is what lets a new image version run
-  on the data of the previous one. A disk whose first and last MiB are
-  all zeros is blank and gets formatted. Anything else is left alone and
-  logged as a mismatch, so the failure mode is an unmounted volume,
-  never lost data.
+- **A shell-script helper applies that rule.** It is a POSIX `sh`
+  script, identical in every image, delivered as a published support
+  image with one variant per init system (OpenRC and systemd) and merged
+  only when an image declares volumes. An image with volumes but neither
+  init system fails the conversion rather than silently getting
+  unprepared volumes. A script rather than a binary keeps it
+  architecture-independent and readable in the guest; the image must
+  provide `mkfs.ext4`.
 - **Local instances.** `deploy --to local-qemu` keeps volume disks per
   instance, named after the image repository without its tag, so
   deploying a new tag of the same image reuses the volumes while the
