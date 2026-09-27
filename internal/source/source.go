@@ -30,6 +30,25 @@ const ReadyLabel = "io.contemper.ready"
 // tools like `podman save`/`buildah push` under this well-known key).
 const RefNameAnnotation = "org.opencontainers.image.ref.name"
 
+// maxIndexDepth bounds how many levels of nested image index
+// resolveDescriptor will follow before giving up. Real layouts nest at
+// most two deep (an index of per-tag indexes, each listing per-platform
+// manifests alongside attestation manifests); the limit exists to turn a
+// malformed or cyclic layout into an error instead of a long walk.
+const maxIndexDepth = 8
+
+// dockerReferenceTypeAnnotation and dockerReferenceTypeAttestation mark
+// a descriptor as a buildx/containerd attestation manifest rather than
+// an image manifest. Docker's containerd image store and containerd's
+// own exporters attach one of these, with platform "unknown/unknown", to
+// each attestation alongside the real per-platform manifests in a
+// nested index; selectManifest must skip them rather than mistake one
+// for a platform's manifest.
+const (
+	dockerReferenceTypeAnnotation  = "vnd.docker.reference.type"
+	dockerReferenceTypeAttestation = "attestation-manifest"
+)
+
 // Kind identifies which of the four supported source forms a Ref names.
 type Kind string
 
@@ -198,32 +217,25 @@ func loadOCILayout(ref Ref, platform v1.Platform) (*Image, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading OCI layout %q: %w", ref.Value, err)
 	}
-	im, err := idx.IndexManifest()
+
+	leaf, leafIndex, topDesc, topDescs, err := resolveDescriptor(idx, platform, ref.Value)
 	if err != nil {
-		return nil, fmt.Errorf("reading index manifest of %q: %w", ref.Value, err)
-	}
-	if len(im.Manifests) == 0 {
-		return nil, fmt.Errorf("OCI layout %q has no manifests", ref.Value)
+		return nil, err
 	}
 
-	desc, err := selectManifest(im.Manifests, platform)
+	img, err := leafIndex.Image(leaf.Digest)
 	if err != nil {
-		return nil, fmt.Errorf("%q: %w", ref.Value, err)
-	}
-
-	img, err := idx.Image(desc.Digest)
-	if err != nil {
-		return nil, fmt.Errorf("reading image %s from %q: %w", desc.Digest, ref.Value, err)
+		return nil, fmt.Errorf("reading image %s from %q: %w", leaf.Digest, ref.Value, err)
 	}
 
 	base, tag := "image", "latest"
-	if refName := refNameOf(im.Manifests, desc); refName != "" {
+	if refName := refNameOf(topDescs, topDesc); refName != "" {
 		base, tag = splitRepoTag(refName)
 	}
 
 	return &Image{
 		Image:        img,
-		Digest:       desc.Digest,
+		Digest:       leaf.Digest,
 		Ref:          ref,
 		RepoBase:     base,
 		Tag:          tag,
@@ -344,6 +356,13 @@ func ociLayoutIndexAnnotations(ref Ref, platform v1.Platform) (map[string]string
 	return indexManifestAnnotations(idx, platform, ref.Value)
 }
 
+// indexManifestAnnotations returns the annotations on the leaf manifest
+// descriptor selected for platform, recursing through nested indexes
+// (see resolveDescriptor) to reach it. This is the descriptor the
+// support-image annotation fallback in docs/reference/support-image-
+// annotations.md means by "that platform's descriptor inside the
+// index" - the one carrying Platform, however deeply it is nested -
+// which is not necessarily the outermost one used for bundle naming.
 func indexManifestAnnotations(idx v1.ImageIndex, platform v1.Platform, name string) (map[string]string, error) {
 	im, err := idx.IndexManifest()
 	if err != nil {
@@ -352,30 +371,92 @@ func indexManifestAnnotations(idx v1.ImageIndex, platform v1.Platform, name stri
 	if len(im.Manifests) == 0 {
 		return nil, nil
 	}
-	desc, err := selectManifest(im.Manifests, platform)
+	leaf, _, _, _, err := resolveDescriptor(idx, platform, name)
 	if err != nil {
-		return nil, fmt.Errorf("%q: %w", name, err)
+		return nil, err
 	}
-	return desc.Annotations, nil
+	return leaf.Annotations, nil
+}
+
+// resolveDescriptor walks idx, and any image index it points to in turn
+// (up to maxIndexDepth levels), applying selectManifest at each level -
+// so a containerd-produced layout, where index.json points to a second
+// index before reaching the per-platform manifests and attestation
+// manifests selectManifest ignores, still resolves.
+//
+// It returns the leaf descriptor (never itself an index, since
+// selectManifest's result is followed into ImageIndex() until it isn't)
+// together with the v1.ImageIndex it was found in, so a caller can fetch
+// leafIndex.Image(leaf.Digest); and separately the outermost index's
+// selected descriptor, topDesc, and all of that index's sibling
+// descriptors, topDescs - since tools that write these layouts set
+// image-naming annotations at the outermost level regardless of how
+// deeply the actual platform manifests end up nested.
+func resolveDescriptor(idx v1.ImageIndex, platform v1.Platform, name string) (leaf v1.Descriptor, leafIndex v1.ImageIndex, topDesc v1.Descriptor, topDescs []v1.Descriptor, err error) {
+	cur := idx
+	for depth := 0; ; depth++ {
+		if depth > maxIndexDepth {
+			return v1.Descriptor{}, nil, v1.Descriptor{}, nil, fmt.Errorf("%q: image index nesting exceeds %d levels", name, maxIndexDepth)
+		}
+		im, err := cur.IndexManifest()
+		if err != nil {
+			return v1.Descriptor{}, nil, v1.Descriptor{}, nil, fmt.Errorf("reading index manifest of %q: %w", name, err)
+		}
+		if len(im.Manifests) == 0 {
+			return v1.Descriptor{}, nil, v1.Descriptor{}, nil, fmt.Errorf("%q has no manifests", name)
+		}
+
+		desc, err := selectManifest(im.Manifests, platform)
+		if err != nil {
+			return v1.Descriptor{}, nil, v1.Descriptor{}, nil, fmt.Errorf("%q: %w", name, err)
+		}
+		if depth == 0 {
+			topDesc, topDescs = desc, im.Manifests
+		}
+		if !desc.MediaType.IsIndex() {
+			return desc, cur, topDesc, topDescs, nil
+		}
+		cur, err = cur.ImageIndex(desc.Digest)
+		if err != nil {
+			return v1.Descriptor{}, nil, v1.Descriptor{}, nil, fmt.Errorf("reading nested index %s of %q: %w", desc.Digest, name, err)
+		}
+	}
 }
 
 // selectManifest picks the descriptor matching platform from an index's
-// manifest list. A single-manifest layout with no platform metadata at
-// all (a single-arch archive) is accepted unconditionally.
+// manifest list, ignoring attestation manifests. A single-manifest
+// layout with no platform metadata at all (a single-arch archive, or an
+// outer descriptor that wraps a nested index) is accepted
+// unconditionally. The returned descriptor may itself be an index;
+// resolveDescriptor is what recurses into one to reach a leaf manifest.
 func selectManifest(descs []v1.Descriptor, platform v1.Platform) (v1.Descriptor, error) {
-	var imageDescs []v1.Descriptor
+	var candidates []v1.Descriptor
 	for _, d := range descs {
-		if d.MediaType.IsImage() {
-			imageDescs = append(imageDescs, d)
+		if !isAttestationManifest(d) {
+			candidates = append(candidates, d)
 		}
 	}
-	if len(imageDescs) == 0 {
-		imageDescs = descs
+	if len(candidates) == 0 {
+		// Every descriptor looked like an attestation manifest (or the
+		// list was empty to begin with); fall back to the unfiltered
+		// list so platform matching below still runs and fails with its
+		// usual error rather than a confusing "no manifests" here.
+		candidates = descs
 	}
-	if len(imageDescs) == 1 && imageDescs[0].Platform == nil {
-		return imageDescs[0], nil
+
+	var manifestDescs []v1.Descriptor
+	for _, d := range candidates {
+		if d.MediaType.IsImage() || d.MediaType.IsIndex() {
+			manifestDescs = append(manifestDescs, d)
+		}
 	}
-	for _, d := range imageDescs {
+	if len(manifestDescs) == 0 {
+		manifestDescs = candidates
+	}
+	if len(manifestDescs) == 1 && manifestDescs[0].Platform == nil {
+		return manifestDescs[0], nil
+	}
+	for _, d := range manifestDescs {
 		if d.Platform == nil {
 			continue
 		}
@@ -384,6 +465,18 @@ func selectManifest(descs []v1.Descriptor, platform v1.Platform) (v1.Descriptor,
 		}
 	}
 	return v1.Descriptor{}, fmt.Errorf("no manifest for platform %s/%s", platform.OS, platform.Architecture)
+}
+
+// isAttestationManifest reports whether d is a buildx/containerd
+// attestation manifest rather than an image: it carries the
+// "attestation-manifest" reference-type annotation, or the placeholder
+// platform "unknown/unknown" those manifests are published under (or
+// both).
+func isAttestationManifest(d v1.Descriptor) bool {
+	if d.Annotations[dockerReferenceTypeAnnotation] == dockerReferenceTypeAttestation {
+		return true
+	}
+	return d.Platform != nil && d.Platform.OS == "unknown" && d.Platform.Architecture == "unknown"
 }
 
 func refNameOf(descs []v1.Descriptor, desc v1.Descriptor) string {

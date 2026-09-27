@@ -176,6 +176,134 @@ func TestIndexAnnotationsFallsBackToDescriptor(t *testing.T) {
 	}
 }
 
+// buildNestedLayout writes a two-level OCI layout to dir, mimicking what
+// Docker's containerd image store writes for `docker save`: index.json
+// points to a second index (tagged with outerAnnotations), which lists
+// an arm64 manifest, an amd64 manifest (tagged with
+// "io.contemper.leaf-marker": "amd64", standing in for a support-image
+// annotation read at that level), and an attestation manifest -
+// platform unknown/unknown, "vnd.docker.reference.type":
+// "attestation-manifest" - that must be ignored throughout. It returns
+// the digest of each platform's image.
+func buildNestedLayout(t *testing.T, dir string, outerAnnotations map[string]string) (arm64Digest, amd64Digest v1.Hash) {
+	t.Helper()
+
+	arm64Img, err := imgtest.Image(v1.Platform{OS: "linux", Architecture: "arm64"}, nil,
+		[]imgtest.File{{Path: "arm64-marker", Data: []byte("arm64")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	amd64Img, err := imgtest.Image(v1.Platform{OS: "linux", Architecture: "amd64"}, nil,
+		[]imgtest.File{{Path: "amd64-marker", Data: []byte("amd64")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attestationImg, err := imgtest.Image(v1.Platform{OS: "unknown", Architecture: "unknown"}, nil,
+		[]imgtest.File{{Path: "attestation", Data: []byte("not a real platform image")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	innerIdx := mutate.AppendManifests(empty.Index,
+		mutate.IndexAddendum{
+			Add:        arm64Img,
+			Descriptor: v1.Descriptor{Platform: &v1.Platform{OS: "linux", Architecture: "arm64"}},
+		},
+		mutate.IndexAddendum{
+			Add: amd64Img,
+			Descriptor: v1.Descriptor{
+				Platform:    &v1.Platform{OS: "linux", Architecture: "amd64"},
+				Annotations: map[string]string{"io.contemper.leaf-marker": "amd64"},
+			},
+		},
+		mutate.IndexAddendum{
+			Add: attestationImg,
+			Descriptor: v1.Descriptor{
+				Platform:    &v1.Platform{OS: "unknown", Architecture: "unknown"},
+				Annotations: map[string]string{"vnd.docker.reference.type": "attestation-manifest"},
+			},
+		},
+	)
+
+	outerIdx := mutate.AppendManifests(empty.Index,
+		mutate.IndexAddendum{
+			Add:        innerIdx,
+			Descriptor: v1.Descriptor{Annotations: outerAnnotations},
+		},
+	)
+
+	if _, err := layout.Write(dir, outerIdx); err != nil {
+		t.Fatalf("writing layout: %v", err)
+	}
+
+	arm64Digest, err = arm64Img.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	amd64Digest, err = amd64Img.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return arm64Digest, amd64Digest
+}
+
+func TestLoadOCILayoutNestedIndexSelectsPlatformAndIgnoresAttestation(t *testing.T) {
+	dir := t.TempDir()
+	arm64Digest, amd64Digest := buildNestedLayout(t, dir, nil)
+
+	img, err := source.Load(source.Ref{Kind: source.KindOCILayout, Value: dir},
+		v1.Platform{OS: "linux", Architecture: "arm64"})
+	if err != nil {
+		t.Fatalf("Load(arm64): %v", err)
+	}
+	if img.Digest != arm64Digest {
+		t.Errorf("Load(arm64) selected digest %s, want %s", img.Digest, arm64Digest)
+	}
+
+	img, err = source.Load(source.Ref{Kind: source.KindOCILayout, Value: dir},
+		v1.Platform{OS: "linux", Architecture: "amd64"})
+	if err != nil {
+		t.Fatalf("Load(amd64): %v", err)
+	}
+	if img.Digest != amd64Digest {
+		t.Errorf("Load(amd64) selected digest %s, want %s", img.Digest, amd64Digest)
+	}
+}
+
+func TestLoadOCILayoutNestedIndexWrongArch(t *testing.T) {
+	dir := t.TempDir()
+	buildNestedLayout(t, dir, nil)
+
+	_, err := source.Load(source.Ref{Kind: source.KindOCILayout, Value: dir},
+		v1.Platform{OS: "linux", Architecture: "riscv64"})
+	if err == nil {
+		t.Fatalf("Load: expected an error for an unmatched platform")
+	}
+}
+
+func TestIndexAnnotationsNestedIndexReturnsLeafAnnotations(t *testing.T) {
+	dir := t.TempDir()
+	buildNestedLayout(t, dir, nil)
+
+	anns, err := source.IndexAnnotations(source.Ref{Kind: source.KindOCILayout, Value: dir},
+		v1.Platform{OS: "linux", Architecture: "amd64"})
+	if err != nil {
+		t.Fatalf("IndexAnnotations: %v", err)
+	}
+	if anns["io.contemper.leaf-marker"] != "amd64" {
+		t.Errorf("IndexAnnotations = %v, want io.contemper.leaf-marker=amd64", anns)
+	}
+
+	anns, err = source.IndexAnnotations(source.Ref{Kind: source.KindOCILayout, Value: dir},
+		v1.Platform{OS: "linux", Architecture: "arm64"})
+	if err != nil {
+		t.Fatalf("IndexAnnotations: %v", err)
+	}
+	if _, ok := anns["io.contemper.leaf-marker"]; ok {
+		t.Errorf("arm64 leaf descriptor should carry no leaf-marker annotation, got %v", anns)
+	}
+}
+
 func TestRefStringCleansLocalPaths(t *testing.T) {
 	for raw, want := range map[string]string{
 		"oci-archive:/a/dev/../contemper/_out/x.tar": "oci-archive:/a/contemper/_out/x.tar",
