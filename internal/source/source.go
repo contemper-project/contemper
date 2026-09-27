@@ -62,6 +62,7 @@ const (
 // Kind identifies which of the four supported source forms a Ref names.
 type Kind string
 
+// The four supported Kind values, one per source form Ref.Kind can name.
 const (
 	KindRegistry      Kind = "registry"
 	KindOCIArchive    Kind = "oci-archive"
@@ -198,14 +199,14 @@ func loadOCIArchive(ref Ref, platform v1.Platform) (*Image, error) {
 	if err != nil {
 		return nil, fmt.Errorf("creating temp dir: %w", err)
 	}
-	cleanup := func() { os.RemoveAll(tmpDir) }
+	cleanup := func() { _ = os.RemoveAll(tmpDir) }
 
 	f, err := os.Open(ref.Value)
 	if err != nil {
 		cleanup()
 		return nil, fmt.Errorf("opening oci-archive %q: %w", ref.Value, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if err := extractTar(f, tmpDir); err != nil {
 		cleanup()
@@ -346,13 +347,13 @@ func ociArchiveIndexAnnotations(ref Ref, platform v1.Platform) (map[string]strin
 	if err != nil {
 		return nil, fmt.Errorf("creating temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	f, err := os.Open(ref.Value)
 	if err != nil {
 		return nil, fmt.Errorf("opening oci-archive %q: %w", ref.Value, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if err := extractTar(f, tmpDir); err != nil {
 		return nil, fmt.Errorf("extracting oci-archive %q: %w", ref.Value, err)
@@ -573,22 +574,31 @@ func extractTar(r io.Reader, dir string) error {
 		target := filepath.Join(dir, filepath.Clean(string(filepath.Separator)+hdr.Name))
 		switch hdr.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0o755); err != nil {
+			// dir is always a private temp dir this function's caller
+			// just created, so there is no reason for its contents to be
+			// group/world readable.
+			if err := os.MkdirAll(target, 0o750); err != nil {
 				return err
 			}
 		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 				return err
 			}
-			out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+			// Same private-scratch reasoning as the MkdirAll above.
+			out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 			if err != nil {
 				return err
 			}
-			if _, err := io.Copy(out, tr); err != nil {
-				out.Close()
+			// Not a decompression-bomb risk: these are OCI-archive blobs
+			// from a local archive the caller chose to convert, sized by
+			// their own real content, not an attacker-controlled stream.
+			if _, err := io.Copy(out, tr); err != nil { //nolint:gosec // G110: bounded by the source archive's real content, not attacker-controlled
+				_ = out.Close()
 				return err
 			}
-			out.Close()
+			if err := out.Close(); err != nil {
+				return err
+			}
 		default:
 			// OCI layouts contain only dirs and regular files.
 		}

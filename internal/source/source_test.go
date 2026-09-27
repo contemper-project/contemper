@@ -263,10 +263,10 @@ func tarLayout(t *testing.T, dir, base string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 
 	tw := tar.NewWriter(out)
-	defer tw.Close()
+	defer func() { _ = tw.Close() }()
 
 	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -297,7 +297,7 @@ func tarLayout(t *testing.T, dir, base string) string {
 		if err != nil {
 			return err
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		_, err = io.Copy(tw, f)
 		return err
 	})
