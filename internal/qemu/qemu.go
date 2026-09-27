@@ -5,6 +5,7 @@ package qemu
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -276,12 +277,17 @@ func Deploy(opts Options) error {
 		return err
 	}
 
-	waitErr := waitForExpect(opts.SerialLogPath, opts.Expect, opts.Timeout)
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	waitErr := waitForExpect(opts.SerialLogPath, opts.Expect, opts.Timeout, exited)
 	if cmd.Process != nil {
 		_ = cmd.Process.Kill()
 	}
-	_ = cmd.Wait()
 	stopTail()
+	if errors.Is(waitErr, errExitedEarly) {
+		rep.Fail("deploy", waitErr.Error(), toolErr.String())
+		return waitErr
+	}
 	if waitErr != nil {
 		rep.Fail("deploy", waitErr.Error(), "")
 		return waitErr
@@ -322,7 +328,13 @@ func tailToWriter(path string, w io.Writer) (stop func()) {
 	return func() { once.Do(func() { close(done) }) }
 }
 
-func waitForExpect(logPath, expect string, timeout time.Duration) error {
+// errExitedEarly reports that QEMU exited before the expected output
+// appeared, so waiting out the timeout would be pointless.
+var errExitedEarly = errors.New("qemu exited before the expected output appeared")
+
+// waitForExpect polls the serial log for expect until it appears, the
+// timeout passes, or QEMU exits (a value on exited).
+func waitForExpect(logPath, expect string, timeout time.Duration, exited <-chan error) error {
 	if timeout <= 0 {
 		timeout = 60 * time.Second
 	}
@@ -331,6 +343,20 @@ func waitForExpect(logPath, expect string, timeout time.Duration) error {
 		data, _ := os.ReadFile(logPath)
 		if bytes.Contains(data, []byte(expect)) {
 			return nil
+		}
+		select {
+		case err := <-exited:
+			// One last look: the match may have been written just
+			// before QEMU exited.
+			data, _ = os.ReadFile(logPath)
+			if bytes.Contains(data, []byte(expect)) {
+				return nil
+			}
+			if err != nil {
+				return fmt.Errorf("%w (%v) waiting for %q", errExitedEarly, err, expect)
+			}
+			return fmt.Errorf("%w waiting for %q", errExitedEarly, expect)
+		default:
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("timed out after %s waiting for %q on the serial console; log tail:\n%s",

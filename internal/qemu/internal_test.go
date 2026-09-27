@@ -1,9 +1,12 @@
 package qemu
 
 import (
+	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBuildArgsWithFirmware(t *testing.T) {
@@ -126,4 +129,33 @@ func writeFakeFile(t *testing.T, name string) string {
 		t.Fatal(err)
 	}
 	return p
+}
+
+func TestWaitForExpectStopsWhenQemuExits(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "serial.log")
+	if err := os.WriteFile(log, []byte("booting\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	exited <- errors.New("exit status 1")
+	start := time.Now()
+	err := waitForExpect(log, "never-printed", time.Minute, exited)
+	if !errors.Is(err, errExitedEarly) {
+		t.Fatalf("waitForExpect = %v, want errExitedEarly", err)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Errorf("waitForExpect took %s, should return as soon as QEMU exits", time.Since(start))
+	}
+}
+
+func TestWaitForExpectMatchBeatsExit(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "serial.log")
+	if err := os.WriteFile(log, []byte("boot-ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	exited <- nil
+	if err := waitForExpect(log, "boot-ok", time.Minute, exited); err != nil {
+		t.Fatalf("waitForExpect = %v, want a match", err)
+	}
 }
