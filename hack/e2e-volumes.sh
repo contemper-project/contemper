@@ -22,7 +22,7 @@
 # Usage: hack/e2e-volumes.sh [--timeout DURATION]
 #
 # Requires: go, podman or docker (CONTAINER_ENGINE selects one
-# explicitly), curl, e2fsprogs (mkfs.ext4, debugfs, e2fsck, e2label),
+# explicitly), curl, e2fsprogs (mkfs.ext4, debugfs, e2fsck),
 # qemu-img, qemu-system-<arch> and UEFI firmware for it. Output,
 # including each deploy's serial log, goes to _out/volumes/.
 set -euo pipefail

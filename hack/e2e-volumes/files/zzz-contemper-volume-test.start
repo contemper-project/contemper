@@ -11,7 +11,21 @@
 # printed first.
 dev=$(awk '$2 == "/data" { print $1; exit }' /proc/mounts)
 if [ -n "$dev" ]; then
-	label=$(e2label "$dev" 2>/dev/null)
+	# e2label lives in e2fsprogs-extra, which this image doesn't install
+	# (only plain e2fsprogs, for fsck.ext4 - see examples/alpine's
+	# Containerfile), so read the label straight out of the ext2/3/4
+	# superblock instead, the same way
+	# support/volumes-support/base/usr/lib/contemper/format-volumes does:
+	# s_volume_name is 16 bytes, NUL-padded, at offset 1024+120.
+	hex=$(dd if="$dev" bs=1 skip=1144 count=16 2>/dev/null | od -An -tx1 | tr -d ' \t\n')
+	label=
+	rest=$hex
+	while [ -n "$rest" ]; do
+		byte=${rest%"${rest#??}"}
+		rest=${rest#??}
+		label="$label\\$(printf '%03o' "0x$byte")"
+	done
+	label=$(printf '%b' "$label")
 	echo "contemper-volume-mounted label=${label:-<none>} dev=$dev" >/dev/console
 else
 	echo "contemper-volume-not-mounted" >/dev/console
