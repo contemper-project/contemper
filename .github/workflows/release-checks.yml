@@ -60,7 +60,10 @@ jobs:
         run: |
           set -euo pipefail
           pattern='^(feat|fix|perf|deps|docs|refactor|test|build|ci|chore|revert)(\([a-z0-9,/ -]+\))?!?: .+'
-          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          # Full history (the checkout above has fetch-depth: 0): a
+          # --depth=1 fetch would graft the base branch, so a PR based on an
+          # older base commit would list every commit in the repository.
+          git fetch --no-tags origin "$BASE_REF"
           status=0
           while IFS= read -r sha; do
             subject="$(git log -1 --format=%s "$sha")"
