@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://contemper-project.github.io/contemper/
+    about: Check the docs first - many "how do I" questions are answered there.

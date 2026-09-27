@@ -1,0 +1,62 @@
+name: Bug report
+description: Something doesn't work the way it should.
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: contemper version
+      description: Output of `contemper version`.
+      placeholder: v0.3.1
+    validations:
+      required: true
+  - type: input
+    id: host
+    attributes:
+      label: Host OS/arch
+      description: e.g. macOS 15 arm64, Ubuntu 24.04 amd64.
+      placeholder: macOS 15 arm64
+    validations:
+      required: true
+  - type: input
+    id: target
+    attributes:
+      label: Target
+      description: The `--target` (or `--arch`) you passed, if any.
+      placeholder: qemu
+  - type: dropdown
+    id: source-type
+    attributes:
+      label: Source type
+      description: The form of the source (and `--support`, if used) reference.
+      options:
+        - Registry reference (ghcr.io/...)
+        - oci-archive:<path>
+        - "oci:<path>"
+        - docker-archive:<path>
+        - Not applicable
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command run
+      description: The exact contemper command line, redacting anything private.
+      render: sh
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: Full output, including any error message. Use `--verbose` if you can.
+      render: sh
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+      description: What you expected to happen instead.
+    validations:
+      required: true
