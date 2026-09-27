@@ -1,0 +1,76 @@
+# Minimal contemper-ready Debian appliance: a kernel, a generic initrd,
+# a cmdline, systemd as init, and a boot-completion marker on the serial
+# console - the systemd counterpart of ../alpine, so this image can be
+# booted end-to-end without any further configuration. See
+# ../../docs/guide/authoring.md for the fixed-path contract this
+# satisfies.
+FROM debian:trixie-slim
+
+LABEL io.contemper.ready="true"
+
+ARG TARGETARCH
+ENV DEBIAN_FRONTEND=noninteractive
+
+# linux-image-<arch> is Debian's real kernel metapackage name, one per
+# TARGETARCH (amd64, arm64), which happens to match TARGETARCH's own
+# spelling. systemd-sysv provides /sbin/init. udev is listed explicitly
+# because --no-install-recommends would otherwise not pull it in, and
+# the initrd's root=LABEL= resolution (and, for volumes, the helper's
+# own label lookups) needs the by-label symlinks only a running udev
+# creates. e2fsprogs gives the boot-time fsck of the root filesystem its
+# fsck.ext4, the same reason ../alpine installs it.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      "linux-image-${TARGETARCH}" systemd-sysv udev initramfs-tools e2fsprogs && \
+    rm -rf /var/lib/apt/lists/*
+
+# initramfs-tools' default MODULES=most (see
+# /etc/initramfs-tools/initramfs.conf) is already generic rather than
+# host-only: it includes every common block/storage driver, virtio
+# included, regardless of what the build host itself uses - unlike
+# dracut or mkinitcpio, which default to probing the build host and need
+# an explicit --no-hostonly (see ../../docs/guide/authoring.md).
+# mkinitramfs (not update-initramfs, which has no output option) writes
+# straight to the fixed path, so the initrd needs no symlink the way the
+# kernel still does.
+RUN kver="$(basename "$(find /lib/modules -mindepth 1 -maxdepth 1 -type d)")" && \
+    mkdir -p /boot/contemper && \
+    mkinitramfs -o /boot/contemper/initrd "${kver}" && \
+    ln -sf "../vmlinuz-${kver}" /boot/contemper/vmlinuz
+
+# The cmdline depends on which serial console the target architecture's
+# virt machine exposes, same split as ../alpine.
+RUN case "$TARGETARCH" in \
+      arm64) console=ttyAMA0 ;; \
+      amd64) console=ttyS0 ;; \
+      *) echo "examples/debian: unsupported TARGETARCH '$TARGETARCH'" >&2; exit 1 ;; \
+    esac && \
+    echo "rootfstype=ext4 rw console=${console}" >/boot/contemper/cmdline
+
+RUN echo 'LABEL=contemper-root / ext4 rw,relatime 0 1' >>/etc/fstab
+
+# Passwordless root, for interactive testing over the serial console -
+# same as ../alpine. A serial login itself needs no extra configuration:
+# systemd's getty generator starts serial-getty@<console>.service on its
+# own for whatever console= the kernel cmdline names.
+RUN passwd -d root
+
+# Proof-of-boot marker: printed to the serial console once systemd
+# reaches multi-user.target, the systemd counterpart of ../alpine's
+# OpenRC local.d script and what `contemper deploy --expect` waits for
+# in hack/e2e.sh.
+RUN printf '%s\n' \
+      '[Unit]' \
+      'Description=contemper: boot-completion marker' \
+      'After=multi-user.target' \
+      '' \
+      '[Service]' \
+      'Type=oneshot' \
+      'RemainAfterExit=yes' \
+      "ExecStart=/bin/sh -c 'echo contemper-boot-ok >/dev/console'" \
+      '' \
+      '[Install]' \
+      'WantedBy=multi-user.target' \
+      >/etc/systemd/system/contemper-boot-ok.service && \
+    mkdir -p /etc/systemd/system/multi-user.target.wants && \
+    ln -sf ../contemper-boot-ok.service /etc/systemd/system/multi-user.target.wants/contemper-boot-ok.service
