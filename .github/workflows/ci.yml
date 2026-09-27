@@ -36,6 +36,7 @@ jobs:
           shellcheck -s sh \
             support/volumes-support/base/usr/lib/contemper/format-volumes \
             support/volumes-support/openrc/etc/init.d/contemper-volumes \
+            support/volumes-support/systemd/etc/systemd/system-generators/contemper-volumes \
             hack/e2e-volumes/files/check-volume.sh \
             hack/e2e-volumes/files/zzz-contemper-volume-test.start
 

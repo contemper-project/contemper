@@ -6,8 +6,12 @@ Description=contemper e2e: check the /data volume
 # ordering itself after this unit (a unit it wants) - without that, the
 # two orderings form a cycle and systemd drops this job. local-fs.target
 # only becomes active once every fstab mount, /data's LABEL=data one
-# included, has been attempted (nofail doesn't change the ordering), so
-# the check sees the volume's final state.
+# included, has been attempted: nofail alone would drop that mount
+# unit's Before=local-fs.target ordering, but the systemd volume
+# helper's generator (support/volumes-support/systemd/.../
+# system-generators/contemper-volumes) restores it, so this is exactly
+# what this check verifies - that an ordinary service really does see
+# /data already mounted, not a race it happens to win.
 After=multi-user.target local-fs.target contemper-boot-ok.service
 
 [Service]

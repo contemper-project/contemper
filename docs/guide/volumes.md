@@ -64,6 +64,15 @@ image with no other way to prepare the disk. Opt out of the fstab lines
 entirely — if your init system mounts volumes its own way — with the
 image label `io.contemper.fstab="false"` or `convert --no-fstab`.
 
+On systemd, `nofail` by itself would do more than that: it also drops
+the generated mount unit's implicit ordering before `local-fs.target`
+(`systemd.mount(5)`), so boot could reach `local-fs.target` — and every
+ordinary service, which is ordered after it by default — before the
+volume is actually mounted. The systemd variant of the volume helper
+(below) restores that ordering with a small boot-time generator, without
+giving up what `nofail` is for: a missing disk still only delays boot by
+its device timeout, never fails it.
+
 ## How the volume helper works
 
 Formatting a blank disk has to happen somewhere, and only a local
@@ -140,6 +149,18 @@ image only ever drops in files and never runs `systemctl enable` or
 anything else. Either way it runs before local filesystems are checked
 and mounted, so the
 label is right by the time `/etc/fstab`'s `LABEL=` lines are resolved.
+
+The systemd variant also adds a small generator,
+`/etc/systemd/system-generators/contemper-volumes`
+(`systemd.generator(7)`): at boot, for each line in
+`/etc/contemper/volumes` it computes the fstab-generated mount unit's
+name (`systemd-escape --path --suffix=mount <mountpoint>`) and drops in
+a `Before=local-fs.target` override for it — the ordering `nofail` (see
+[fstab](#fstab) above) otherwise removes. It changes nothing else about
+the mount, so a genuinely missing disk still only delays boot; it never
+fails or logs anything if `/etc/contemper/volumes` or `systemd-escape`
+isn't there, or if a directory can't be written, so it can never itself
+break boot.
 
 The systemd unit adds `DefaultDependencies=no` and
 `After=systemd-udev-trigger.service`: by the time that trigger's own oneshot

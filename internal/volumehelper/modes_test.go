@@ -14,6 +14,7 @@ func TestHelperScriptsAreExecutable(t *testing.T) {
 	for _, rel := range []string{
 		"base/usr/lib/contemper/format-volumes",
 		"openrc/etc/init.d/contemper-volumes",
+		"systemd/etc/systemd/system-generators/contemper-volumes",
 	} {
 		info, err := os.Stat(filepath.Join(root, rel))
 		if err != nil {
