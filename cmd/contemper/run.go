@@ -289,7 +289,7 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 		buildInfo.Support = &guestmeta.ImageRef{Ref: supportRefForBuild, Digest: supportImg.Digest.String()}
 		for _, v := range resolvedVariants {
 			buildInfo.SupportVariants = append(buildInfo.SupportVariants, guestmeta.VariantRef{
-				Branch: v.Branch, Variant: v.Variant, Ref: v.Ref, Digest: v.Digest,
+				Branch: v.Branch, Variant: v.Variant, Ref: redactedVariantRef(v.Ref), Digest: v.Digest,
 			})
 		}
 	}
@@ -300,7 +300,7 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 		}
 		for _, v := range helperResult.Variants {
 			buildInfo.VolumeHelperVariants = append(buildInfo.VolumeHelperVariants, guestmeta.VariantRef{
-				Branch: v.Branch, Variant: v.Variant, Ref: v.Ref, Digest: v.Digest,
+				Branch: v.Branch, Variant: v.Variant, Ref: redactedVariantRef(v.Ref), Digest: v.Digest,
 			})
 		}
 	}
@@ -767,6 +767,21 @@ func redactedRefString(ref source.Ref) string {
 		return ref.String()
 	}
 	return guestmeta.RedactLocalRef(string(ref.Kind), ref.Value)
+}
+
+// redactedVariantRef is redactedRefString for a resolved variant's
+// recorded reference string (empty for a no-op variant), so a local
+// variant's host path stays out of /etc/contemper/build like any other
+// local reference.
+func redactedVariantRef(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	ref, err := source.ParseRef(raw)
+	if err != nil {
+		return raw
+	}
+	return redactedRefString(ref)
 }
 
 // machineArch maps an OCI architecture to the machine name used in bundle
