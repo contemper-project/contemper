@@ -74,7 +74,7 @@ func TestCheckPrereqsAllPresent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rfs.Close()
+	defer func() { _ = rfs.Close() }()
 	if err := volumehelper.CheckPrereqs(rfs); err != nil {
 		t.Errorf("CheckPrereqs: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestCheckPrereqsMissingMkfsExt4(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rfs.Close()
+	defer func() { _ = rfs.Close() }()
 
 	err = volumehelper.CheckPrereqs(rfs)
 	if err == nil {

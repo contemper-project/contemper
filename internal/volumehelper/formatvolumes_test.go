@@ -1,6 +1,8 @@
 package volumehelper_test
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -68,9 +70,10 @@ func runExt4Label(t *testing.T, shellPath, fn, imgPath string) (label string, ok
 	if err := os.WriteFile(runner, []byte(script), 0o755); err != nil {
 		t.Fatalf("writing runner script: %v", err)
 	}
-	out, err := exec.Command(shellPath, runner, imgPath).Output()
+	out, err := exec.CommandContext(context.Background(), shellPath, runner, imgPath).Output()
 	if err != nil {
-		if _, isExit := err.(*exec.ExitError); !isExit {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
 			t.Fatalf("running %s %s: %v", shellPath, runner, err)
 		}
 		return strings.TrimRight(string(out), "\n"), false
@@ -89,12 +92,14 @@ func makeExt4Image(t *testing.T, mkfsPath, dir, name, label string) string {
 	}
 	const size = 4 * 1024 * 1024
 	if err := f.Truncate(size); err != nil {
-		f.Close()
+		_ = f.Close()
 		t.Fatalf("truncating %s: %v", img, err)
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		t.Fatalf("closing %s: %v", img, err)
+	}
 
-	out, err := exec.Command(mkfsPath, "-q", "-F", "-L", label, img).CombinedOutput()
+	out, err := exec.CommandContext(context.Background(), mkfsPath, "-q", "-F", "-L", label, img).CombinedOutput()
 	if err != nil {
 		t.Fatalf("mkfs.ext4 -L %q %s: %v\n%s", label, img, err, out)
 	}

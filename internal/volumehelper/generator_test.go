@@ -1,6 +1,7 @@
 package volumehelper_test
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -100,7 +101,7 @@ func runGenerator(t *testing.T, volumesFile, path string) (normalDir string) {
 	}
 	env = append(env, "PATH="+path)
 
-	cmd := exec.Command("sh", abs, normalDir, earlyDir, lateDir)
+	cmd := exec.CommandContext(context.Background(), "sh", abs, normalDir, earlyDir, lateDir)
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err != nil {

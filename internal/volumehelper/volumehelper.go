@@ -141,7 +141,7 @@ func Merge(ref string, srcImg v1.Image, platform v1.Platform) (*Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("building source rootfs for the volume helper: %w", err)
 	}
-	defer srcRfs.Close()
+	defer func() { _ = srcRfs.Close() }()
 
 	if err := CheckPrereqs(srcRfs); err != nil {
 		return nil, err
