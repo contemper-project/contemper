@@ -194,7 +194,7 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 				rep.Fail("support image", err.Error(), "")
 				return err
 			}
-			defer os.RemoveAll(vr.cacheDir)
+			defer func() { _ = os.RemoveAll(vr.cacheDir) }()
 			for _, vi := range vr.images {
 				defer vi.Close()
 			}
@@ -262,7 +262,7 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 		mergeStage.Fail("merge", err.Error(), "")
 		return err
 	}
-	defer rfs.Close()
+	defer func() { _ = rfs.Close() }()
 	mergeStage.Done("🧬", mergeLabel, "")
 	reportOverlayStats(rep, overlayReportLabels, rfs.OverlayStats)
 
@@ -362,7 +362,12 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 
 	bundleName := fmt.Sprintf("%s-%s.%s", img.RepoBase, img.Tag, machineArch(platform.Architecture))
 	outBundleDir := filepath.Join(opts.outDir, bundleName)
-	if err := os.MkdirAll(outBundleDir, 0o755); err != nil {
+	// The bundle (manifest + disk image) is the tool's deliverable: it
+	// must stay readable and listable by whatever user or process later
+	// deploys it, which may not be this one - so 0o755 here, like
+	// contemper.json's own 0o644 (see bundle.Write), is intentional, not
+	// an oversight.
+	if err := os.MkdirAll(outBundleDir, 0o755); err != nil { //nolint:gosec // G301: bundle output must stay world-readable for whatever deploys it
 		return fmt.Errorf("creating %s: %w", outBundleDir, err)
 	}
 
@@ -427,7 +432,7 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 	elapsed := rep.Elapsed().Round(100 * time.Millisecond)
 	rep.Finish("bundle ready", fmt.Sprintf("%-16s%s", progress.HumanBytes(diskInfo.SizeBytes), elapsed))
 
-	fmt.Fprintln(cmd.OutOrStdout(), outBundleDir)
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), outBundleDir)
 	return nil
 }
 
@@ -497,7 +502,7 @@ func resolveVariants(schema *support.Schema, img *source.Image, platform v1.Plat
 	ok := false
 	defer func() {
 		if !ok {
-			os.RemoveAll(vr.cacheDir)
+			_ = os.RemoveAll(vr.cacheDir)
 			for _, vi := range vr.images {
 				vi.Close()
 			}
@@ -508,7 +513,7 @@ func resolveVariants(schema *support.Schema, img *source.Image, platform v1.Plat
 	if err != nil {
 		return nil, fmt.Errorf("building source rootfs for variant resolution: %w", err)
 	}
-	defer srcRfs.Close()
+	defer func() { _ = srcRfs.Close() }()
 
 	branches, err := support.Resolve(schema, func(p string) bool {
 		_, err := srcRfs.Resolve(p)
@@ -569,7 +574,7 @@ func hintsFrom(cfg *v1.ConfigFile) bundle.Hints {
 	return h
 }
 
-func runDeploy(cmd *cobra.Command, opts deployOptions) error {
+func runDeploy(_ *cobra.Command, opts deployOptions) error {
 	rep, err := newReporter(os.Stderr, opts.progressMode, opts.verbose, opts.quiet)
 	if err != nil {
 		return err

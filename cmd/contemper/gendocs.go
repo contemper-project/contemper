@@ -20,10 +20,12 @@ func newGenDocsCmd() *cobra.Command {
 		Hidden: true,
 		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := os.MkdirAll(filepath.Dir(args[0]), 0o755); err != nil {
+			// A docs page in the source tree: the same modes as any other
+			// checked-in file, so the docs build and other users can read it.
+			if err := os.MkdirAll(filepath.Dir(args[0]), 0o755); err != nil { //nolint:gosec // G301: a directory in the source tree
 				return err
 			}
-			return os.WriteFile(args[0], cliReference(cmd.Root()), 0o644)
+			return os.WriteFile(args[0], cliReference(cmd.Root()), 0o644) //nolint:gosec // G306: a docs page in the source tree
 		},
 	}
 }
