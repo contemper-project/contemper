@@ -29,6 +29,15 @@ if [ -n "$dev" ]; then
 	echo "contemper-volume-mounted label=${label:-<none>} dev=$dev" >/dev/console
 else
 	echo "contemper-volume-not-mounted" >/dev/console
+	# Diagnostics for a failed run: is the helper installed and enabled,
+	# and did OpenRC start it?
+	{
+		ls -la /etc/runlevels/boot/ /etc/init.d/contemper-volumes /usr/lib/contemper/ 2>&1
+		rc-status boot 2>&1
+		cat /etc/contemper/volumes /etc/fstab 2>&1
+		ls -la /dev/vd* /sys/block/*/serial 2>&1
+		for s in /sys/block/*/serial; do echo "$s: $(cat "$s")"; done
+	} | sed 's/^/diag: /' >/dev/console
 fi
 
 marker=/data/marker
