@@ -9,6 +9,7 @@ package localqemu
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -103,7 +104,9 @@ func planVolumeDisk(dir, name string, sizeBytes int64, exists bool, existingSize
 // shrink it (which could truncate data). Returns the disk's path and
 // whether it was just created.
 func EnsureVolumeDisk(dir, name string, sizeBytes int64) (path string, created bool, err error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	// The state dir holds this instance's persistent volume disks, so it
+	// gets tighter permissions than a throwaway scratch dir would.
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return "", false, fmt.Errorf("creating state dir %s: %w", dir, err)
 	}
 
@@ -133,7 +136,7 @@ func EnsureVolumeDisk(dir, name string, sizeBytes int64) (path string, created b
 		return "", false, err
 	}
 	args := []string{"create", "-f", "qcow2", action.Path, strconv.FormatInt(sizeBytes, 10)}
-	if out, err := exec.Command(qemuImgPath, args...).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(context.Background(), qemuImgPath, args...).CombinedOutput(); err != nil { //nolint:gosec // G204: qemuImgPath is resolved by hostenv.Required, never a shell
 		return "", false, fmt.Errorf("qemu-img create: %w\n%s", err, out)
 	}
 	return action.Path, true, nil
@@ -148,7 +151,7 @@ func qcow2VirtualSize(path string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	cmd := exec.Command(qemuImgPath, "info", "--output=json", path)
+	cmd := exec.CommandContext(context.Background(), qemuImgPath, "info", "--output=json", path) //nolint:gosec // G204: qemuImgPath is resolved by hostenv.Required, never a shell
 	var stderr bytes.Buffer
 	cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
 	out, err := cmd.Output()
