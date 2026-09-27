@@ -40,7 +40,7 @@ func Validate(rfs *rootfs.Rootfs) (*Result, error) {
 		return nil, fmt.Errorf("initrd: %w", err)
 	}
 	var cmdline string
-	if _, ok := rfs.Lookup(CmdlinePath); ok {
+	if present(rfs, CmdlinePath) {
 		cmdlineRaw, err := rfs.ReadFile(CmdlinePath)
 		if err != nil {
 			return nil, fmt.Errorf("cmdline: %w", err)
@@ -53,7 +53,7 @@ func Validate(rfs *rootfs.Rootfs) (*Result, error) {
 	}
 
 	var osRelease []byte
-	if _, ok := rfs.Lookup(OSReleasePath); ok {
+	if present(rfs, OSReleasePath) {
 		osRelease, err = rfs.ReadFile(OSReleasePath)
 		if err != nil {
 			return nil, fmt.Errorf("os-release: %w", err)
@@ -61,4 +61,16 @@ func Validate(rfs *rootfs.Rootfs) (*Result, error) {
 	}
 
 	return &Result{Kernel: kernel, Initrd: initrd, Cmdline: cmdline, OSRelease: osRelease}, nil
+}
+
+// present reports whether an optional fixed path exists: either as an
+// entry of its own (even a dangling symlink, so reading it reports the
+// problem) or reached through a symlinked parent directory, such as a
+// /boot/contemper that is itself a symlink.
+func present(rfs *rootfs.Rootfs, p string) bool {
+	if _, ok := rfs.Lookup(p); ok {
+		return true
+	}
+	_, err := rfs.Resolve(p)
+	return err == nil
 }

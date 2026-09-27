@@ -145,3 +145,33 @@ func TestValidateNoOSRelease(t *testing.T) {
 		t.Errorf("OSRelease should be nil when the image has none, got %q", res.OSRelease)
 	}
 }
+
+// TestValidateSymlinkedFixedDir checks that the optional cmdline and
+// os-release are still found when a parent directory of the fixed path
+// is a symlink, as the kernel and initrd already were.
+func TestValidateSymlinkedFixedDir(t *testing.T) {
+	rfs := build(t, []imgtest.File{
+		{Path: "boot/", Typeflag: tar.TypeDir},
+		{Path: "boot/k-6.1/", Typeflag: tar.TypeDir},
+		{Path: "boot/k-6.1/vmlinuz", Data: []byte("kernel-bytes")},
+		{Path: "boot/k-6.1/initrd", Data: []byte("initrd-bytes")},
+		{Path: "boot/k-6.1/cmdline", Data: []byte("console=ttyS0\n")},
+		{Path: "boot/contemper", Typeflag: tar.TypeSymlink, Linkname: "k-6.1"},
+		{Path: "sbin/", Typeflag: tar.TypeDir},
+		{Path: "sbin/init", Data: []byte("#!/bin/sh\n"), Mode: 0o755},
+		{Path: "usr/", Typeflag: tar.TypeDir},
+		{Path: "usr/etc/", Typeflag: tar.TypeDir},
+		{Path: "usr/etc/os-release", Data: []byte("NAME=Test\n")},
+		{Path: "etc", Typeflag: tar.TypeSymlink, Linkname: "usr/etc"},
+	})
+	res, err := validate.Validate(rfs)
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if res.Cmdline != "console=ttyS0" {
+		t.Errorf("Cmdline = %q, want the one behind the symlinked directory", res.Cmdline)
+	}
+	if string(res.OSRelease) != "NAME=Test\n" {
+		t.Errorf("OSRelease = %q, want the one behind the symlinked directory", res.OSRelease)
+	}
+}
