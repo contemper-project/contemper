@@ -10,7 +10,10 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
+
+	"github.com/contemper-project/contemper/internal/volume"
 )
 
 // FormatVersion is the current contemper.json schema version. It stays 1
@@ -128,7 +131,28 @@ func Read(dir string) (*Manifest, error) {
 	if err := json.Unmarshal(data, &m); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
+	if err := m.check(); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 	return &m, nil
+}
+
+// check rejects manifest values that deploy turns into host paths: the
+// disk file, joined onto the bundle directory, must be a plain file name,
+// and each volume name, which names a disk file in the instance's state
+// directory, must be a valid volume name. A bundle may have been copied
+// from elsewhere, so neither may point outside its directory.
+func (m *Manifest) check() error {
+	f := m.Disk.File
+	if f == "" || f == "." || f == ".." || strings.ContainsAny(f, "/\\") {
+		return fmt.Errorf("disk.file %q must be a plain file name", f)
+	}
+	for _, v := range m.Volumes {
+		if err := volume.ValidateName(v.Name); err != nil {
+			return fmt.Errorf("volume %s: %w", v.Path, err)
+		}
+	}
+	return nil
 }
 
 // Write marshals m as indented JSON to <dir>/contemper.json.

@@ -161,3 +161,38 @@ func TestWriteSupportOrigin(t *testing.T) {
 		t.Errorf("round-trip mismatch: %+v", got.Support)
 	}
 }
+
+func TestReadRejectsUnsafeValues(t *testing.T) {
+	valid := func() *bundle.Manifest {
+		return &bundle.Manifest{
+			FormatVersion: bundle.FormatVersion,
+			Disk:          bundle.DiskInfo{File: "disk.qcow2", Format: "qcow2"},
+			Volumes:       []bundle.Volume{{Name: "data", Path: "/data", FS: "ext4"}},
+		}
+	}
+	dir := t.TempDir()
+	if err := bundle.Write(dir, valid()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bundle.Read(dir); err != nil {
+		t.Fatalf("Read of a valid manifest: %v", err)
+	}
+
+	for name, mutate := range map[string]func(*bundle.Manifest){
+		"disk file with a directory": func(m *bundle.Manifest) { m.Disk.File = "../../elsewhere/disk.qcow2" },
+		"empty disk file":            func(m *bundle.Manifest) { m.Disk.File = "" },
+		"volume name with a path":    func(m *bundle.Manifest) { m.Volumes[0].Name = "../../../x" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			m := valid()
+			mutate(m)
+			dir := t.TempDir()
+			if err := bundle.Write(dir, m); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := bundle.Read(dir); err == nil {
+				t.Fatal("Read succeeded, want an error")
+			}
+		})
+	}
+}
