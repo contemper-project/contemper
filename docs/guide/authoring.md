@@ -133,4 +133,6 @@ The repository's `examples/alpine/Containerfile` is a minimal image that
 satisfies all of the above: a kernel, a generic initrd built with
 `mkinitfs`, a command line, OpenRC with a serial login, and a boot marker
 printed to the console. [Getting started](../getting-started.md) walks
-through building and booting it.
+through building and booting it. `examples/debian/Containerfile` does the
+same with systemd as init and `initramfs-tools` generating the initrd, for
+a merged-`/usr`, systemd-based starting point instead.

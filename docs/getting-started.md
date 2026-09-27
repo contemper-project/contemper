@@ -95,4 +95,6 @@ That is exactly what `make e2e` (`hack/e2e.sh`) and the CI boot test do.
 ## Next steps
 
 Read [Authoring an image](guide/authoring.md) to adapt this to your own
-image, starting from any base and any init system.
+image, starting from any base and any init system. `examples/debian` is
+the same walkthrough with systemd as init instead of OpenRC, if that's
+closer to what you're starting from.
