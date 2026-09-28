@@ -5,3 +5,4 @@
 /site/
 /docs/reference/cli.md
 /.venv/
+coverage.out

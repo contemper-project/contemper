@@ -1,0 +1,22 @@
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
+
+comment:
+  layout: "condensed_header, diff, flags, condensed_files, condensed_footer"
+  require_changes: true
+
+ignore:
+  # E2E build helpers: synthetic image builders driven by hack/*.sh, not
+  # code that ships in contemper.
+  - "hack/**"
+  # Example build files for the docs and e2e boot tests, not Go code.
+  - "examples/**"
+  # Test-only helper for building synthetic in-process OCI images; it has
+  # no behavior of its own to cover.
+  - "internal/imgtest/**"

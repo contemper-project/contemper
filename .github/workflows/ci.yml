@@ -105,8 +105,21 @@ jobs:
       - name: Install host tools (macOS)
         if: runner.os == 'macOS'
         run: brew install e2fsprogs
+      # -coverpkg=./... attributes coverage to the package that actually
+      # runs the code, not just the package whose test binary is running -
+      # without it, code only exercised through another package's tests
+      # (e.g. a higher-level package driving several internal ones) shows
+      # as uncovered. On this module that raises the total by a few points
+      # with no change to which tests run.
       - name: go test
-        run: go test ./...
+        run: go test -coverpkg=./... -coverprofile=coverage.out -covermode=atomic ./...
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.out
+          flags: ${{ matrix.os == 'ubuntu-latest' && 'linux' || 'macos' }}
+          fail_ci_if_error: false
 
   build:
     needs: changes
