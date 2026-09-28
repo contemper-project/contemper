@@ -229,22 +229,6 @@ func buildDebugfsScript(rfs *rootfs.Rootfs, payloadDir string, stage *progress.S
 		}
 	}
 
-	// debugfs grows a directory's own block allocation as entries are
-	// added to it, but doing so while linking in a TypeLink entry can
-	// leave the target inode's link count short of what's added below,
-	// which e2fsck then reports as a corrupt reference count. Ext4Options
-	// works around this by pre-expanding every directory to its final
-	// entry count right after mkdir, so no add-entry command ever
-	// triggers that growth path. 50 entries/block is an empirical
-	// average for typical name lengths;
-	// erring toward more blocks than needed is harmless.
-	const directoryEntriesPerBlock = 50
-	dirCounts := map[string]int{}
-	for p := range rfs.Index {
-		dir, _ := splitPath(p)
-		dirCounts[dir]++
-	}
-
 	var b strings.Builder
 	var warnings []string
 	fileN := 0
@@ -270,10 +254,6 @@ func buildDebugfsScript(rfs *rootfs.Rootfs, payloadDir string, stage *progress.S
 		switch hdr.Typeflag {
 		case tar.TypeDir:
 			fmt.Fprintf(&b, "mkdir %s\n", qp)
-			neededBlocks := (dirCounts[p] + directoryEntriesPerBlock - 1) / directoryEntriesPerBlock
-			for k := 1; k < neededBlocks; k++ {
-				fmt.Fprintf(&b, "expand_dir %s\n", qp)
-			}
 			writeAttrs(&b, qp, hdr)
 			if err := writeXattrs(&b, payloadDir, &xattrN, qp, hdr); err != nil {
 				return "", nil, fmt.Errorf("%s: %w", p, err)
@@ -315,7 +295,18 @@ func buildDebugfsScript(rfs *rootfs.Rootfs, payloadDir string, stage *progress.S
 			if err != nil {
 				return "", nil, fmt.Errorf("%s: hardlink target: %w", p, err)
 			}
-			hardlinks = append(hardlinks, fmt.Sprintf("ln %s %s\n", qt, qp))
+			dir, _ := splitPath(p)
+			qd, err := quoteArg(dir)
+			if err != nil {
+				return "", nil, fmt.Errorf("%s: %w", p, err)
+			}
+			// Unlike write/mkdir/symlink, debugfs's ln (make_link) does
+			// not grow a directory whose last block is already full: it
+			// fails with "No free space in the directory" and exits 0.
+			// expand_dir guarantees room for one more entry regardless of
+			// block size or name length, at the cost of at most one extra
+			// directory block per hardlink.
+			hardlinks = append(hardlinks, fmt.Sprintf("expand_dir %s\nln %s %s\n", qd, qt, qp))
 
 		case tar.TypeChar, tar.TypeBlock, tar.TypeFifo:
 			dir, base := splitPath(p)
@@ -373,12 +364,14 @@ func writeAttrs(b *strings.Builder, quotedPath string, hdr *tar.Header) {
 	fmt.Fprintf(b, "sif %s uid %d\n", quotedPath, hdr.Uid)
 	fmt.Fprintf(b, "sif %s gid %d\n", quotedPath, hdr.Gid)
 	// The leading '@' forces integer parsing: debugfs's string_to_time
-	// otherwise tries strptime("%Y%m%d%H%M%S") on a bare number before
-	// falling back to strtoll, and strptime does not range-check, so an
-	// mtime like 1789895046 is read as the date "1789-89-50 46:00:00" and
-	// stored as a timestamp beyond ext4's representable range. e2fsck -fn
-	// then flags those as "beyond 2310-04-04 are likely pre-1970" and the
-	// conversion fails.
+	// otherwise tries strptime on a bare number, first with
+	// "%Y%m%d%H%M%S" and then with "%Y%m%d%H%M", before falling back to
+	// parsing it as a plain integer. A Unix time whose digits happen to
+	// parse under either format is stored as that (wrong) date instead of
+	// the intended one - silently in most cases, since the result is
+	// still a valid ext4 timestamp; only when it lands beyond ext4's
+	// representable range does e2fsck -fn catch it, reporting "beyond
+	// 2310-04-04 are likely pre-1970".
 	fmt.Fprintf(b, "sif %s mtime @%d\n", quotedPath, hdr.ModTime.Unix())
 }
 
