@@ -32,7 +32,8 @@
 // Usage:
 //
 //	buildimg -prefix ghcr.io/contemper-project -tag v1 \
-//	    -support-dir /path/to/support/volumes-support [-revision <commit-sha>]
+//	    -support-dir /path/to/support/volumes-support [-revision <commit-sha>] \
+//	    [-digests-file /path/to/digests.txt]
 package main
 
 import (
@@ -72,11 +73,12 @@ func main() {
 }
 
 func run() error {
-	var prefix, tag, supportDir, revision string
+	var prefix, tag, supportDir, revision, digestsFile string
 	flag.StringVar(&prefix, "prefix", "", "registry prefix, e.g. ghcr.io/contemper-project or localhost:5555/contemper-e2e")
 	flag.StringVar(&tag, "tag", "v1", "tag to publish the images under")
 	flag.StringVar(&supportDir, "support-dir", "", "path to support/volumes-support (containing base/, openrc/, systemd/)")
 	flag.StringVar(&revision, "revision", "", "commit SHA to record as org.opencontainers.image.revision (optional)")
+	flag.StringVar(&digestsFile, "digests-file", "", "if set, append one '<image-name> <digest>' line per pushed image to this file (created if missing), for a caller that wants each image's digest without scraping stdout")
 	flag.Parse()
 
 	if prefix == "" {
@@ -86,38 +88,70 @@ func run() error {
 		return fmt.Errorf("-support-dir is required")
 	}
 
-	openrcRef, openrcDigest, err := buildAndPush(filepath.Join(supportDir, "openrc"), prefix+"/volumes-support-init-system-openrc:"+tag, nil,
+	openrcName := prefix + "/volumes-support-init-system-openrc"
+	openrcRef, openrcDigest, err := buildAndPush(filepath.Join(supportDir, "openrc"), openrcName+":"+tag, nil,
 		ociAnnotations("volumes-support-init-system-openrc", revision,
 			"OpenRC integration for contemper's volume-formatting boot helper: runs it as an init.d service before local filesystems are mounted."))
 	if err != nil {
 		return fmt.Errorf("openrc variant: %w", err)
 	}
 	fmt.Printf("pushed %s@%s\n", openrcRef, openrcDigest)
+	if err := appendDigest(digestsFile, openrcName, openrcDigest); err != nil {
+		return fmt.Errorf("recording digest for openrc variant: %w", err)
+	}
 
-	systemdRef, systemdDigest, err := buildAndPush(filepath.Join(supportDir, "systemd"), prefix+"/volumes-support-init-system-systemd:"+tag, nil,
+	systemdName := prefix + "/volumes-support-init-system-systemd"
+	systemdRef, systemdDigest, err := buildAndPush(filepath.Join(supportDir, "systemd"), systemdName+":"+tag, nil,
 		ociAnnotations("volumes-support-init-system-systemd", revision,
 			"systemd integration for contemper's volume-formatting boot helper: runs it as a oneshot service before local filesystems are mounted."))
 	if err != nil {
 		return fmt.Errorf("systemd variant: %w", err)
 	}
 	fmt.Printf("pushed %s@%s\n", systemdRef, systemdDigest)
+	if err := appendDigest(digestsFile, systemdName, systemdDigest); err != nil {
+		return fmt.Errorf("recording digest for systemd variant: %w", err)
+	}
 
-	openrcByDigest := fmt.Sprintf("%s/volumes-support-init-system-openrc@%s", prefix, openrcDigest)
-	systemdByDigest := fmt.Sprintf("%s/volumes-support-init-system-systemd@%s", prefix, systemdDigest)
+	openrcByDigest := fmt.Sprintf("%s@%s", openrcName, openrcDigest)
+	systemdByDigest := fmt.Sprintf("%s@%s", systemdName, systemdDigest)
 	baseAnnotations := map[string]string{
 		"io.contemper.branch.init-system.openrc.requires.files":  "/sbin/openrc",
 		"io.contemper.branch.init-system.openrc.image":           openrcByDigest,
 		"io.contemper.branch.init-system.systemd.requires.files": "/usr/lib/systemd/systemd",
 		"io.contemper.branch.init-system.systemd.image":          systemdByDigest,
 	}
-	baseRef, baseDigest, err := buildAndPush(filepath.Join(supportDir, "base"), prefix+"/volumes-support:"+tag, baseAnnotations,
+	baseName := prefix + "/volumes-support"
+	baseRef, baseDigest, err := buildAndPush(filepath.Join(supportDir, "base"), baseName+":"+tag, baseAnnotations,
 		ociAnnotations("volumes-support", revision,
 			"contemper's volume-formatting boot helper: formats a blank declared volume and reuses an already-formatted one, leaving anything else alone."))
 	if err != nil {
 		return fmt.Errorf("base image: %w", err)
 	}
 	fmt.Printf("pushed %s@%s\n", baseRef, baseDigest)
+	if err := appendDigest(digestsFile, baseName, baseDigest); err != nil {
+		return fmt.Errorf("recording digest for base image: %w", err)
+	}
 
+	return nil
+}
+
+// appendDigest appends "name digest\n" to path, creating it if needed, so a
+// caller (a CI workflow attesting build provenance, e.g.) can read back
+// which digest each image name was last pushed at without parsing stdout.
+// It does nothing when path is empty - the default, and what
+// hack/e2e-volumes.sh relies on.
+func appendDigest(path, name string, digest v1.Hash) error {
+	if path == "" {
+		return nil
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644) //nolint:gosec // G302: not a secret, just a scratch file this process's own caller reads back
+	if err != nil {
+		return fmt.Errorf("opening %s: %w", path, err)
+	}
+	defer f.Close() //nolint:errcheck // best-effort close after a successful write below
+	if _, err := fmt.Fprintf(f, "%s %s\n", name, digest); err != nil {
+		return fmt.Errorf("writing to %s: %w", path, err)
+	}
 	return nil
 }
 

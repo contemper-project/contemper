@@ -3,7 +3,10 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	v1 "github.com/google/go-containerregistry/pkg/v1"
 )
 
 // TestBuildIndexAnnotations checks that buildIndex sets the OCI
@@ -120,5 +123,47 @@ func TestOCIAnnotationsRevisionOptional(t *testing.T) {
 	anns = ociAnnotations("volumes-support", "deadbeef", "a description")
 	if anns["org.opencontainers.image.revision"] != "deadbeef" {
 		t.Errorf("revision annotation = %q, want %q", anns["org.opencontainers.image.revision"], "deadbeef")
+	}
+}
+
+// TestAppendDigestEmptyPathIsNoop checks that an empty -digests-file (the
+// default, and what hack/e2e-volumes.sh relies on) writes nothing anywhere.
+func TestAppendDigestEmptyPathIsNoop(t *testing.T) {
+	if err := appendDigest("", "example.com/img", v1.Hash{}); err != nil {
+		t.Fatalf("appendDigest with empty path: %v", err)
+	}
+}
+
+// TestAppendDigestAppends checks that appendDigest creates the file on its
+// first call and appends further "name digest" lines to it afterwards,
+// rather than overwriting - a CI workflow calls buildimg once per tag it
+// publishes, and expects every pushed image's digest to still be there
+// after both calls.
+func TestAppendDigestAppends(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "digests.txt")
+
+	h1, err := v1.NewHash("sha256:" + strings.Repeat("1", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h2, err := v1.NewHash("sha256:" + strings.Repeat("2", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := appendDigest(path, "example.com/a", h1); err != nil {
+		t.Fatalf("first appendDigest: %v", err)
+	}
+	if err := appendDigest(path, "example.com/b", h2); err != nil {
+		t.Fatalf("second appendDigest: %v", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "example.com/a " + h1.String() + "\n" + "example.com/b " + h2.String() + "\n"
+	if string(got) != want {
+		t.Errorf("digests file = %q, want %q", got, want)
 	}
 }
