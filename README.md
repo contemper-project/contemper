@@ -5,6 +5,7 @@
 [![Latest release](https://img.shields.io/github/v/release/contemper-project/contemper)](https://github.com/contemper-project/contemper/releases)
 [![License](https://img.shields.io/github/license/contemper-project/contemper)](LICENSE)
 [![Go version](https://img.shields.io/github/go-mod/go-version/contemper-project/contemper)](go.mod)
+[![Coverage](https://codecov.io/gh/contemper-project/contemper/graph/badge.svg?token=KVKFFGZCSP)](https://codecov.io/gh/contemper-project/contemper)
 [![Docs](https://img.shields.io/badge/docs-contemper--project.github.io-blue)](https://contemper-project.github.io/contemper/)
 
 Build bootable VM images from container images.
