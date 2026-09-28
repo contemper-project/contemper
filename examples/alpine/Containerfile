@@ -3,7 +3,7 @@
 # console, so this image can be booted end-to-end without any further
 # configuration. See ../../README.md for the fixed-path contract this
 # satisfies.
-FROM alpine:3.22
+FROM alpine:3.24
 
 LABEL io.contemper.ready="true"
 
