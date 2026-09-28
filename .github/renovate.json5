@@ -1,0 +1,212 @@
+// Renovate configuration: https://docs.renovatebot.com/configuration-options/
+//
+// Replaces dependabot.yml's version-update entries (gomod, github-actions,
+// uv) and additionally covers the version pins Dependabot can't see: the
+// GoReleaser and golangci-lint action inputs, the `go` directive in
+// go.mod, the example/test container base images, the local end-to-end
+// test registry image, and the embedded systemd-boot-efi stub version.
+// Dependabot's security alerts stay on separately (a repository setting,
+// not config here).
+//
+// Install the Mend Renovate GitHub App for this repository after this
+// file merges to main; it reads this config, opens the Dependency
+// Dashboard issue, and starts opening PRs on the schedule below.
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: [
+    'config:recommended',
+    // Keeps GitHub Actions pinned to a full commit SHA with a trailing
+    // "# vX.Y.Z" comment (our existing style) and tracks the comment's
+    // semver precision, instead of collapsing every bump into an opaque
+    // "digest" update.
+    'helpers:pinGitHubActionDigestsToSemver',
+  ],
+  // config:recommended already turns on the Dependency Dashboard issue.
+  dependencyDashboard: true,
+  // config:recommended's :ignoreModulesAndTests preset ignores
+  // "**/examples/**" (aimed at vendored dependency examples, not ours):
+  // examples/alpine and examples/debian are real, deployable image
+  // definitions whose base images we want tracked, so clear it. This
+  // repo has no vendor/, node_modules/ or test-fixture directories for
+  // the rest of that preset's list to matter.
+  ignorePaths: [],
+  timezone: 'Europe/Vienna',
+  schedule: ['before 6am on monday'],
+  semanticCommits: 'enabled',
+  // No automerge anywhere: branch protection requires checks and a
+  // review on every PR regardless.
+
+  packageRules: [
+    // --- Go modules (go.mod / go.sum). Broad rule first so every update
+    // type - minor, patch, major, and anything else Renovate might ever
+    // propose here (e.g. a digest/pin update, a replacement) - gets our
+    // commit type/scope instead of falling back to config:recommended's
+    // generic "chore". Includes the `tool` directive (gotestsum).
+    {
+      matchManagers: ['gomod'],
+      semanticCommitType: 'deps',
+      semanticCommitScope: 'gomod',
+    },
+    // Minor + patch grouped; majors are left ungrouped (one PR each) by
+    // simply not matching them here.
+    {
+      matchManagers: ['gomod'],
+      matchUpdateTypes: ['minor', 'patch'],
+      groupName: 'Go module updates (minor & patch)',
+    },
+    {
+      matchManagers: ['gomod'],
+      postUpdateOptions: ['gomodTidy'],
+    },
+    // The `go` directive itself: Renovate doesn't propose updates to it
+    // without rangeStrategy "bump". Kept out of the grouping rule above
+    // (this rule is last, so its own groupName wins for this depType)
+    // since a language version bump deserves its own review, not to
+    // ride along with a dependency group.
+    {
+      matchManagers: ['gomod'],
+      matchDepTypes: ['golang'],
+      rangeStrategy: 'bump',
+      groupName: 'Go language version',
+    },
+
+    // --- GitHub Actions. Same broad-then-group pattern as gomod above:
+    // every update type gets ci(actions), minor+patch are grouped,
+    // majors (and pin/digest updates, if any action is ever added
+    // unpinned) are one PR each.
+    {
+      matchManagers: ['github-actions'],
+      semanticCommitType: 'ci',
+      semanticCommitScope: 'actions',
+    },
+    {
+      matchManagers: ['github-actions'],
+      matchUpdateTypes: ['minor', 'patch'],
+      groupName: 'GitHub Actions updates (minor & patch)',
+    },
+
+    // --- uv-managed docs tooling (pyproject.toml / uv.lock). Same
+    // broad-then-group pattern; also covers the lockFileMaintenance
+    // branch, which Renovate reports as its own updateType.
+    {
+      matchManagers: ['pep621'],
+      semanticCommitType: 'build',
+      semanticCommitScope: 'uv',
+    },
+    {
+      matchManagers: ['pep621'],
+      matchUpdateTypes: ['minor', 'patch'],
+      groupName: 'Python docs tooling updates (minor & patch)',
+    },
+
+    // --- Container base images (examples/*/Containerfile,
+    // hack/e2e-volumes/Containerfile), matched by Renovate's dockerfile
+    // manager (it matches files literally named "Containerfile" as well
+    // as "Dockerfile" by default). Tags stay tags: these are
+    // user-facing examples, not something we want pinned to a digest.
+    // debian:trixie-slim is a codename tag - Renovate has nothing to
+    // bump there until "trixie" is superseded as Debian's stable
+    // release.
+    {
+      matchManagers: ['dockerfile'],
+      pinDigests: false,
+      semanticCommitType: 'build',
+      semanticCommitScope: 'containers',
+    },
+
+    // --- Custom-managed version pins Dependabot can't see (see the
+    // customManagers section below for what extracts each one).
+
+    // GoReleaser's version, pinned identically in release.yml and
+    // release-checks.yml: same depName in both files, so Renovate opens
+    // one PR touching both.
+    {
+      matchDatasources: ['github-releases'],
+      matchDepNames: ['goreleaser/goreleaser'],
+      groupName: 'GoReleaser version',
+      semanticCommitType: 'ci',
+      semanticCommitScope: 'release',
+    },
+    // golangci-lint-action's `version` input in ci.yml.
+    {
+      matchDatasources: ['github-releases'],
+      matchDepNames: ['golangci/golangci-lint'],
+      groupName: 'golangci-lint version',
+      semanticCommitType: 'ci',
+      semanticCommitScope: 'lint',
+    },
+    // The local registry image hack/e2e-variants.sh and
+    // hack/e2e-volumes.sh start for the support-image variant tests.
+    // Docker Hub's library/registry is tagged both as a floating major
+    // ("2") and exact versions; we track the major tag to keep this
+    // simple, so this rule only fires once Docker Hub publishes a
+    // "registry:3".
+    {
+      matchDatasources: ['docker'],
+      matchDepNames: ['registry'],
+      groupName: 'local end-to-end test registry image',
+      semanticCommitType: 'build',
+      semanticCommitScope: 'containers',
+    },
+    // The embedded systemd-boot-efi UEFI stub version pinned in
+    // hack/fetch-stubs.sh. The hosted Renovate app can only edit the
+    // pin - it can't run the script that downloads, verifies and
+    // re-extracts the stub binaries - so this is gated behind Dependency
+    // Dashboard approval, and the PR body explains what a human still
+    // has to do.
+    {
+      matchDatasources: ['deb'],
+      matchDepNames: ['systemd-boot-efi'],
+      semanticCommitType: 'build',
+      semanticCommitScope: 'uki',
+      dependencyDashboardApproval: true,
+      prBodyNotes: [
+        'The hosted Renovate app can only bump the version string in `hack/fetch-stubs.sh`. Before merging this PR, check it out locally, run `./hack/fetch-stubs.sh`, and commit the resulting `internal/uki/stubs/*.efi.stub` and `internal/uki/stubs/SHA256SUMS` changes onto this branch - otherwise the embedded stub binaries and the version string this PR bumped will disagree.',
+      ],
+    },
+  ],
+
+  customManagers: [
+    {
+      customType: 'regex',
+      managerFilePatterns: [
+        '/^\\.github/workflows/release\\.yml$/',
+        '/^\\.github/workflows/release-checks\\.yml$/',
+      ],
+      matchStrings: ['version:\\s*(?<currentValue>v\\d+\\.\\d+\\.\\d+)\\n'],
+      depNameTemplate: 'goreleaser/goreleaser',
+      datasourceTemplate: 'github-releases',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/^\\.github/workflows/ci\\.yml$/'],
+      matchStrings: ['version:\\s*(?<currentValue>v\\d+\\.\\d+\\.\\d+)\\n'],
+      depNameTemplate: 'golangci/golangci-lint',
+      datasourceTemplate: 'github-releases',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: [
+        '/^hack/e2e-variants\\.sh$/',
+        '/^hack/e2e-volumes\\.sh$/',
+      ],
+      matchStrings: ['\\bregistry:(?<currentValue>[\\w.-]+)\\b'],
+      depNameTemplate: 'registry',
+      datasourceTemplate: 'docker',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/^hack/fetch-stubs\\.sh$/'],
+      matchStrings: ['SYSTEMD_BOOT_EFI_VERSION="(?<currentValue>[^"]+)"'],
+      depNameTemplate: 'systemd-boot-efi',
+      datasourceTemplate: 'deb',
+      versioningTemplate: 'deb',
+      registryUrlTemplate: 'https://deb.debian.org/debian?suite=trixie&components=main&binaryArch=amd64',
+    },
+  ],
+
+  lockFileMaintenance: {
+    enabled: true,
+    schedule: ['before 6am on monday'],
+  },
+}
