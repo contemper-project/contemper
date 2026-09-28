@@ -16,6 +16,13 @@ go test ./...
 
 `make build`, `make vet` and `make test` do the same.
 
+For a local coverage report:
+
+```sh
+go test -coverprofile=coverage.out -covermode=atomic ./...
+go tool cover -html=coverage.out
+```
+
 Run the linter with [golangci-lint](https://golangci-lint.run/) (see
 `.golangci.yml` for the enabled linters and formatters) before opening a
 PR - CI runs the same check:
