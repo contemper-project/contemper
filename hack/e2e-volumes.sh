@@ -121,9 +121,9 @@ registry_started=0
 registry_up() { curl -fsS -o /dev/null "http://${REGISTRY_HOST}/v2/"; }
 
 if ! registry_up; then
-	echo "==> starting a local registry (${engine} run registry:2)" >&2
+	echo "==> starting a local registry (${engine} run registry:3)" >&2
 	"${engine}" rm -f "${REGISTRY_NAME}" >/dev/null 2>&1 || true
-	"${engine}" run -d --rm --name "${REGISTRY_NAME}" -p "127.0.0.1:${REGISTRY_HOST##*:}:5000" registry:2 >/dev/null
+	"${engine}" run -d --rm --name "${REGISTRY_NAME}" -p "127.0.0.1:${REGISTRY_HOST##*:}:5000" registry:3 >/dev/null
 	registry_started=1
 	for _ in $(seq 1 50); do
 		if registry_up; then
