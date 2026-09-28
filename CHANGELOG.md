@@ -2,118 +2,87 @@
 
 ## 0.1.0 (2026-09-28)
 
+The first release of contemper: build bootable VM images from container
+images. You author a VM image as an ordinary container build, push it
+like any other image, and contemper turns it into a disk.
 
-### Features
+This is an early, proof-of-concept release. The path from image to
+booting VM works end to end and is tested in CI, but expect rough edges,
+missing features and breaking changes before 1.0.
 
-* **convert:** declare and size volumes, write guest metadata ([e5b81c6](https://github.com/contemper-project/contemper/commit/e5b81c693dc6962ae3219642ebc3b29b7a804003))
-* **convert:** merge the automatic volume-formatting helper ([95c52ec](https://github.com/contemper-project/contemper/commit/95c52ec70c0c6c0f6a2a46ce179c9172e3c0c390))
-* **convert:** report download size and rootfs contribution per overlay ([4973f11](https://github.com/contemper-project/contemper/commit/4973f116d9a665805526c86f83ba1fecfaaf9233))
-* **deploy:** size volumes and attach them as per-instance qcow2 disks ([bfacae7](https://github.com/contemper-project/contemper/commit/bfacae77bb2fb71d06cb8bf5bacc1c0d29f61b21))
-* **examples:** add a systemd-based Debian example ([1a889f1](https://github.com/contemper-project/contemper/commit/1a889f1d957b3d0337e9511c71d419383f6b0089))
-* **guestmeta:** render /etc/contemper/build, /etc/contemper/volumes and fstab ([c393c87](https://github.com/contemper-project/contemper/commit/c393c8772dc0889c509d6648e84843e2acf5d55d))
-* **release:** publish .deb/.rpm packages and a Homebrew cask ([a470fae](https://github.com/contemper-project/contemper/commit/a470faeda602bd21df1ab992016df4433afe8c3f))
-* **rootfs:** add synthetic entry injection for convert-time content ([d5d59a3](https://github.com/contemper-project/contemper/commit/d5d59a3a62acce740e4809b501f55cb8ed25e776))
-* **rootfs:** report per-overlay contribution stats from Build ([e76a0ac](https://github.com/contemper-project/contemper/commit/e76a0ac08cabcc9d349efb76097f086d4de9eff2))
-* **target:** add a serial-pattern hook for /etc/contemper/volumes ([aeb933e](https://github.com/contemper-project/contemper/commit/aeb933e4fdb0a55a2434bc8b08bca1e2710488de))
-* **version:** resolve version from ldflags with a debug.ReadBuildInfo fallback ([7ae6698](https://github.com/contemper-project/contemper/commit/7ae6698be48714a960ed97c86eacb4864bf1e6de))
-* **volumes-support:** add OCI description annotations to published images ([1c6a650](https://github.com/contemper-project/contemper/commit/1c6a6508a78ecf237ee730c37a5dd3b8a46feace))
-* **volumes:** add name derivation, validation and spec resolution ([1d49032](https://github.com/contemper-project/contemper/commit/1d49032aba7b8bd048781ecab776ddbb8fc618b4))
-* **volumes:** add the first-boot volume-formatting helper scripts ([b5f7df8](https://github.com/contemper-project/contemper/commit/b5f7df89250610eb9c9c60eb31487d064d8fd1f6))
+### What it does
 
+- **`contemper convert`** turns a contemper-ready OCI image into a
+  bundle: a UEFI-bootable qcow2 disk (a Unified Kernel Image on the EFI
+  partition, a writable ext4 root) plus `contemper.json`, which records
+  the image digests and support images the disk came from. A failed
+  conversion leaves no partial bundle behind, and converting again
+  replaces the previous bundle as a whole.
+- **Nothing from the image runs during conversion.** contemper merges
+  layers and reads files; it needs no container runtime, no root and no
+  emulation. An arm64 disk builds on an x86-64 host, and the other way
+  round.
+- **Sources:** registry references (using the docker/podman
+  credentials you already have), OCI archives, OCI layouts and docker
+  archives. Multi-platform images resolve to the target architecture.
+- **Support images** layer what a platform needs on top of your image.
+  Their variants let one support image adapt to what it's merged into,
+  for example OpenRC vs. systemd.
+- **Volumes:** `VOLUME` declarations become separate data disks, sized
+  by an image label or at deploy time (`deploy --volume /data=10GiB`),
+  and attached per instance. A helper merged into the image formats a
+  blank volume on first boot and reuses an existing one, on OpenRC and
+  systemd.
+- **`contemper deploy --to local-qemu`** boots a bundle under QEMU, with
+  KVM or HVF acceleration where available and software emulation for a
+  foreign architecture.
+- Runs on Linux and macOS, amd64 and arm64.
 
-### Bug Fixes
+### Install
 
-* **bundle:** reject disk and volume names that escape their directory ([6f00b27](https://github.com/contemper-project/contemper/commit/6f00b273028c6d1417a9ed46b3144605f50bbf0c))
-* **ci:** list only the PR's own commits when its base is behind ([a8c478d](https://github.com/contemper-project/contemper/commit/a8c478da1f8a21c6bdd05c567b5cbfaad8b0f049))
-* **cmd:** satisfy golangci-lint findings in the CLI entry points ([5575709](https://github.com/contemper-project/contemper/commit/557570984a50d0b8dbbee291096521278add6b97))
-* **convert:** redact local variant references in /etc/contemper/build ([72f3eca](https://github.com/contemper-project/contemper/commit/72f3eca68f462630cd52223f09c2b3dfdad3c7ad))
-* **convert:** write the bundle atomically ([4714b3f](https://github.com/contemper-project/contemper/commit/4714b3ff5f9afdb5571af86870f3d5b90ad8e001))
-* **deploy:** attach volumes as virtio-blk devices carrying the serial ([2045acf](https://github.com/contemper-project/contemper/commit/2045acf566830fca7821a6b7e3d742f2fae2c2c6))
-* **deploy:** reap QEMU before returning so volumes can be reattached ([966534b](https://github.com/contemper-project/contemper/commit/966534bc6d71759919b73d88e6af83fb13bfae1d))
-* **deploy:** stop waiting for --expect as soon as QEMU exits ([0032fc2](https://github.com/contemper-project/contemper/commit/0032fc2b4af1596cb898c302b641832f66777ed1))
-* **disk:** bound debugfs script lines so none can be split ([93b8183](https://github.com/contemper-project/contemper/commit/93b8183023918c65cdf21fd67d020984d967de28))
-* **disk:** check written image close errors; satisfy remaining findings ([ef8577a](https://github.com/contemper-project/contemper/commit/ef8577ad2b2eaa16ae25b3fc03c8b9f64f8bcdce))
-* **disk:** ignore debugfs's command echo when scanning for errors ([db598f0](https://github.com/contemper-project/contemper/commit/db598f0928e883f5063513e2d22fe3e2dbc48d41))
-* **disk:** keep extended attributes on device nodes and FIFOs ([9a8f89e](https://github.com/contemper-project/contemper/commit/9a8f89e7da3980c0d0f2fd9e919e05d87e605785))
-* **disk:** reject hardlinks to removed or directory targets up front ([c709863](https://github.com/contemper-project/contemper/commit/c709863510a61172dbf63072ce01a93f625b0ec6))
-* **disk:** round the root partition size up to a whole MiB ([5a98105](https://github.com/contemper-project/contemper/commit/5a98105def1e0dd84875dc761f55678187dd9540))
-* **e2e-volumes:** stop the boot check from depending on e2label ([6ac664d](https://github.com/contemper-project/contemper/commit/6ac664d93147e3727224d7a029b7b05ebc37c455))
-* **guestmeta:** escape the mount point in appended fstab lines ([d5a976e](https://github.com/contemper-project/contemper/commit/d5a976ec69abaa6d2020704bdc676fb07b3398b2))
-* **hack:** fetch the UEFI stubs over HTTPS ([37f1fd2](https://github.com/contemper-project/contemper/commit/37f1fd2329e148bace2f623eef9846feb3c42ad4))
-* **hack:** sync the volume marker before announcing a fresh volume ([342d967](https://github.com/contemper-project/contemper/commit/342d96710301737cbc4b3c657f812a51dd354eee))
-* **hack:** verify UEFI stub downloads against Debian's signed archive metadata ([35c7ca2](https://github.com/contemper-project/contemper/commit/35c7ca21e51617f779c88a3be91ef6cb2822b61c))
-* **hostenv:** suggest qemu-utils for a missing qemu-img on Linux ([673f3e9](https://github.com/contemper-project/contemper/commit/673f3e95e971013ef285d4d2e3a0689c51f79166))
-* **localqemu:** tighten the state dir and annotate gosec findings ([7baba97](https://github.com/contemper-project/contemper/commit/7baba97e915d407d9beb0f83c95da0f930a9d5b0))
-* **qemu:** escape commas in -drive values and check the disk format ([bcd2514](https://github.com/contemper-project/contemper/commit/bcd25147a06fb7553a4554ef0576556f75d67d53))
-* **qemu:** remove the temporary serial log after deploy ([f24c368](https://github.com/contemper-project/contemper/commit/f24c368d4c703bb2415046c7e98797f5238c598d))
-* **qemu:** use software emulation for a foreign-architecture bundle ([57c1187](https://github.com/contemper-project/contemper/commit/57c1187d0512215ef6730ece3538b0214714d0b8))
-* **qemu:** wrap both errors in waitForExpect for errors.Is ([5003286](https://github.com/contemper-project/contemper/commit/500328673a0ae323de7729792c6f0016200ef382))
-* **rootfs:** check tar file close errors; wrap resolve errors ([0ff7b8a](https://github.com/contemper-project/contemper/commit/0ff7b8af60f06673f3eef52fae64b73c6dfca4f4))
-* **rootfs:** resolve symlinks in intermediate path segments too ([71d3de9](https://github.com/contemper-project/contemper/commit/71d3de91f9c172f41726adc065f9c5ad5d71ce44))
-* **rootfs:** synthesize parent directories a layer does not list ([2b6f261](https://github.com/contemper-project/contemper/commit/2b6f261c3040cdb15c2dbc98cb14729464e065a8))
-* **source:** check extracted file close errors; tighten scratch perms ([ec438eb](https://github.com/contemper-project/contemper/commit/ec438eb17ae0f67be4205d1f62237a8e2f147fd1))
-* **source:** follow nested image indexes and skip attestation manifests ([4c4bec4](https://github.com/contemper-project/contemper/commit/4c4bec41308b8cd59b862474d6dfa00a379a7e85))
-* **source:** prefer containerd image name for bundle naming ([716bac6](https://github.com/contemper-project/contemper/commit/716bac6d0cce1b2c187c3afdd8a00a2d21b109b7))
-* **support:** keep registry support images from naming local variants ([15f9273](https://github.com/contemper-project/contemper/commit/15f9273ec666098c0477a5eca5d108497aa1176a))
-* **support:** require variant images from the support image's own registry ([ed771f5](https://github.com/contemper-project/contemper/commit/ed771f5ec739fc25094ce2ab5e1be64ff8840786))
-* **target:** check copied disk image close errors ([702a333](https://github.com/contemper-project/contemper/commit/702a3331668048855a032d6c0c2c0c875b2cde27))
-* **uki:** bound gzip kernel decompression ([c43dc0c](https://github.com/contemper-project/contemper/commit/c43dc0caeaff6b56543877bc1f8dbfbf23d03c05))
-* **uki:** reject section data too large for a PE32+ image ([28cc781](https://github.com/contemper-project/contemper/commit/28cc78140958f22412c0fdd5ce3482cfee7336a6))
-* **validate:** find cmdline and os-release behind symlinked directories ([65b4904](https://github.com/contemper-project/contemper/commit/65b490483e0143e473b46d8505598de0a67fb40f))
-* **volume:** reject negative, non-finite and overflowing sizes ([5896f19](https://github.com/contemper-project/contemper/commit/5896f19118bbaf797585cc3fb5c5c3addac4dffc))
-* **volume:** reject relative VOLUME paths and control characters ([96d848f](https://github.com/contemper-project/contemper/commit/96d848f80f6f40b226654aca3796432e617debb7))
-* **volumes:** check for blank disks without temporary files ([d79c7b2](https://github.com/contemper-project/contemper/commit/d79c7b20128b013494dd54f543273d4a7b534754))
-* **volumes:** commit the OpenRC init script as executable ([5158fa4](https://github.com/contemper-project/contemper/commit/5158fa46369c1a570ef3ce9ec70c4cee8128362e))
-* **volumes:** enable the OpenRC helper service and run it before fsck ([2a50772](https://github.com/contemper-project/contemper/commit/2a50772fdbad682a480cf99de6a2e1220a921aae))
-* **volumes:** have udev re-probe a volume right after formatting it ([7c8e1df](https://github.com/contemper-project/contemper/commit/7c8e1dfd05f2d9cffbe628eef842cb4806c070e0))
-* **volumes:** order systemd volume mounts before local-fs.target ([6ba5be7](https://github.com/contemper-project/contemper/commit/6ba5be72f49ca10f78a310116b1b82b1bd40ae13))
-* **volumes:** read the ext4 label from the superblock, not e2label ([b4abbcb](https://github.com/contemper-project/contemper/commit/b4abbcb2820e411cc263bc3ae0ff796adadb6399))
-* **volumes:** restore the helper scripts' executable bits ([38fa7d7](https://github.com/contemper-project/contemper/commit/38fa7d78f612e4c7fba6911c82a5f623ff12400e))
+- **macOS (Homebrew):** `brew install contemper-project/tap/contemper`
+  (also installs e2fsprogs and QEMU).
+- **Debian/Ubuntu:** download the `.deb` below and
+  `sudo apt install ./contemper_0.1.0_linux_amd64.deb`.
+- **Fedora/RHEL:** download the `.rpm` below and
+  `sudo dnf install ./contemper-0.1.0-1.x86_64.rpm`.
+- **Anything else:** the `.tar.gz` archives below, plus the host tools:
+  e2fsprogs (`mkfs.ext4`, `debugfs`, `e2fsck`) and `qemu-img` to convert,
+  QEMU and UEFI firmware to deploy.
 
+The packages install what `convert` needs; for `deploy`, add the
+emulator and firmware for the bundles you boot. See
+[Install](https://contemper-project.github.io/contemper/getting-started/#install)
+and [Host tools](https://contemper-project.github.io/contemper/reference/host-tools/).
 
-### Dependencies
+Every archive and package is listed in `checksums.txt` and carries a
+signed build provenance attestation:
 
-* bump golang.org/x/mod and golang.org/x/text past known advisories ([6381123](https://github.com/contemper-project/contemper/commit/63811234e49f1e21267d0af358177ccacdcc860a))
+```console
+$ gh attestation verify contemper_0.1.0_linux_amd64.tar.gz --repo contemper-project/contemper
+```
 
+### Getting started
 
-### Documentation
+- Documentation: https://contemper-project.github.io/contemper/
+- An image needs a kernel, a generic initrd and an init system at fixed
+  paths, and the `io.contemper.ready="true"` label. See
+  [Authoring images](https://contemper-project.github.io/contemper/guide/authoring/);
+  `examples/` has an Alpine (OpenRC) and a Debian (systemd) image.
 
-* add a DCO section to CONTRIBUTING ([2fa8a31](https://github.com/contemper-project/contemper/commit/2fa8a3160bf718df4756b959ff3aee0fc99adcf9))
-* add the documentation site ([58099d3](https://github.com/contemper-project/contemper/commit/58099d33536053f681b89b4ce7b5a4a73a08a39b))
-* add the support-image annotation schema reference ([dfbb4ea](https://github.com/contemper-project/contemper/commit/dfbb4eaf53374b5e7b1f16a83298bbf9071721d6))
-* **bundle:** document convert's overwrite behavior ([d75795f](https://github.com/contemper-project/contemper/commit/d75795fed487a1fbd6ac2dcbbc37d115ec1f30fe))
-* **contributing:** note how to get a local coverage report ([a29cee8](https://github.com/contemper-project/contemper/commit/a29cee86a672fbf6aad24446761f78cdb1be2388))
-* correct the Packer comparison to its ISO-driven installs ([9d58224](https://github.com/contemper-project/contemper/commit/9d582246a2abe439a1d914ff216f65516ac1b6ab))
-* **design:** close answered open questions ([3b874a5](https://github.com/contemper-project/contemper/commit/3b874a51c2b3d5f32c87b290c61468b5de7fa9e6))
-* **design:** make the roadmap forward-looking ([ca7b41a](https://github.com/contemper-project/contemper/commit/ca7b41a450eaa0f9aabdc09fac35120946c60312))
-* document per-target default support images ([c4da0e6](https://github.com/contemper-project/contemper/commit/c4da0e693044bd2547ff48d208d6d65da195843e))
-* document running the linter locally ([69e5dd7](https://github.com/contemper-project/contemper/commit/69e5dd7c5bc6adcb7af9cfeacf6db891ecfcd8c8))
-* document verifying release and image provenance ([d2454c0](https://github.com/contemper-project/contemper/commit/d2454c08eaf31b30603828e4e45dbb97e8658562))
-* **getting-started:** document installing via packages and the cask ([6fb9014](https://github.com/contemper-project/contemper/commit/6fb9014208424baa51bdbdd53706a50abad68ac5))
-* **getting-started:** show podman and docker as tabs ([9beaec1](https://github.com/contemper-project/contemper/commit/9beaec14bce2b91b4e6d88eede4d0b507975f576))
-* **guide:** drop stale "planned" note on support resolution ([c85c8c3](https://github.com/contemper-project/contemper/commit/c85c8c31bbd72aa95297a484c997a33a390cf381))
-* link the releases page from the install instructions ([fb01f9b](https://github.com/contemper-project/contemper/commit/fb01f9b348baba315a9dc333c4ad77aa5ccfee7b))
-* manage the docs toolchain with uv ([80300cb](https://github.com/contemper-project/contemper/commit/80300cb172f1a94e95fd39584f0381ceedfb1580))
-* mark support-image variants implemented ([9c9ae1c](https://github.com/contemper-project/contemper/commit/9c9ae1c07e41f174212f4d9a2d53571e56ad3c75))
-* mention examples/debian alongside the Alpine quick start ([16a2aed](https://github.com/contemper-project/contemper/commit/16a2aed24d68ff9a59b949443147273466e11949))
-* mention the e2e-variants boot test job ([9eb4f9e](https://github.com/contemper-project/contemper/commit/9eb4f9ecc609e51a44970888b72af697b29edb1d))
-* merge the volume formatting and reuse rules ([184553d](https://github.com/contemper-project/contemper/commit/184553d8220b736b02151a340c3a5bdf9f613a57))
-* move xattr/capability preservation to the roadmap's Done section ([065e14e](https://github.com/contemper-project/contemper/commit/065e14e7a8a7b3d02a7d93f9dcbaac1bbb3f681b))
-* point internal comments at public docs, not internal ones ([72d6ac2](https://github.com/contemper-project/contemper/commit/72d6ac21bf619b29dde5ce91809a1d95c6833685))
-* **readme:** add Codecov badge ([960d552](https://github.com/contemper-project/contemper/commit/960d55200b394322d41564dbcc972653a53e5930))
-* **readme:** add project badges ([be1ae5d](https://github.com/contemper-project/contemper/commit/be1ae5d3de78ebc9f4815c046fe7b865da00ee17))
-* **readme:** drop the Go Report Card badge ([eea942a](https://github.com/contemper-project/contemper/commit/eea942a92c762a4a9df09870e666edc9f15aaa77))
-* **readme:** rewrite status for the public pre-1.0 release ([a166e48](https://github.com/contemper-project/contemper/commit/a166e4831dcff7fe74a764edb907584e624c108f))
-* record the planned volume design ([bc32d6b](https://github.com/contemper-project/contemper/commit/bc32d6b76bf49af6093a50e93c25aa23da8a3d72))
-* **reference:** explain why host tools aren't bundled ([1b2085e](https://github.com/contemper-project/contemper/commit/1b2085e2234b63158acff35e8f607c3ed7e6e350))
-* reuse formatted volumes; identify volumes by path ([6a88686](https://github.com/contemper-project/contemper/commit/6a886863d603983be1daf8aafdd23c5930e92fac))
-* route the headline example through a registry ([b519d06](https://github.com/contemper-project/contemper/commit/b519d06c9ae574ca98f6ba0b03b7f210ead6292a))
-* settle volume sizing, naming and helper delivery ([81d1763](https://github.com/contemper-project/contemper/commit/81d176325fe368fb143e190f439a841cbcb4eacc))
-* **sources:** document docker save support and bundle naming rules ([7a0f48c](https://github.com/contemper-project/contemper/commit/7a0f48cc2b014e2a26d778df71c42fb1876ca6e1))
-* **support-images:** show download size and merge contribution output ([c638fe2](https://github.com/contemper-project/contemper/commit/c638fe21ef5b361e0a9c77ef74a90d9cd786a859))
-* **support:** document the same-registry rule for variant images ([3cb1c46](https://github.com/contemper-project/contemper/commit/3cb1c4614cd0a35cbf7f5944a1963025cc0e2808))
-* **volumes:** add a volumes guide and an image-labels reference ([65fcae0](https://github.com/contemper-project/contemper/commit/65fcae02495c57cfc23a146a961328ea8a9c313d))
-* **volumes:** correct the udev relabelling explanation ([a82ba7c](https://github.com/contemper-project/contemper/commit/a82ba7cb4a9a8f84cbc109f62c94acdd25777007))
-* **volumes:** document reading the label from the superblock ([1122761](https://github.com/contemper-project/contemper/commit/112276132f6c35aafab1cd9db07af28b3f56f0a5))
-* **volumes:** document the merged-/usr predicate resolution ([87c8df6](https://github.com/contemper-project/contemper/commit/87c8df6ad4a4388d43a95ccc3f7034401400eee4))
-* **volumes:** explain the systemd helper's boot ordering ([f46ecb5](https://github.com/contemper-project/contemper/commit/f46ecb565619cf9680a37d210c5e5d9ce7aa4b77))
+### Before you rely on it
+
+This release is for trying contemper out, not for production use. CLI
+flags and the bundle format will still change (bundles are
+`formatVersion` 1). Known limitations:
+
+- An image where a later layer removes or replaces the target of a
+  hardlink is rejected.
+- Paths and symlink targets longer than about 1000 bytes are rejected.
+- A bundle for a foreign architecture boots under software emulation,
+  which is slow.
+
+Please report bugs and ideas in the
+[issue tracker](https://github.com/contemper-project/contemper/issues),
+and security issues as described in
+[SECURITY.md](https://github.com/contemper-project/contemper/blob/main/SECURITY.md).
