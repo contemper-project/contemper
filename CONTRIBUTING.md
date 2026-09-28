@@ -80,6 +80,72 @@ Releases are cut by merging the release PR that
 maintains from these commit types and scopes; you don't need to bump
 versions or write changelog entries by hand.
 
+## Planning and priorities
+
+Open work is tracked in GitHub issues and the
+[contemper project](https://github.com/orgs/contemper-project/projects/1).
+Issues have a type - Epic, Feature, Task, or Bug - and epics have
+sub-issues, ordered by priority, that are the actual work. The project
+also carries Priority (P1/P2/P3) and Size (S/M/L) fields, and groups
+issues into milestones named after a theme rather than a version -
+[release-please](https://github.com/googleapis/release-please) cuts
+whichever release follows a merge, so a milestone doesn't promise a
+specific version. The repository's issues list can't show a custom
+order - the project's default table view can: milestones top to
+bottom in the order they'll be worked, and inside each one epics
+first, then P1, P2, P3. That view is the source of truth for what's
+next. Issues without a milestone are later: accepted ideas that
+aren't scheduled yet.
+
+For features and tasks, priority means:
+
+- **P1** - needed for the milestone's goal.
+- **P2** - wanted in the milestone, but not blocking it.
+- **P3** - nice to have, or for later.
+
+An issue labelled `design` needs a decision recorded in
+[docs/design](docs/design/) before the work it unblocks can start.
+
+### Picking the next item
+
+1. Open P1 bugs first.
+2. Finish what's already In Progress before starting something new.
+3. Otherwise, work through the first milestone in the project's
+   order, top to bottom: a `design` issue before the work it
+   unblocks, then by priority, preferring items that aren't blocked
+   on something else.
+4. Small items (Size S) are good for filling gaps between larger
+   work.
+
+### Bug triage
+
+New bug reports arrive with type Bug and a `triage` label. A
+maintainer reproduces the bug or asks for more detail, sets its
+Priority, adds it to the project, and removes `triage`.
+
+- **P1** - security issues (reported privately through
+  [SECURITY.md](SECURITY.md), never as a public issue), data loss or
+  corruption (wrong disk or volume contents), a correctly authored
+  image that no longer converts or boots, a regression from the
+  previous release, or broken release artifacts or install packages.
+  These come before any feature work and release as soon as the fix
+  lands - a `fix:` commit makes release-please cut a patch release.
+- **P2** - a documented behavior that's broken but has a workaround,
+  or only affects an uncommon setup. Goes into the current milestone.
+- **P3** - cosmetic problems, unclear messages, docs mistakes. No
+  milestone; picked up when convenient, often labelled
+  `good first issue`.
+
+If a bug report turns out to be a missing feature, its type changes
+to Feature and it's prioritised like one.
+
+### Before you start
+
+Comment on an issue before starting anything larger than Size S, so
+work isn't duplicated. Issues labelled `good first issue` or
+`help wanted` are good entry points. Labels starting with `area:`
+say which part of contemper an issue touches.
+
 ## Pull requests
 
 PRs must pass CI (build, lint, tests, and the docs build) before merge.
