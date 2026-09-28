@@ -46,5 +46,6 @@ jobs:
             /tmp/volumes-support-buildimg \
               -prefix ghcr.io/contemper-project \
               -tag "${tag}" \
-              -support-dir support/volumes-support
+              -support-dir support/volumes-support \
+              -revision "${GITHUB_SHA}"
           done
