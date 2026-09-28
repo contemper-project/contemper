@@ -117,7 +117,7 @@ jobs:
             email="$(git log -1 --format=%ae "$sha")"
             subject="$(git log -1 --format=%s "$sha")"
 
-            # Bot-authored commits (dependabot, release-please via
+            # Bot-authored commits (Renovate, release-please via
             # GITHUB_TOKEN) can't sign off on their own account; skip them.
             if [[ "$email" == *"[bot]@users.noreply.github.com" ]]; then
               echo "skip (bot author): $sha $email"

@@ -41,6 +41,11 @@ shopt -s inherit_errexit 2>/dev/null || true
 # release), fetching the specific archived version reproducibly means
 # using a snapshot.debian.org timestamp instead - see the error message
 # below for why this script doesn't do that automatically.
+#
+# Renovate watches this version against the suite's archive (see
+# .github/renovate.json5) but can only edit the string below, not run
+# this script; its PR is gated behind Dependency Dashboard approval and
+# says to re-run this script and commit the result before merging.
 SYSTEMD_BOOT_EFI_VERSION="257.13-1~deb13u1"
 SUITE="trixie"
 BASE_URL="https://deb.debian.org/debian"
