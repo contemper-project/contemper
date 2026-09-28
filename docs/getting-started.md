@@ -32,6 +32,21 @@ keg-only locations):
 For building the example you also need podman or docker. See
 [Host tools](reference/host-tools.md) for what each tool is used for.
 
+### Verifying downloads
+
+Every release archive carries a signed build provenance attestation, so
+you can check that a downloaded archive was actually built by this
+project's release workflow, straight from that commit and workflow run:
+
+```console
+$ gh attestation verify contemper_0.1.0_linux_amd64.tar.gz --repo contemper-project/contemper
+```
+
+(with the archive name you downloaded).
+
+That's on top of the usual checksum check against the release's
+`checksums.txt` (itself attested the same way).
+
 ## Build the example image
 
 The example lives in `examples/alpine/Containerfile`. It installs a

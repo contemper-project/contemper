@@ -111,6 +111,13 @@ The variant images are named by digest, not a floating tag, so a given
 `volumes-support:v1` always names an exact, reproducible pair of variant
 images.
 
+Each published image (the base and both variants) carries a signed build
+provenance attestation, checked with:
+
+```console
+$ gh attestation verify oci://ghcr.io/contemper-project/volumes-support:v1 --repo contemper-project/contemper
+```
+
 **When it merges.** Only when your image declares at least one volume
 (no volumes, no helper — a plain `qemu` build never gains this layer). If
 you also pass `--support`, that image and its own resolved variants merge
