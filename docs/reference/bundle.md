@@ -109,6 +109,21 @@ The manifest doubles as the deployment metadata format and the
 provenance record: the digests linking a disk to its inputs are recorded
 because deploying needs them anyway.
 
+## Converting into an existing bundle directory
+
+`convert` writes the bundle into a subdirectory of `--out` named after
+the image (`<repository>-<tag>.<arch>`). It assembles the whole bundle,
+disk and `contemper.json`, in a temporary directory beside that
+subdirectory and moves it into place only once everything succeeded. A
+failed conversion leaves no partial bundle behind, and an existing bundle
+of the same name stays as it was.
+
+When the conversion succeeds, a previous bundle of the same name is
+replaced as a whole, so files the new run doesn't produce (for example a
+`disk.raw` from an earlier `--keep-raw` run) are gone afterwards. If that
+subdirectory exists, is not empty and has no `contemper.json`, `convert`
+refuses to touch it and fails before doing any work.
+
 !!! note "On \"no new artifact format\""
     contemper reads only normal OCI images. A bundle is an *output*, and a
     directory holding a disk and a JSON file barely qualifies as a format.
