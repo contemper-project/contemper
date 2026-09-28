@@ -6,7 +6,7 @@
 | --- | --- |
 | 1. Check readiness | Read the manifest and config, require `io.contemper.ready`. No layers are pulled. |
 | 2. Pull and merge | Walk the layers bottom to top, applying whiteouts and opaque directories, producing the merged filesystem a container runtime would see. |
-| 3. Resolve support | Read the target's support image. **Planned:** evaluate its variants against the merged view. |
+| 3. Resolve support | Read the target's support image and evaluate its variants against the merged view. |
 | 4. Overlay | Merge the support image's layers on top, as a final `COPY --from=` stage would. |
 | 5. Validate | Check the merged filesystem against the [fixed-path contract](authoring.md#the-fixed-path-contract), plus any paths the support image requires. |
 | 6. Assemble | Write the target's output: a UEFI-bootable disk with a Unified Kernel Image, as qcow2. |
