@@ -32,7 +32,10 @@ Three clarifications:
 - Generate your initrd in *generic* mode, not host-only mode. dracut and
   mkinitcpio default to probing the hardware of the machine they run on,
   which during a container build is your build host rather than the VM
-  that will boot the image. Pass `--no-hostonly` or the equivalent.
+  that will boot the image. Pass `--no-hostonly` or the equivalent; for
+  mkinitcpio, that means dropping its `autodetect` hook from `HOOKS` in
+  `/etc/mkinitcpio.conf`, since that hook is what makes its initrd
+  host-only in the first place.
 
 ## The fixed-path contract
 
@@ -136,3 +139,6 @@ printed to the console. [Getting started](../getting-started.md) walks
 through building and booting it. `examples/debian/Containerfile` does the
 same with systemd as init and `initramfs-tools` generating the initrd, for
 a merged-`/usr`, systemd-based starting point instead.
+`examples/archlinux/Containerfile` is the same again with `mkinitcpio`
+generating the initrd (amd64 only, since that's all the official
+`archlinux` base image is published for).
