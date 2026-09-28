@@ -23,14 +23,16 @@ contemper could build every architecture present, require an explicit
 `--arch`, or default to the host's. It currently defaults to the host's;
 this is a UX question more than a technical one.
 
-**Provenance.** Beyond the bundle manifest, whether contemper should
-attach provenance to published output. If it does, an OCI referrer is
-the natural shape, since cosign and oras can inspect it without
+**Provenance.** This is about attaching provenance to contemper's
+*output*: the bundles `convert` produces for an image you author, beyond
+what the [bundle manifest](../reference/bundle.md) already records.
+contemper's own release artifacts and published support images now
+carry signed GitHub build provenance (see [verifying
+downloads](../getting-started.md#verifying-downloads) and the [volumes
+guide](../guide/volumes.md)), but whether a build's output bundle gets
+the same treatment is still open. An OCI referrer would be the natural
+shape there too, since cosign and oras can inspect it without
 contemper-specific tooling.
-
-**Support image tag pinning.** Floating tags keep support images easy to
-update but make builds non-reproducible. Floating by default, with the
-resolved digests recorded in the bundle, is the likely compromise.
 
 **Blessed base images.** Curated base images that already satisfy the
 kernel, initrd and init requirements would remove the main sharp edge in
