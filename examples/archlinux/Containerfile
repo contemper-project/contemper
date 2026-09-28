@@ -13,8 +13,10 @@ ARG TARGETARCH
 # e2fsprogs gives the boot-time fsck of the root filesystem its
 # fsck.ext4, the same reason ../alpine and ../debian install it. Recent
 # Arch kernel packages no longer install a copy under /boot; the kernel
-# and its module tree both live under /usr/lib/modules/<kver>/.
-RUN pacman -Sy --noconfirm --needed linux mkinitcpio e2fsprogs
+# and its module tree both live under /usr/lib/modules/<kver>/. Arch
+# doesn't support installing on top of a partially-synced package
+# database, so this is a full sync-and-upgrade (-Syu), not just -Sy.
+RUN pacman -Syu --noconfirm --needed linux mkinitcpio e2fsprogs
 
 # mkinitcpio's default HOOKS includes 'autodetect', which - unlike
 # dracut's or initramfs-tools' generic defaults - trims the initrd down
@@ -26,17 +28,27 @@ RUN sed -i 's/^HOOKS=.*/HOOKS=(base udev modconf block filesystems fsck)/' /etc/
 # Generic initrd and kernel at the fixed contemper paths. -g writes
 # straight to the target path, the same as debian's mkinitramfs -o; the
 # kernel itself needs a symlink since mkinitcpio doesn't relocate it.
-RUN kver="$(basename "$(find /usr/lib/modules -mindepth 1 -maxdepth 1 -type d)")" && \
+# /usr/lib/modules is expected to hold exactly one kernel's directory at
+# this point; anything else (none, or more than one from a leftover
+# package) means the kver guess below would silently pick the wrong
+# kernel, so fail loudly instead.
+RUN kdirs="$(find /usr/lib/modules -mindepth 1 -maxdepth 1 -type d)" && \
+    kcount="$(printf '%s\n' "$kdirs" | grep -c .)" && \
+    if [ "$kcount" -ne 1 ]; then \
+      echo "examples/archlinux: expected exactly one directory under /usr/lib/modules, found $kcount: $kdirs" >&2; \
+      exit 1; \
+    fi && \
+    kver="$(basename "$kdirs")" && \
     mkdir -p /boot/contemper && \
     mkinitcpio -k "$kver" -g /boot/contemper/initrd && \
     ln -sf "/usr/lib/modules/$kver/vmlinuz" /boot/contemper/vmlinuz
 
-# The cmdline depends on which serial console the target architecture's
-# virt machine exposes, same split as ../alpine and ../debian.
+# Unlike ../alpine and ../debian, this example is amd64-only: the
+# official archlinux image is published for amd64 only, so there is no
+# arm64 console branch to speak of here.
 RUN case "$TARGETARCH" in \
-      arm64) console=ttyAMA0 ;; \
       amd64) console=ttyS0 ;; \
-      *) echo "examples/archlinux: unsupported TARGETARCH '$TARGETARCH'" >&2; exit 1 ;; \
+      *) echo "examples/archlinux: unsupported TARGETARCH '$TARGETARCH' (this example is amd64-only; the archlinux base image isn't published for other architectures)" >&2; exit 1 ;; \
     esac && \
     echo "rootfstype=ext4 rw console=${console}" >/boot/contemper/cmdline
 

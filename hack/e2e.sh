@@ -47,6 +47,14 @@ alpine | debian | archlinux) ;;
 	exit 2
 	;;
 esac
+
+# The archlinux example's base image is only published for amd64; catch
+# that here, before spending time on a container build that would only
+# fail inside the Containerfile itself.
+if [ "${EXAMPLE}" = "archlinux" ] && [ "$(uname -m)" != "x86_64" ]; then
+	echo "e2e.sh: --example archlinux requires an amd64 host (got $(uname -m)); the archlinux base image isn't published for other architectures" >&2
+	exit 2
+fi
 IMAGE="contemper-example-${EXAMPLE}:dev"
 
 engine="${CONTAINER_ENGINE:-}"
