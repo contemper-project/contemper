@@ -1,32 +1,43 @@
 # Roadmap
 
-What exists, and the rough shape of what's left before a v1.
-
-## Done
-
-- [x] Readiness check, layer merge, fixed-path validation
-- [x] Registry, OCI archive, OCI layout and docker archive sources, with
-      per-platform selection
-- [x] Plain root-filesystem support images and `requires.files`
-- [x] UKI assembly with an embedded systemd-stub
-- [x] GPT disk with ESP and ext4 root, built without root privileges;
-      qcow2 output
-- [x] `qemu` and `incus` targets with aliases
-- [x] Bundle manifest
-- [x] `deploy --to local-qemu`, with boot tests in CI
-- [x] Preserve extended attributes and file capabilities in the root
-      filesystem
-- [x] Support-image annotation schema (branch and variant declarations,
-      default variants) and variant resolution
+What contemper ships today is in the
+[changelog](https://github.com/contemper-project/contemper/blob/main/CHANGELOG.md)
+and the rest of these docs, starting with [how conversion
+works](../guide/how-it-works.md) and [deploying locally](../guide/deploying.md).
+This page only tracks what's still open.
 
 ## Next
 
-- [ ] Publish the Incus support image
-- [ ] Build, publish and deploy adapters, one backend each (buildx for
-      build, incus for publish and deploy)
-- [ ] Project configuration file for phase defaults
-- [ ] Volumes: guest-side formatting on first boot, fstab entries,
-      volume and root disk sizes
-- [ ] Resolve the deployment metadata question
-- [ ] Tool vendoring strategy for release builds
-- [ ] Decide on blessed base images
+### Lifecycle adapters
+
+- A build adapter: build the image with `podman`/`docker` and convert in
+  one command, chaining `build` → `convert` → `deploy --to local-qemu`.
+- Publish and deploy to a remote Incus.
+
+### Incus
+
+- Publish the Incus support image (`incus-agent`) and have the `incus`
+  target use it by default.
+- Incus volumes and the deployment metadata that ties a bundle to an
+  Incus instance.
+
+### Volumes and the root filesystem
+
+- Defined behavior when the image already has content at a `VOLUME`
+  path.
+- Faster root filesystem population.
+
+### Distribution
+
+- apt/yum package repositories.
+- A tool vendoring strategy for release builds.
+
+### API and configuration
+
+- A project configuration file for phase defaults.
+- A public Go library API, with the CLI as a thin wrapper over it.
+
+### Open design decisions
+
+- Whether to bless a set of base images that already satisfy contemper's
+  fixed-path requirements (see [open questions](open-questions.md)).
