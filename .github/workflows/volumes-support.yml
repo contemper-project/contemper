@@ -82,19 +82,19 @@ jobs:
       # `gh attestation verify oci://ghcr.io/contemper-project/<image>:v1`
       # finds it without a separate lookup.
       - name: Attest volumes-support-init-system-openrc
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: ghcr.io/contemper-project/volumes-support-init-system-openrc
           subject-digest: ${{ steps.digests.outputs.openrc }}
           push-to-registry: true
       - name: Attest volumes-support-init-system-systemd
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: ghcr.io/contemper-project/volumes-support-init-system-systemd
           subject-digest: ${{ steps.digests.outputs.systemd }}
           push-to-registry: true
       - name: Attest volumes-support
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: ghcr.io/contemper-project/volumes-support
           subject-digest: ${{ steps.digests.outputs.base }}
