@@ -1,0 +1,75 @@
+# Minimal contemper-ready Arch Linux appliance: a kernel, a generic
+# initrd, a cmdline, systemd as init, and a boot-completion marker on
+# the serial console - the pacman/mkinitcpio counterpart of ../debian,
+# so this image can be booted end-to-end without any further
+# configuration. See ../../docs/guide/authoring.md for the fixed-path
+# contract this satisfies.
+FROM archlinux:latest
+
+LABEL io.contemper.ready="true"
+
+ARG TARGETARCH
+
+# e2fsprogs gives the boot-time fsck of the root filesystem its
+# fsck.ext4, the same reason ../alpine and ../debian install it. Recent
+# Arch kernel packages no longer install a copy under /boot; the kernel
+# and its module tree both live under /usr/lib/modules/<kver>/.
+RUN pacman -Sy --noconfirm --needed linux mkinitcpio e2fsprogs
+
+# mkinitcpio's default HOOKS includes 'autodetect', which - unlike
+# dracut's or initramfs-tools' generic defaults - trims the initrd down
+# to only the modules the *build host* has loaded, making it host-only
+# rather than generic. Dropping 'autodetect' is mkinitcpio's equivalent
+# of dracut's --no-hostonly, per ../../docs/guide/authoring.md.
+RUN sed -i 's/^HOOKS=.*/HOOKS=(base udev modconf block filesystems fsck)/' /etc/mkinitcpio.conf
+
+# Generic initrd and kernel at the fixed contemper paths. -g writes
+# straight to the target path, the same as debian's mkinitramfs -o; the
+# kernel itself needs a symlink since mkinitcpio doesn't relocate it.
+RUN kver="$(basename "$(find /usr/lib/modules -mindepth 1 -maxdepth 1 -type d)")" && \
+    mkdir -p /boot/contemper && \
+    mkinitcpio -k "$kver" -g /boot/contemper/initrd && \
+    ln -sf "/usr/lib/modules/$kver/vmlinuz" /boot/contemper/vmlinuz
+
+# The cmdline depends on which serial console the target architecture's
+# virt machine exposes, same split as ../alpine and ../debian.
+RUN case "$TARGETARCH" in \
+      arm64) console=ttyAMA0 ;; \
+      amd64) console=ttyS0 ;; \
+      *) echo "examples/archlinux: unsupported TARGETARCH '$TARGETARCH'" >&2; exit 1 ;; \
+    esac && \
+    echo "rootfstype=ext4 rw console=${console}" >/boot/contemper/cmdline
+
+RUN echo 'LABEL=contemper-root / ext4 rw,relatime 0 1' >>/etc/fstab
+
+# Passwordless root, for interactive testing over the serial console -
+# same as ../alpine and ../debian.
+RUN passwd -d root
+
+# A first boot with no locale, timezone or hostname configured makes
+# systemd-firstboot stop and prompt on the console instead of letting
+# the boot proceed unattended, unlike ../alpine and ../debian, whose
+# init systems have no such first-boot step. Masking it (the offline
+# equivalent of `systemctl mask`, since no systemd is running during the
+# build) keeps this appliance boot end-to-end without any further
+# configuration, matching the other examples' contract.
+RUN ln -sf /dev/null /etc/systemd/system/systemd-firstboot.service
+
+# Proof-of-boot marker: printed to the serial console once systemd
+# reaches multi-user.target, the same unit ../debian uses and what
+# `contemper deploy --expect` waits for in hack/e2e.sh.
+RUN printf '%s\n' \
+      '[Unit]' \
+      'Description=contemper: boot-completion marker' \
+      'After=multi-user.target' \
+      '' \
+      '[Service]' \
+      'Type=oneshot' \
+      'RemainAfterExit=yes' \
+      "ExecStart=/bin/sh -c 'echo contemper-boot-ok >/dev/console'" \
+      '' \
+      '[Install]' \
+      'WantedBy=multi-user.target' \
+      >/etc/systemd/system/contemper-boot-ok.service && \
+    mkdir -p /etc/systemd/system/multi-user.target.wants && \
+    ln -sf ../contemper-boot-ok.service /etc/systemd/system/multi-user.target.wants/contemper-boot-ok.service

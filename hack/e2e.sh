@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # End-to-end boot test: build the chosen example image (--example
-# alpine|debian, default alpine) for the host architecture, convert it
-# with `contemper convert --target qemu`, and boot the bundle with
-# `contemper deploy --to local-qemu`, passing once the image's boot
+# alpine|debian|archlinux, default alpine) for the host architecture,
+# convert it with `contemper convert --target qemu`, and boot the bundle
+# with `contemper deploy --to local-qemu`, passing once the image's boot
 # marker appears on the serial console.
 #
-# Usage: hack/e2e.sh [--example alpine|debian] [--timeout DURATION]
+# Usage: hack/e2e.sh [--example alpine|debian|archlinux] [--timeout DURATION]
 #
 # Requires: go, podman or docker (CONTAINER_ENGINE selects one explicitly),
 # e2fsprogs (mkfs.ext4, debugfs, e2fsck), qemu-img, qemu-system-<arch> and
@@ -41,9 +41,9 @@ while [ $# -gt 0 ]; do
 done
 
 case "${EXAMPLE}" in
-alpine | debian) ;;
+alpine | debian | archlinux) ;;
 *)
-	echo "e2e.sh: unknown --example '${EXAMPLE}' (want alpine or debian)" >&2
+	echo "e2e.sh: unknown --example '${EXAMPLE}' (want alpine, debian or archlinux)" >&2
 	exit 2
 	;;
 esac
