@@ -28,6 +28,9 @@ type File struct {
 	// records, the convention GNU tar and Go's archive/tar use for
 	// extended attributes.
 	Xattrs map[string]string
+	// ModTime, if non-zero, overrides the tar entry's mtime (epoch by
+	// default).
+	ModTime time.Time
 }
 
 var epoch = time.Unix(0, 0)
@@ -50,6 +53,10 @@ func Layer(files []File) (v1.Layer, error) {
 				mode = 0o644
 			}
 		}
+		modTime := f.ModTime
+		if modTime.IsZero() {
+			modTime = epoch
+		}
 		hdr := &tar.Header{
 			Name:     f.Path,
 			Typeflag: typeflag,
@@ -60,7 +67,7 @@ func Layer(files []File) (v1.Layer, error) {
 			Devmajor: f.Devmajor,
 			Devminor: f.Devminor,
 			Size:     int64(len(f.Data)),
-			ModTime:  epoch,
+			ModTime:  modTime,
 		}
 		if len(f.Xattrs) > 0 {
 			hdr.Format = tar.FormatPAX

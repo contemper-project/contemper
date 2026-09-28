@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 
@@ -367,5 +368,122 @@ func TestPopulateExt4BadHardlinkTargets(t *testing.T) {
 				t.Fatalf("PopulateExt4 error = %v, want one containing %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// TestPopulateExt4MtimeExact checks that a file's mtime survives exactly,
+// including values whose digits debugfs's string_to_time would otherwise
+// misread as a date (see the leading '@' in writeAttrs): an ordinary
+// Unix time that happens to parse as a valid-looking date, and one whose
+// misparsed date falls outside ext4's representable range.
+func TestPopulateExt4MtimeExact(t *testing.T) {
+	debugfsPath, e2fsckPath := requireExt4Tools(t)
+
+	cases := []struct {
+		name  string
+		mtime int64
+	}{
+		{"ordinary Unix time", 1701011200},
+		{"misparsed as a date beyond ext4's range without the @ prefix", 1789895046},
+	}
+
+	var files []imgtest.File
+	for i, tc := range cases {
+		files = append(files, imgtest.File{
+			Path:    fmt.Sprintf("f%d", i),
+			Data:    []byte("x"),
+			ModTime: time.Unix(tc.mtime, 0).UTC(),
+		})
+	}
+	img, err := imgtest.Image(v1.Platform{OS: "linux", Architecture: "amd64"}, nil, files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rfs, err := rootfs.Build(img)
+	if err != nil {
+		t.Fatalf("rootfs.Build: %v", err)
+	}
+	defer func() { _ = rfs.Close() }()
+
+	imgPath := t.TempDir() + "/root.img"
+	if _, err := disk.PopulateExt4(rfs, imgPath, disk.Ext4Options{
+		Label:     "contemper-root",
+		SizeBytes: 64 * 1024 * 1024,
+	}); err != nil {
+		t.Fatalf("PopulateExt4: %v", err)
+	}
+
+	// e2fsck -fn is the authoritative correctness check.
+	if out, err := exec.CommandContext(context.Background(), e2fsckPath, "-fn", imgPath).CombinedOutput(); err != nil {
+		t.Fatalf("e2fsck -fn reported problems: %v\n%s", err, out)
+	}
+
+	for i, tc := range cases {
+		stat := debugfsStat(t, debugfsPath, imgPath, fmt.Sprintf("/f%d", i))
+		want := fmt.Sprintf("mtime: 0x%08x", uint32(tc.mtime))
+		if !strings.Contains(stat, want) {
+			t.Errorf("%s: mtime not stored exactly, want %q in: %s", tc.name, want, stat)
+		}
+	}
+}
+
+// TestPopulateExt4HardlinkIntoFullDirectory checks that a hardlink whose
+// parent directory's last block is already full still gets created:
+// debugfs's ln (make_link), unlike write/mkdir/symlink, doesn't grow such
+// a directory on its own. 92 entries with this name length are enough to
+// fill a 4 KiB block exactly (empirically, against debugfs 1.47); 512 MiB
+// is the size at which mke2fs's own defaults switch from 1 KiB to 4 KiB
+// blocks, since PopulateExt4 has no block-size option of its own and
+// real contemper images are well above that size anyway.
+func TestPopulateExt4HardlinkIntoFullDirectory(t *testing.T) {
+	debugfsPath, e2fsckPath := requireExt4Tools(t)
+
+	files := []imgtest.File{
+		{Path: "d/", Typeflag: tar.TypeDir},
+		{Path: "target", Data: []byte("x")},
+	}
+	for i := 1; i <= 92; i++ {
+		files = append(files, imgtest.File{
+			Path: fmt.Sprintf("d/file_with_a_moderately_long_name_%d", i),
+			Data: []byte("x"),
+		})
+	}
+	files = append(files, imgtest.File{Path: "d/hardlink", Typeflag: tar.TypeLink, Linkname: "target"})
+
+	img, err := imgtest.Image(v1.Platform{OS: "linux", Architecture: "amd64"}, nil, files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rfs, err := rootfs.Build(img)
+	if err != nil {
+		t.Fatalf("rootfs.Build: %v", err)
+	}
+	defer func() { _ = rfs.Close() }()
+
+	imgPath := t.TempDir() + "/root.img"
+	warnings, err := disk.PopulateExt4(rfs, imgPath, disk.Ext4Options{
+		Label:     "contemper-root",
+		SizeBytes: 512 * 1024 * 1024,
+	})
+	if err != nil {
+		t.Fatalf("PopulateExt4: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("unexpected warnings: %v", warnings)
+	}
+
+	// e2fsck -fn is the authoritative correctness check.
+	if out, err := exec.CommandContext(context.Background(), e2fsckPath, "-fn", imgPath).CombinedOutput(); err != nil {
+		t.Fatalf("e2fsck -fn reported problems: %v\n%s", err, out)
+	}
+
+	linkStat := debugfsStat(t, debugfsPath, imgPath, "/d/hardlink")
+	if !strings.Contains(linkStat, "Links: 2") {
+		t.Errorf("hardlink should have 2 links (itself + target): %s", linkStat)
+	}
+
+	targetStat := debugfsStat(t, debugfsPath, imgPath, "/target")
+	if !strings.Contains(targetStat, "Links: 2") {
+		t.Errorf("target should have 2 links (itself + hardlink): %s", targetStat)
 	}
 }
