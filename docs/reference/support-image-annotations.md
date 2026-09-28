@@ -42,12 +42,22 @@ fails the conversion, naming the offending key.
 A variant needs a `.requires.files` predicate unless it is the branch's
 declared default.
 
-When the support image comes from a registry, each `.image` must be a
-registry reference too: a local `oci-archive:`, `oci:` or
-`docker-archive:` reference fails the conversion, so an image's
-annotations can never point contemper at files on the build host. A
-support image loaded from a local archive or layout may name local
-variant images.
+Where a variant's `.image` may point depends on where the support image
+itself came from:
+
+- **Support image from a registry:** each `.image` must be a registry
+  reference in the **same registry** as the support image (the repository
+  may differ; `docker.io` and `index.docker.io` count as the same
+  registry). Local `oci-archive:`, `oci:` and `docker-archive:`
+  references, and references to any other registry, fail the conversion.
+  An image's annotations can therefore never point contemper at files on
+  the build host, or make it pull from another registry with your
+  credentials.
+- **Support image from a local archive or layout:** `.image` may be a
+  registry reference in any registry, or a local reference. You supplied
+  that file directly, so its annotations are trusted like your own
+  command line. Relative local paths resolve against the current working
+  directory, as they do on the command line.
 
 ## Resolution
 
