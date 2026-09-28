@@ -14,6 +14,14 @@
 // multi-platform reference), never a floating tag, so the support image
 // always names an exact, reproducible set of variant bytes.
 //
+// It also sets the standard org.opencontainers.image.* annotations
+// (title, description, source, licenses, and revision when -revision
+// is given) on each index and on each platform manifest, so a
+// registry UI has something to show for the image. These live in a
+// separate namespace from contemper's own io.contemper.* keys above and
+// are never read back by contemper (internal/support.Parse only
+// recognizes io.contemper.* keys and ignores everything else).
+//
 // Used both by .github/workflows/volumes-support.yml (publishing to
 // ghcr.io/contemper-project) and by hack/e2e-volumes.sh (publishing to a
 // local registry for the boot test), for the same reason
@@ -24,7 +32,7 @@
 // Usage:
 //
 //	buildimg -prefix ghcr.io/contemper-project -tag v1 \
-//	    -support-dir /path/to/support/volumes-support
+//	    -support-dir /path/to/support/volumes-support [-revision <commit-sha>]
 package main
 
 import (
@@ -49,6 +57,13 @@ import (
 // for, in the fixed order they're appended to each index.
 var platforms = []string{"amd64", "arm64"}
 
+// sourceAnnotation and licenseAnnotation are the same for all three
+// images: they all live in this one repository, under its one license.
+const (
+	sourceAnnotation  = "https://github.com/contemper-project/contemper"
+	licenseAnnotation = "Apache-2.0"
+)
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "buildimg:", err)
@@ -57,10 +72,11 @@ func main() {
 }
 
 func run() error {
-	var prefix, tag, supportDir string
+	var prefix, tag, supportDir, revision string
 	flag.StringVar(&prefix, "prefix", "", "registry prefix, e.g. ghcr.io/contemper-project or localhost:5555/contemper-e2e")
 	flag.StringVar(&tag, "tag", "v1", "tag to publish the images under")
 	flag.StringVar(&supportDir, "support-dir", "", "path to support/volumes-support (containing base/, openrc/, systemd/)")
+	flag.StringVar(&revision, "revision", "", "commit SHA to record as org.opencontainers.image.revision (optional)")
 	flag.Parse()
 
 	if prefix == "" {
@@ -70,13 +86,17 @@ func run() error {
 		return fmt.Errorf("-support-dir is required")
 	}
 
-	openrcRef, openrcDigest, err := buildAndPush(filepath.Join(supportDir, "openrc"), prefix+"/volumes-support-init-system-openrc:"+tag, nil)
+	openrcRef, openrcDigest, err := buildAndPush(filepath.Join(supportDir, "openrc"), prefix+"/volumes-support-init-system-openrc:"+tag, nil,
+		ociAnnotations("volumes-support-init-system-openrc", revision,
+			"OpenRC integration for contemper's volume-formatting boot helper: runs it as an init.d service before local filesystems are mounted."))
 	if err != nil {
 		return fmt.Errorf("openrc variant: %w", err)
 	}
 	fmt.Printf("pushed %s@%s\n", openrcRef, openrcDigest)
 
-	systemdRef, systemdDigest, err := buildAndPush(filepath.Join(supportDir, "systemd"), prefix+"/volumes-support-init-system-systemd:"+tag, nil)
+	systemdRef, systemdDigest, err := buildAndPush(filepath.Join(supportDir, "systemd"), prefix+"/volumes-support-init-system-systemd:"+tag, nil,
+		ociAnnotations("volumes-support-init-system-systemd", revision,
+			"systemd integration for contemper's volume-formatting boot helper: runs it as a oneshot service before local filesystems are mounted."))
 	if err != nil {
 		return fmt.Errorf("systemd variant: %w", err)
 	}
@@ -90,7 +110,9 @@ func run() error {
 		"io.contemper.branch.init-system.systemd.requires.files": "/usr/lib/systemd/systemd",
 		"io.contemper.branch.init-system.systemd.image":          systemdByDigest,
 	}
-	baseRef, baseDigest, err := buildAndPush(filepath.Join(supportDir, "base"), prefix+"/volumes-support:"+tag, baseAnnotations)
+	baseRef, baseDigest, err := buildAndPush(filepath.Join(supportDir, "base"), prefix+"/volumes-support:"+tag, baseAnnotations,
+		ociAnnotations("volumes-support", revision,
+			"contemper's volume-formatting boot helper: formats a blank declared volume and reuses an already-formatted one, leaving anything else alone."))
 	if err != nil {
 		return fmt.Errorf("base image: %w", err)
 	}
@@ -99,16 +121,39 @@ func run() error {
 	return nil
 }
 
-// buildAndPush builds one platform image per entry in platforms from
-// dir's file tree, appends each to a multi-platform index with
+// ociAnnotations builds the standard org.opencontainers.image.*
+// annotations for one of the three published images: description (one
+// short sentence specific to that image), source and licenses (the same
+// for all three, since they're all built from this one repository), and
+// title and revision when a commit SHA is available. ghcr.io shows at
+// most a few hundred characters of description, so these stay well
+// under that.
+func ociAnnotations(title, revision, description string) map[string]string {
+	anns := map[string]string{
+		"org.opencontainers.image.title":       title,
+		"org.opencontainers.image.description": description,
+		"org.opencontainers.image.source":      sourceAnnotation,
+		"org.opencontainers.image.licenses":    licenseAnnotation,
+	}
+	if revision != "" {
+		anns["org.opencontainers.image.revision"] = revision
+	}
+	return anns
+}
+
+// buildIndex builds one platform image per entry in platforms from
+// dir's file tree and appends each to a multi-platform index, with
 // descAnnotations set on every one of its descriptors (the
 // index-descriptor annotation fallback docs/reference/support-image-
 // annotations.md describes, which applies uniformly regardless of which
-// platform a reader resolves), and pushes that index to ref.
-func buildAndPush(dir, ref string, descAnnotations map[string]string) (string, v1.Hash, error) {
+// platform a reader resolves) and ociAnnotations set on both the index
+// itself and each platform manifest - the two places ghcr.io reads
+// image metadata from for a multi-platform reference. It does no
+// network I/O, so it can be exercised without a registry.
+func buildIndex(dir string, descAnnotations, ociAnns map[string]string) (v1.ImageIndex, error) {
 	files, err := filesFromDir(dir)
 	if err != nil {
-		return "", v1.Hash{}, fmt.Errorf("reading %s: %w", dir, err)
+		return nil, fmt.Errorf("reading %s: %w", dir, err)
 	}
 
 	var idx v1.ImageIndex = empty.Index
@@ -116,7 +161,10 @@ func buildAndPush(dir, ref string, descAnnotations map[string]string) (string, v
 		platform := v1.Platform{OS: "linux", Architecture: arch}
 		img, err := imgtest.Image(platform, nil, files)
 		if err != nil {
-			return "", v1.Hash{}, fmt.Errorf("building %s image: %w", arch, err)
+			return nil, fmt.Errorf("building %s image: %w", arch, err)
+		}
+		if len(ociAnns) > 0 {
+			img = mutate.Annotations(img, ociAnns).(v1.Image) //nolint:forcetypeassert // mutate.Annotations on a v1.Image always returns a v1.Image
 		}
 		idx = mutate.AppendManifests(idx, mutate.IndexAddendum{
 			Add: img,
@@ -125,6 +173,19 @@ func buildAndPush(dir, ref string, descAnnotations map[string]string) (string, v
 				Annotations: descAnnotations,
 			},
 		})
+	}
+	if len(ociAnns) > 0 {
+		idx = mutate.Annotations(idx, ociAnns).(v1.ImageIndex) //nolint:forcetypeassert // mutate.Annotations on a v1.ImageIndex always returns a v1.ImageIndex
+	}
+	return idx, nil
+}
+
+// buildAndPush builds dir's multi-platform index (see buildIndex) and
+// pushes it to ref.
+func buildAndPush(dir, ref string, descAnnotations, ociAnns map[string]string) (string, v1.Hash, error) {
+	idx, err := buildIndex(dir, descAnnotations, ociAnns)
+	if err != nil {
+		return "", v1.Hash{}, err
 	}
 
 	nref, err := name.ParseReference(ref)
