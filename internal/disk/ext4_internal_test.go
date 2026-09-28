@@ -17,3 +17,16 @@ func TestFindErrorMarkerIgnoresEchoedLines(t *testing.T) {
 		t.Errorf("findErrorMarker = %q, want %q", got, "File not found")
 	}
 }
+
+// TestFindErrorMarkerDetectsFullDirectory checks that debugfs's ln
+// failure on a directory whose last block is already full - which
+// exits 0 and otherwise leaves no trace - is caught.
+func TestFindErrorMarkerDetectsFullDirectory(t *testing.T) {
+	script := `ln "/target" "/d/hardlink_target"` + "\n"
+	out := "debugfs 1.47.0 (5-Feb-2023)\n" +
+		`debugfs: ln "/target" "/d/hardlink_target"` + "\n" +
+		"make_link: No free space in the directory \n"
+	if got := findErrorMarker(script, out); got != "No free space in the directory" {
+		t.Errorf("findErrorMarker = %q, want %q", got, "No free space in the directory")
+	}
+}
