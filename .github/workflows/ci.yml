@@ -159,7 +159,8 @@ jobs:
   e2e:
     # Boots each example end to end: podman build → convert --target
     # qemu → deploy --to local-qemu, waiting for the boot marker. One
-    # matrix leg per init system: alpine/OpenRC, debian/systemd.
+    # matrix leg per init system: alpine/OpenRC, debian/systemd,
+    # archlinux/systemd (mkinitcpio instead of initramfs-tools).
     needs: changes
     if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
@@ -167,7 +168,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        example: [alpine, debian]
+        example: [alpine, debian, archlinux]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
