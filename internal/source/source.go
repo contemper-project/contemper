@@ -104,15 +104,52 @@ func ParseRef(raw string) (Ref, error) {
 // to point contemper at files on the build host, so when parent is a
 // registry reference, raw must be one too. A local parent (an archive or
 // layout the user supplied) may name local variants.
+//
+// A registry parent also constrains which registry a variant may come
+// from: it must be the same registry as parent (the repository may
+// differ - the published variants of a real support image live in
+// sibling repositories under the same host). Without this, a support
+// image's annotations - content the image itself controls - could name
+// a variant in any registry, pulled with the user's own credentials, so
+// a third-party support image could pull a private image the user has
+// access to into the disk. A local parent may still name a variant in
+// any registry, since the user already chose to trust that parent image
+// directly.
 func ParseVariantRef(parent Ref, raw string) (Ref, error) {
 	ref, err := ParseRef(raw)
 	if err != nil {
 		return Ref{}, err
 	}
-	if parent.Kind == KindRegistry && ref.Kind != KindRegistry {
+	if parent.Kind != KindRegistry {
+		return ref, nil
+	}
+	if ref.Kind != KindRegistry {
 		return Ref{}, fmt.Errorf("variant image %q is a local %s reference, but the image declaring it came from a registry; only registry references are allowed there", raw, ref.Kind)
 	}
+	parentRegistry, err := registryHost(parent.Value)
+	if err != nil {
+		return Ref{}, fmt.Errorf("parsing support image ref %q: %w", parent.Value, err)
+	}
+	variantRegistry, err := registryHost(ref.Value)
+	if err != nil {
+		return Ref{}, fmt.Errorf("parsing variant image %q: %w", raw, err)
+	}
+	if variantRegistry != parentRegistry {
+		return Ref{}, fmt.Errorf("variant image %q is in registry %q, but the image declaring it is in registry %q; a variant must come from the same registry (a different repository there is fine)", raw, variantRegistry, parentRegistry)
+	}
 	return ref, nil
+}
+
+// registryHost returns the normalized registry host of a registry
+// reference string (e.g. "docker.io" and "index.docker.io" both come
+// back as "index.docker.io"), for comparing two registry references'
+// hosts regardless of which alias each was written with.
+func registryHost(raw string) (string, error) {
+	nref, err := name.ParseReference(raw)
+	if err != nil {
+		return "", err
+	}
+	return nref.Context().RegistryStr(), nil
 }
 
 // String returns the reference in the form ParseRef accepts, with local

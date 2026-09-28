@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
@@ -455,5 +456,39 @@ func TestParseVariantRef(t *testing.T) {
 	ref, err := source.ParseVariantRef(registry, "ghcr.io/example/support-openrc:v1")
 	if err != nil || ref.Kind != source.KindRegistry {
 		t.Errorf("ParseVariantRef(registry parent, registry ref) = %+v, %v", ref, err)
+	}
+}
+
+func TestParseVariantRefRegistryMatch(t *testing.T) {
+	registry := source.Ref{Kind: source.KindRegistry, Value: "ghcr.io/example/support:v1"}
+	local := source.Ref{Kind: source.KindOCIArchive, Value: "support.tar"}
+
+	// A sibling repository under the same registry host is fine.
+	if _, err := source.ParseVariantRef(registry, "ghcr.io/example/support-openrc:v1"); err != nil {
+		t.Errorf("same registry, different repository: got error %v, want none", err)
+	}
+
+	// A different registry host is rejected, naming both registries.
+	_, err := source.ParseVariantRef(registry, "docker.io/example/support-openrc:v1")
+	if err == nil {
+		t.Fatal("different registry: succeeded, want an error")
+	}
+	if !strings.Contains(err.Error(), "ghcr.io") || !strings.Contains(err.Error(), "index.docker.io") {
+		t.Errorf("different registry: error %q does not name both registries", err.Error())
+	}
+
+	// "docker.io" and "index.docker.io" name the same registry.
+	dockerParent := source.Ref{Kind: source.KindRegistry, Value: "docker.io/example/support:v1"}
+	if _, err := source.ParseVariantRef(dockerParent, "index.docker.io/example/support-openrc:v1"); err != nil {
+		t.Errorf("docker.io vs index.docker.io: got error %v, want none (same registry)", err)
+	}
+	indexParent := source.Ref{Kind: source.KindRegistry, Value: "index.docker.io/example/support:v1"}
+	if _, err := source.ParseVariantRef(indexParent, "docker.io/example/support-openrc:v1"); err != nil {
+		t.Errorf("index.docker.io vs docker.io: got error %v, want none (same registry)", err)
+	}
+
+	// A local parent may still name a variant in any registry.
+	if ref, err := source.ParseVariantRef(local, "docker.io/example/support-openrc:v1"); err != nil || ref.Kind != source.KindRegistry {
+		t.Errorf("ParseVariantRef(local parent, registry ref) = %+v, %v; want a registry ref, no error", ref, err)
 	}
 }
