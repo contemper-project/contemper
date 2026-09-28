@@ -15,9 +15,9 @@ on:
       - .github/workflows/volumes-support.yml
   workflow_dispatch:
 
-permissions:
-  contents: read
-  packages: write
+# Top-level permissions stay empty; the one job below declares exactly
+# what it needs.
+permissions: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -26,6 +26,11 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -47,5 +52,50 @@ jobs:
               -prefix ghcr.io/contemper-project \
               -tag "${tag}" \
               -support-dir support/volumes-support \
-              -revision "${GITHUB_SHA}"
+              -revision "${GITHUB_SHA}" \
+              -digests-file "${RUNNER_TEMP}/volumes-support-digests.txt"
           done
+      - name: Resolve pushed digests
+        id: digests
+        run: |
+          # buildimg ran once per tag above, publishing the same
+          # deterministic content under "v1" and the commit SHA, so each
+          # image name appears twice in the digests file with the same
+          # digest. Collapse that to one digest per name for the attest
+          # steps below, and fail if the two pushes ever differ: attesting
+          # only one of them would leave the other tag unverifiable.
+          declare -A digest
+          while read -r name sha; do
+            if [ -n "${digest[${name}]:-}" ] && [ "${digest[${name}]}" != "${sha}" ]; then
+              echo "::error::${name}: the two tags got different digests (${digest[${name}]} vs ${sha})"
+              exit 1
+            fi
+            digest["${name}"]="${sha}"
+          done < "${RUNNER_TEMP}/volumes-support-digests.txt"
+          {
+            echo "openrc=${digest[ghcr.io/contemper-project/volumes-support-init-system-openrc]}"
+            echo "systemd=${digest[ghcr.io/contemper-project/volumes-support-init-system-systemd]}"
+            echo "base=${digest[ghcr.io/contemper-project/volumes-support]}"
+          } >>"${GITHUB_OUTPUT}"
+      # Signed, Sigstore-backed build provenance for each published image,
+      # attached to its own index in the registry (push-to-registry) so
+      # `gh attestation verify oci://ghcr.io/contemper-project/<image>:v1`
+      # finds it without a separate lookup.
+      - name: Attest volumes-support-init-system-openrc
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/contemper-project/volumes-support-init-system-openrc
+          subject-digest: ${{ steps.digests.outputs.openrc }}
+          push-to-registry: true
+      - name: Attest volumes-support-init-system-systemd
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/contemper-project/volumes-support-init-system-systemd
+          subject-digest: ${{ steps.digests.outputs.systemd }}
+          push-to-registry: true
+      - name: Attest volumes-support
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/contemper-project/volumes-support
+          subject-digest: ${{ steps.digests.outputs.base }}
+          push-to-registry: true
