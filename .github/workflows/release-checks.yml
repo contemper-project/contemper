@@ -6,8 +6,15 @@ name: Release checks
 #   Conventional Commits, since PRs are rebase-merged and release-please
 #   parses each commit individually, and against the DCO (see
 #   CONTRIBUTING.md).
+#
+# Also runs on push to main, where it always does the full 4-target
+# snapshot release, so packaging breakage from a PR that took the
+# lighter path below shows up on main before a release PR does.
+# commit-checks has nothing to check outside a PR and is skipped there.
 on:
   pull_request:
+  push:
+    branches: [main]
 
 permissions:
   contents: read
@@ -26,9 +33,22 @@ jobs:
     # GoReleaser packages; left in here anyway since the snapshot build
     # is cheap and a second, narrower list would be one more place to
     # keep in sync.)
+    #
+    # "release" is narrower: only the inputs that actually change what
+    # GoReleaser packages (its config, the archived license files, the
+    # Go version). Only these are worth paying for a full 4-target
+    # snapshot release on a PR; everything else in "go" already gets a
+    # `goreleaser check` plus a single-target build, and its cross-compile
+    # coverage from ci.yml's own build matrix.
+    #
+    # Like ci.yml, both outputs are forced true for non-pull_request
+    # events (the push-to-main run here) rather than trusting the filter,
+    # since paths-filter's push comparison depends on the SHAs GitHub
+    # attaches to the push event.
     runs-on: ubuntu-latest
     outputs:
-      go: ${{ steps.filter.outputs.go }}
+      go: ${{ github.event_name != 'pull_request' || steps.filter.outputs.go == 'true' }}
+      release: ${{ github.event_name != 'pull_request' || steps.filter.outputs.release == 'true' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
@@ -46,8 +66,18 @@ jobs:
               - 'support/**'
               - 'internal/uki/stubs/**'
               - .github/workflows/release-checks.yml
+            release:
+              - '.goreleaser.y*ml'
+              - .github/workflows/release.yml
+              - .github/workflows/release-checks.yml
+              - go.mod
+              - LICENSE
+              - NOTICE
+              - README.md
+              - 'internal/uki/stubs/LICENSE*'
 
   commit-checks:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -124,8 +154,21 @@ jobs:
           install-only: true
       - name: goreleaser check
         run: goreleaser check
-      - name: goreleaser snapshot build
+      # The full snapshot builds and archives all 4 release targets, which
+      # is where nearly all of this job's time goes; only pay for that
+      # when something that changes what gets released is on the line
+      # (release-affecting files, or a push to main).
+      # Everything else already gets `goreleaser check` above plus a
+      # single-target build, which exercises the same build config
+      # (ldflags, -trimpath, the reproducible mod_timestamp) without the
+      # other 3 cross-compiles - those are covered, config-mechanics
+      # aside, by ci.yml's own build matrix on the same PR.
+      - name: goreleaser snapshot build (full)
+        if: needs.changes.outputs.release == 'true'
         run: goreleaser release --snapshot --clean
+      - name: goreleaser snapshot build (single-target)
+        if: needs.changes.outputs.release != 'true'
+        run: goreleaser build --snapshot --clean --single-target
 
   release-checks-result:
     # The one check to mark required in branch protection, mirroring
