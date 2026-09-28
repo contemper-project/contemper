@@ -1,6 +1,7 @@
 name: Feature request
 description: Suggest something contemper doesn't do yet.
-labels: ["enhancement"]
+type: Feature
+labels: ["triage"]
 body:
   - type: textarea
     id: problem
