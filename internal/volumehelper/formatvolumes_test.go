@@ -233,11 +233,12 @@ func runReprobeDisk(t *testing.T, path, dev, label string) (exitOK bool) {
 	}
 	env = append(env, "PATH="+path)
 
-	cmd := exec.Command("sh", runner, dev, label)
+	cmd := exec.CommandContext(context.Background(), "sh", runner, dev, label)
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		if _, isExit := err.(*exec.ExitError); !isExit {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
 			t.Fatalf("running reprobe_disk: %v\n%s", err, out)
 		}
 		return false

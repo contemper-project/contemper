@@ -172,7 +172,7 @@ func TestOverlayStatsOwnLayersLastWriteWins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	defer rfs.Close()
+	defer func() { _ = rfs.Close() }()
 
 	if len(rfs.OverlayStats) != 1 {
 		t.Fatalf("OverlayStats has %d entries, want 1", len(rfs.OverlayStats))
@@ -213,7 +213,7 @@ func TestOverlayStatsWhiteoutsCounted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	defer rfs.Close()
+	defer func() { _ = rfs.Close() }()
 
 	if len(rfs.OverlayStats) != 1 {
 		t.Fatalf("OverlayStats has %d entries, want 1", len(rfs.OverlayStats))
@@ -235,7 +235,7 @@ func TestOverlayStatsEmptyAndNil(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	defer rfs.Close()
+	defer func() { _ = rfs.Close() }()
 	if len(rfs.OverlayStats) != 0 {
 		t.Errorf("OverlayStats = %+v, want empty (no overlays given)", rfs.OverlayStats)
 	}
@@ -244,7 +244,7 @@ func TestOverlayStatsEmptyAndNil(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	defer rfsNil.Close()
+	defer func() { _ = rfsNil.Close() }()
 	if len(rfsNil.OverlayStats) != 1 || rfsNil.OverlayStats[0] != (rootfs.OverlayStats{}) {
 		t.Errorf("OverlayStats = %+v, want one zero-value entry for the nil overlay", rfsNil.OverlayStats)
 	}

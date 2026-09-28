@@ -177,7 +177,7 @@ func overlayStats(overlay v1.Image) (OverlayStats, error) {
 	}
 
 	rc := mutate.Extract(overlay)
-	defer rc.Close()
+	defer func() { _ = rc.Close() }() // read-only stream; nothing to flush
 	tr := tar.NewReader(rc)
 	for {
 		hdr, err := tr.Next()
@@ -187,7 +187,7 @@ func overlayStats(overlay v1.Image) (OverlayStats, error) {
 		if err != nil {
 			return st, err
 		}
-		if _, err := io.Copy(io.Discard, tr); err != nil {
+		if _, err := io.Copy(io.Discard, tr); err != nil { //nolint:gosec // G110: discarded, and bounded by the overlay's real content
 			return st, fmt.Errorf("reading content of %s: %w", hdr.Name, err)
 		}
 		if normalizePath(hdr.Name) == "/" {
@@ -211,7 +211,7 @@ func countWhiteouts(l v1.Layer) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("reading layer contents: %w", err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }() // read-only stream; nothing to flush
 
 	tr := tar.NewReader(r)
 	n := 0
@@ -223,7 +223,7 @@ func countWhiteouts(l v1.Layer) (int, error) {
 		if err != nil {
 			return 0, err
 		}
-		if _, err := io.Copy(io.Discard, tr); err != nil {
+		if _, err := io.Copy(io.Discard, tr); err != nil { //nolint:gosec // G110: discarded, and bounded by the overlay's real content
 			return 0, fmt.Errorf("reading content of %s: %w", hdr.Name, err)
 		}
 		if strings.HasPrefix(path.Base(path.Clean(hdr.Name)), whiteoutPrefix) {
