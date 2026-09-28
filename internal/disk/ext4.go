@@ -228,6 +228,22 @@ func buildDebugfsScript(rfs *rootfs.Rootfs, payloadDir string, stage *progress.S
 		}
 	}
 
+	// debugfs grows a directory's own block allocation as entries are
+	// added to it, but doing so while linking in a TypeLink entry can
+	// leave the target inode's link count short of what's added below,
+	// which e2fsck then reports as a corrupt reference count. Ext4Options
+	// works around this by pre-expanding every directory to its final
+	// entry count right after mkdir, so no add-entry command ever
+	// triggers that growth path. 50 entries/block is an empirical
+	// average for typical name lengths;
+	// erring toward more blocks than needed is harmless.
+	const directoryEntriesPerBlock = 50
+	dirCounts := map[string]int{}
+	for p := range rfs.Index {
+		dir, _ := splitPath(p)
+		dirCounts[dir]++
+	}
+
 	var b strings.Builder
 	var warnings []string
 	fileN := 0
@@ -253,6 +269,10 @@ func buildDebugfsScript(rfs *rootfs.Rootfs, payloadDir string, stage *progress.S
 		switch hdr.Typeflag {
 		case tar.TypeDir:
 			fmt.Fprintf(&b, "mkdir %s\n", qp)
+			neededBlocks := (dirCounts[p] + directoryEntriesPerBlock - 1) / directoryEntriesPerBlock
+			for k := 1; k < neededBlocks; k++ {
+				fmt.Fprintf(&b, "expand_dir %s\n", qp)
+			}
 			writeAttrs(&b, qp, hdr)
 			if err := writeXattrs(&b, payloadDir, &xattrN, qp, hdr); err != nil {
 				return "", nil, fmt.Errorf("%s: %w", p, err)
@@ -351,7 +371,14 @@ func writeAttrs(b *strings.Builder, quotedPath string, hdr *tar.Header) {
 	fmt.Fprintf(b, "sif %s mode 0%o\n", quotedPath, modeBits(hdr))
 	fmt.Fprintf(b, "sif %s uid %d\n", quotedPath, hdr.Uid)
 	fmt.Fprintf(b, "sif %s gid %d\n", quotedPath, hdr.Gid)
-	fmt.Fprintf(b, "sif %s mtime %d\n", quotedPath, hdr.ModTime.Unix())
+	// The leading '@' forces integer parsing: debugfs's string_to_time
+	// otherwise tries strptime("%Y%m%d%H%M%S") on a bare number before
+	// falling back to strtoll, and strptime does not range-check, so an
+	// mtime like 1789895046 is read as the date "1789-89-50 46:00:00" and
+	// stored as a timestamp beyond ext4's representable range. e2fsck -fn
+	// then flags those as "beyond 2310-04-04 are likely pre-1970" and the
+	// conversion fails.
+	fmt.Fprintf(b, "sif %s mtime @%d\n", quotedPath, hdr.ModTime.Unix())
 }
 
 // writeXattrs appends one "ea_set -f <value-file> <path> <name>" debugfs
