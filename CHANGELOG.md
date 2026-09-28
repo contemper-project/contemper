@@ -43,7 +43,7 @@ missing features and breaking changes before 1.0.
 - **macOS (Homebrew):** `brew install contemper-project/tap/contemper`
   (also installs e2fsprogs and QEMU).
 - **Debian/Ubuntu:** download the `.deb` below and
-  `sudo apt install ./contemper_0.1.0_linux_amd64.deb`.
+  `sudo apt install ./contemper_0.1.0_amd64.deb`.
 - **Fedora/RHEL:** download the `.rpm` below and
   `sudo dnf install ./contemper-0.1.0-1.x86_64.rpm`.
 - **Anything else:** the `.tar.gz` archives below, plus the host tools:

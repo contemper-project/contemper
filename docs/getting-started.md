@@ -28,7 +28,7 @@ your machine with the least fuss:
     [releases page](https://github.com/contemper-project/contemper/releases):
 
     ```console
-    $ sudo apt install ./contemper_0.1.0_linux_amd64.deb
+    $ sudo apt install ./contemper_0.1.0_amd64.deb
     ```
 
     `apt` installs `e2fsprogs` and `qemu-utils` automatically, which is
