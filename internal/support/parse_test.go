@@ -23,6 +23,28 @@ func TestParseTopLevelRequires(t *testing.T) {
 	}
 }
 
+// TestParseIgnoresUnrelatedAnnotations checks that annotations outside
+// contemper's own "io.contemper.*" namespace - such as the standard
+// org.opencontainers.image.* keys a publisher sets for a registry UI -
+// are silently ignored rather than tripping the "unrecognized key"
+// validation that applies to io.contemper.branch.* keys.
+func TestParseIgnoresUnrelatedAnnotations(t *testing.T) {
+	schema, err := support.Parse(map[string]string{
+		"io.contemper.branch.init-system.openrc.requires.files": "/sbin/openrc-init",
+		"org.opencontainers.image.description":                  "a support image",
+		"org.opencontainers.image.source":                       "https://github.com/contemper-project/contemper",
+		"org.opencontainers.image.licenses":                     "Apache-2.0",
+		"org.opencontainers.image.revision":                     "deadbeef",
+		"org.opencontainers.image.title":                        "volumes-support",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(schema.Branches) != 1 || schema.Branches[0].Name != "init-system" {
+		t.Errorf("expected only the init-system branch, got %+v", schema.Branches)
+	}
+}
+
 func TestParseBranchAndVariant(t *testing.T) {
 	schema, err := support.Parse(map[string]string{
 		"io.contemper.branch.init-system.openrc.requires.files":  "/sbin/openrc-init",
