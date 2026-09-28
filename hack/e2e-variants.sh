@@ -16,6 +16,13 @@
 # qemu-system-<arch> and UEFI firmware for it. Output, including
 # serial.log, goes to _out/variants/.
 #
+# Set CONTEMPER_E2E_COVERDIR to a directory to build contemper with Go's
+# source-code coverage instrumentation and collect the integration
+# coverage from every invocation below (including the two negative
+# convert cases) into it (see `go help testflag`'s GOCOVERDIR, and `go
+# tool covdata`). The e2e-variants buildimg helper is never instrumented.
+# Unset, nothing here changes.
+#
 # The support and variant images are built by hack/e2e-variants/buildimg
 # (see that command's doc comment for why: it lets this script set
 # manifest-level annotations the same way regardless of which container
@@ -65,12 +72,25 @@ fi
 command -v go >/dev/null || { echo "e2e-variants.sh: go not found" >&2; exit 1; }
 command -v curl >/dev/null || { echo "e2e-variants.sh: curl not found" >&2; exit 1; }
 
+COVERDIR="${CONTEMPER_E2E_COVERDIR:-}"
+if [ -n "${COVERDIR}" ]; then
+	mkdir -p "${COVERDIR}"
+	# Absolute, since Go resolves a relative GOCOVERDIR against each
+	# process's own working directory.
+	COVERDIR="$(cd "${COVERDIR}" && pwd)"
+	export GOCOVERDIR="${COVERDIR}"
+fi
+
 # Build per OS/arch, same convention as hack/e2e.sh.
 platform="$(go env GOOS)-$(go env GOARCH)"
 arch="$(go env GOARCH)"
 contemper="${REPO}/bin/${platform}/contemper"
 echo "==> go build (${platform})" >&2
-(cd "${REPO}" && go build -o "bin/${platform}/contemper" ./cmd/contemper)
+if [ -n "${COVERDIR}" ]; then
+	(cd "${REPO}" && go build -cover -coverpkg=./... -o "bin/${platform}/contemper" ./cmd/contemper)
+else
+	(cd "${REPO}" && go build -o "bin/${platform}/contemper" ./cmd/contemper)
+fi
 
 rm -rf "${OUT}"
 mkdir -p "${OUT}"

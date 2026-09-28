@@ -43,7 +43,9 @@ architecture. `e2e-variants` also needs `curl` and a local registry
 (it starts one on `localhost:5555` unless `E2E_REGISTRY` says
 otherwise). Run these if you change disk, boot, or support-image
 behavior; both scripts document their requirements in more detail at
-the top of `hack/e2e.sh` and `hack/e2e-variants.sh`.
+the top of `hack/e2e.sh` and `hack/e2e-variants.sh`. Set
+`CONTEMPER_E2E_COVERDIR=<dir>` to also collect integration coverage from
+the `contemper` binary these scripts build and run.
 
 ### Docs
 
