@@ -111,13 +111,28 @@ jobs:
       # (e.g. a higher-level package driving several internal ones) shows
       # as uncovered. On this module that raises the total by a few points
       # with no change to which tests run.
+      # gotestsum (a tool in go.mod) runs go test and also writes a JUnit
+      # report, which Codecov's test analytics reads (failures, flaky and
+      # slow tests).
       - name: go test
-        run: go test -coverpkg=./... -coverprofile=coverage.out -covermode=atomic ./...
+        run: >-
+          go tool gotestsum --format pkgname --junitfile junit.xml --
+          -coverpkg=./... -coverprofile=coverage.out -covermode=atomic ./...
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.out
+          flags: ${{ matrix.os == 'ubuntu-latest' && 'linux' || 'macos' }}
+          fail_ci_if_error: false
+      - name: Upload test results to Codecov
+        # Also after a test failure: that's when the report is most useful.
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          report_type: test_results
+          files: junit.xml
           flags: ${{ matrix.os == 'ubuntu-latest' && 'linux' || 'macos' }}
           fail_ci_if_error: false
 
