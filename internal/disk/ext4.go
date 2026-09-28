@@ -36,6 +36,7 @@ var debugfsErrorMarkers = []string{
 	"already exists",
 	"Filename too long",
 	"ea_set:",
+	"No free space in the directory",
 }
 
 // maxScriptLine is the longest debugfs script line, in bytes and
