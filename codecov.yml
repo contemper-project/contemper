@@ -7,6 +7,13 @@ coverage:
       default:
         informational: true
 
+flags:
+  # The boot tests (hack/e2e*.sh) are path-filtered in CI and skip on
+  # PRs that don't touch Go code, so without carryforward every such PR
+  # would look like this flag's coverage dropped to nothing.
+  e2e:
+    carryforward: true
+
 comment:
   layout: "condensed_header, diff, flags, condensed_files, condensed_footer"
   require_changes: true

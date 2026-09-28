@@ -186,7 +186,30 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils ovmf
       - name: Boot test
+        env:
+          CONTEMPER_E2E_COVERDIR: _gocover
         run: ./hack/e2e.sh --example ${{ matrix.example }} --timeout 300s
+      # Integration coverage from a binary only the boot tests exercise
+      # (see hack/e2e.sh's CONTEMPER_E2E_COVERDIR), merged into one
+      # text-format profile Codecov can read. Also after a failing boot
+      # test, since whatever ran before the failure still wrote data;
+      # skipped if nothing did.
+      - name: Convert integration coverage
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -d _gocover ] && [ -n "$(ls -A _gocover)" ]; then
+            go tool covdata textfmt -i=_gocover -o e2e-coverage.out
+          else
+            echo "no integration coverage data in _gocover; skipping"
+          fi
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: e2e-coverage.out
+          flags: e2e
+          fail_ci_if_error: false
       - name: Upload serial log
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -224,7 +247,26 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils ovmf
       - name: Boot test with a dummy variant support image
+        env:
+          CONTEMPER_E2E_COVERDIR: _gocover
         run: ./hack/e2e-variants.sh --timeout 300s
+      # See the `e2e` job's "Convert integration coverage" step.
+      - name: Convert integration coverage
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -d _gocover ] && [ -n "$(ls -A _gocover)" ]; then
+            go tool covdata textfmt -i=_gocover -o e2e-coverage.out
+          else
+            echo "no integration coverage data in _gocover; skipping"
+          fi
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: e2e-coverage.out
+          flags: e2e
+          fail_ci_if_error: false
       - name: Upload serial log
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -268,7 +310,26 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils ovmf
       - name: Boot test with volumes
+        env:
+          CONTEMPER_E2E_COVERDIR: _gocover
         run: ./hack/e2e-volumes.sh --example ${{ matrix.example }} --timeout 300s
+      # See the `e2e` job's "Convert integration coverage" step.
+      - name: Convert integration coverage
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -d _gocover ] && [ -n "$(ls -A _gocover)" ]; then
+            go tool covdata textfmt -i=_gocover -o e2e-coverage.out
+          else
+            echo "no integration coverage data in _gocover; skipping"
+          fi
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: e2e-coverage.out
+          flags: e2e
+          fail_ci_if_error: false
       - name: Upload serial logs
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

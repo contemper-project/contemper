@@ -7,3 +7,5 @@
 /.venv/
 coverage.out
 junit.xml
+/_gocover/
+e2e-coverage.out
