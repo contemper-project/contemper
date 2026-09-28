@@ -362,16 +362,25 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 
 	bundleName := fmt.Sprintf("%s-%s.%s", img.RepoBase, img.Tag, machineArch(platform.Architecture))
 	outBundleDir := filepath.Join(opts.outDir, bundleName)
-	// The bundle (manifest + disk image) is the tool's deliverable: it
-	// must stay readable and listable by whatever user or process later
-	// deploys it, which may not be this one - so 0o755 here, like
-	// contemper.json's own 0o644 (see bundle.Write), is intentional, not
-	// an oversight.
-	if err := os.MkdirAll(outBundleDir, 0o755); err != nil { //nolint:gosec // G301: bundle output must stay world-readable for whatever deploys it
-		return fmt.Errorf("creating %s: %w", outBundleDir, err)
+	// Fail before doing any of the expensive work below (ext4
+	// population, qcow2 conversion) if --out already names something we
+	// can't safely replace.
+	if err := bundle.CheckDest(outBundleDir); err != nil {
+		return err
 	}
 
-	diskInfo, warnings, err := asm.Assemble(rfs, val, platform.Architecture, outBundleDir, target.Options{
+	// The bundle is assembled in a staging directory next to outBundleDir
+	// and only swapped into place once everything below succeeds
+	// (bundle.Commit), so a failure partway through - or a stale
+	// disk.raw from an earlier --keep-raw run - never leaves a broken or
+	// mixed-version bundle at outBundleDir.
+	stageDir, err := bundle.Stage(outBundleDir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(stageDir) }()
+
+	diskInfo, warnings, err := asm.Assemble(rfs, val, platform.Architecture, stageDir, target.Options{
 		RootSizeBytes: rootSizeBytes,
 		KeepRaw:       opts.keepRaw,
 		Progress:      rep,
@@ -423,7 +432,11 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 		}
 	}
 
-	if err := bundle.Write(outBundleDir, manifest); err != nil {
+	if err := bundle.Write(stageDir, manifest); err != nil {
+		return err
+	}
+
+	if err := bundle.Commit(stageDir, outBundleDir); err != nil {
 		return err
 	}
 
