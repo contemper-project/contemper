@@ -6,46 +6,119 @@ your usual container tooling, convert it, and boot it under QEMU.
 
 ## Install
 
-contemper is a single Go binary. Download one for your platform from the
-[releases page](https://github.com/contemper-project/contemper/releases),
-or build it from a checkout:
+contemper is a single Go binary plus a handful of host tools it discovers
+rather than bundles (see [Host tools](reference/host-tools.md) for what
+each one is for). Pick whichever of these gets it and those tools onto
+your machine with the least fuss:
 
-```console
-$ go build -o contemper ./cmd/contemper
-```
-
-It needs a few host tools, which it finds on `PATH` (and in Homebrew's
-keg-only locations):
-
-=== "macOS (Homebrew)"
+=== "Homebrew (macOS)"
 
     ```console
-    $ brew install go qemu e2fsprogs
+    $ brew install contemper-project/tap/contemper
     ```
+
+    This installs `e2fsprogs` and `qemu` automatically (`convert` needs
+    both; `qemu` also carries the UEFI firmware `deploy --to local-qemu`
+    needs), and removes the quarantine attribute from the (unsigned)
+    binary so macOS will run it.
 
 === "Debian / Ubuntu"
 
+    Download the `.deb` matching your architecture from the
+    [releases page](https://github.com/contemper-project/contemper/releases):
+
     ```console
-    $ sudo apt install e2fsprogs qemu-utils qemu-system ovmf
+    $ sudo apt install ./contemper_0.1.0_linux_amd64.deb
     ```
 
-For building the example you also need podman or docker. See
-[Host tools](reference/host-tools.md) for what each tool is used for.
+    `apt` installs `e2fsprogs` and `qemu-utils` automatically, which is
+    everything `convert` needs. For `deploy --to local-qemu`, add the
+    emulator and UEFI firmware for the bundles you boot:
+
+    ```console
+    $ sudo apt install qemu-system-x86 ovmf            # amd64 bundles
+    $ sudo apt install qemu-system-arm qemu-efi-aarch64  # arm64 bundles
+    ```
+
+=== "Fedora / RHEL"
+
+    Download the `.rpm` matching your architecture from the
+    [releases page](https://github.com/contemper-project/contemper/releases):
+
+    ```console
+    $ sudo dnf install ./contemper-0.1.0-1.x86_64.rpm
+    ```
+
+    `dnf` installs `e2fsprogs` and `qemu-img` automatically, which is
+    everything `convert` needs. For `deploy --to local-qemu`, add the
+    emulator for the bundles you boot; each pulls in its UEFI firmware:
+
+    ```console
+    $ sudo dnf install qemu-system-x86-core      # amd64 bundles
+    $ sudo dnf install qemu-system-aarch64-core  # arm64 bundles
+    ```
+
+=== "Other Linux / manual"
+
+    Works on any Linux distribution: download the tarball for your
+    platform from the
+    [releases page](https://github.com/contemper-project/contemper/releases)
+    and put the `contemper` binary it contains on your `PATH`:
+
+    ```console
+    $ tar -xzf contemper_0.1.0_linux_amd64.tar.gz contemper
+    ```
+
+    Then install the host tools yourself. `convert` always needs
+    `e2fsprogs` and a `qemu-img` binary; `deploy --to local-qemu`
+    additionally needs a system emulator and UEFI firmware for the
+    architecture you're deploying (not necessarily your host's own — see
+    [Host tools](reference/host-tools.md) for cross-architecture deploys):
+
+    - **macOS (Homebrew):** `brew install e2fsprogs qemu`
+    - **Debian/Ubuntu:** `sudo apt install e2fsprogs qemu-utils` to
+      convert; add `qemu-system-x86 ovmf` (amd64 bundles) or
+      `qemu-system-arm qemu-efi-aarch64` (arm64 bundles) for
+      `deploy --to local-qemu`
+    - **Fedora/RHEL:** `sudo dnf install e2fsprogs qemu-img` to convert;
+      add `qemu-system-x86-core` (amd64 bundles, pulls in `edk2-ovmf`) or
+      `qemu-system-aarch64-core` (arm64 bundles, pulls in `edk2-aarch64`)
+      for `deploy --to local-qemu`
+    - **Other distributions:** install your package manager's equivalents
+      of `e2fsprogs` and `qemu-img`, plus a system emulator and UEFI
+      firmware if you'll use `deploy --to local-qemu`; see
+      [Host tools](reference/host-tools.md) for exactly what each is for.
+
+=== "From source"
+
+    ```console
+    $ go install github.com/contemper-project/contemper/cmd/contemper@latest
+    ```
+
+    This still needs the host tools listed under "Other Linux / manual"
+    above; only the binary itself comes from Go. `contemper version`
+    reports whatever version `go install` resolved (a pseudo-version if
+    there is no tagged release yet) rather than the exact commit and
+    build date a downloaded binary embeds.
+
+For building the example below you also need podman or docker.
 
 ### Verifying downloads
 
-Every release archive carries a signed build provenance attestation, so
-you can check that a downloaded archive was actually built by this
-project's release workflow, straight from that commit and workflow run:
+Every release archive and package carries a signed build provenance
+attestation, so you can check that what you downloaded was actually built
+by this project's release workflow, straight from that commit and
+workflow run:
 
 ```console
 $ gh attestation verify contemper_0.1.0_linux_amd64.tar.gz --repo contemper-project/contemper
 ```
 
-(with the archive name you downloaded).
+(with the archive, `.deb` or `.rpm` name you downloaded).
 
 That's on top of the usual checksum check against the release's
-`checksums.txt` (itself attested the same way).
+`checksums.txt`, which lists every archive and package and is itself
+attested the same way.
 
 ## Build the example image
 
