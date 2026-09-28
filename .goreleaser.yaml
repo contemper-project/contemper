@@ -51,5 +51,112 @@ archives:
       - src: internal/uki/stubs/LICENSE.LGPL-2.1
         dst: LICENSE.LGPL-2.1
 
+nfpms:
+  - id: contemper
+    ids:
+      - contemper
+    package_name: contemper
+    file_name_template: "{{ .ConventionalFileName }}"
+    formats:
+      - deb
+      - rpm
+    vendor: The contemper Authors
+    maintainer: Stephan Peijnik-Steinwender <speijnik@gmail.com>
+    homepage: https://contemper-project.github.io/contemper/
+    description: |-
+      Build bootable VM images from container images.
+      contemper takes an OCI image and converts it into a bootable disk for
+      a given virtualization target.
+    license: Apache-2.0
+    bindir: /usr/bin
+    # Same license/attribution files the tar.gz archives carry (see
+    # `archives` above), placed where each packaging format expects them.
+    # rpm has a package-relationship concept for license/doc files that deb
+    # doesn't (nfpm drops content with `type: license`/`doc` from non-rpm
+    # packagers entirely), hence the separate `packager`-scoped entries.
+    contents:
+      - src: LICENSE
+        dst: /usr/share/doc/contemper/LICENSE
+        packager: deb
+      - src: LICENSE
+        dst: /usr/share/doc/contemper/LICENSE
+        type: license
+        packager: rpm
+      - src: NOTICE
+        dst: /usr/share/doc/contemper/NOTICE
+        packager: deb
+      - src: NOTICE
+        dst: /usr/share/doc/contemper/NOTICE
+        type: doc
+        packager: rpm
+      - src: internal/uki/stubs/LICENSE.LGPL-2.1
+        dst: /usr/share/doc/contemper/LICENSE.LGPL-2.1
+        packager: deb
+      - src: internal/uki/stubs/LICENSE.LGPL-2.1
+        dst: /usr/share/doc/contemper/LICENSE.LGPL-2.1
+        type: license
+        packager: rpm
+    # Package names and dependency syntax differ enough between Debian and
+    # Fedora/RHEL that everything here is set per packager rather than as a
+    # shared default. `convert` needs e2fsprogs and a qemu-img binary; those
+    # are hard dependencies. `deploy --to local-qemu` additionally needs a
+    # system emulator and UEFI firmware for the bundle's architecture. Those
+    # are only Suggests: which architecture is needed depends on the bundle,
+    # not the package (nfpm can't vary these per architecture), and a
+    # Recommends with alternatives would make apt/dnf install the first
+    # one, the x86 emulator, on arm64 hosts too.
+    overrides:
+      deb:
+        dependencies:
+          - e2fsprogs
+          - qemu-utils
+        suggests:
+          - qemu-system-x86
+          - qemu-system-arm
+          - ovmf
+          - qemu-efi-aarch64
+      rpm:
+        dependencies:
+          - e2fsprogs
+          - qemu-img
+        # The "-core" subpackages are the headless emulator only (no
+        # SDL/GTK/etc. UI backends, which `deploy --to local-qemu` never
+        # uses); each already requires its matching UEFI firmware package
+        # (edk2-ovmf, edk2-aarch64) on its own.
+        suggests:
+          - qemu-system-x86-core
+          - qemu-system-aarch64-core
+
+homebrew_casks:
+  - name: contemper
+    ids:
+      - contemper
+    directory: Casks
+    homepage: https://contemper-project.github.io/contemper/
+    description: Build bootable VM images from container images.
+    commit_msg_template: "chore(cask): update contemper to {{ .Tag }}"
+    commit_author:
+      name: github-actions[bot]
+      email: 41898282+github-actions[bot]@users.noreply.github.com
+    # Pre-releases (e.g. a release-please "-rc1" style tag, should one ever
+    # be cut) shouldn't move the tap to an unreleased version.
+    skip_upload: auto
+    dependencies:
+      - formula: e2fsprogs
+      - formula: qemu
+    # The binary isn't signed or notarized; without this, Gatekeeper quarantines
+    # it on download and macOS refuses to run it ("contemper is damaged and
+    # can't be opened").
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/contemper"]
+          end
+    repository:
+      owner: contemper-project
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+
 checksum:
   name_template: "checksums.txt"

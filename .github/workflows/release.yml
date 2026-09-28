@@ -58,6 +58,7 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
       # Signed, Sigstore-backed build provenance for everything GoReleaser
       # just built. checksums.txt itself is one subject; subject-checksums
       # attests every archive it lists in one step, keyed to the same
