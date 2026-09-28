@@ -7,6 +7,7 @@
 [![Go version](https://img.shields.io/github/go-mod/go-version/contemper-project/contemper)](go.mod)
 [![Coverage](https://codecov.io/gh/contemper-project/contemper/graph/badge.svg?token=KVKFFGZCSP)](https://codecov.io/gh/contemper-project/contemper)
 [![Docs](https://img.shields.io/badge/docs-contemper--project.github.io-blue)](https://contemper-project.github.io/contemper/)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/contemper-project/contemper/badge)](https://scorecard.dev/viewer/?uri=github.com/contemper-project/contemper)
 
 Build bootable VM images from container images.
 
