@@ -2,6 +2,7 @@ package progress_test
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 
@@ -69,6 +70,22 @@ func TestPlainFail(t *testing.T) {
 	}
 }
 
+func TestFailSilentOnceContextCanceled(t *testing.T) {
+	r, buf := newPlain(false)
+	ctx, cancel := context.WithCancel(context.Background())
+	r.SetContext(ctx)
+	r.Fail("merge", "reason", "hint")
+	if !strings.Contains(buf.String(), "✖  merge: reason") {
+		t.Fatalf("Fail() before cancellation printed %q, want the failure line", buf.String())
+	}
+	buf.Reset()
+	cancel()
+	r.BeginStage("💿", "assembling").Fail("assemble", "context canceled", "")
+	if buf.Len() != 0 {
+		t.Errorf("Fail() after cancellation printed %q, want nothing", buf.String())
+	}
+}
+
 func TestPlainStageDoneIsOneLine(t *testing.T) {
 	r, buf := newPlain(false)
 	s := r.BeginStage("🧬", "merging layers")
@@ -103,6 +120,7 @@ func TestNilReporterIsSilentAndSafe(t *testing.T) {
 	r.Sub("✔", "a", "b")
 	r.SubChild("x")
 	r.Warn("a", "b")
+	r.SetContext(context.Background())
 	r.Fail("stage", "reason", "hint") // must not print anywhere
 	r.Finish("done", "1s")
 	r.VerboseCmd("x", nil)

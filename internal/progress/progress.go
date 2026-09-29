@@ -11,6 +11,7 @@
 package progress
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -70,6 +71,8 @@ type Reporter struct {
 
 	mu   sync.Mutex
 	live *Stage // the currently in-flight stage, tty mode only
+
+	ctx context.Context // see SetContext; nil means never canceled
 }
 
 // New creates a Reporter. Pass quiet=true (or a nil *Reporter, from the
@@ -79,6 +82,19 @@ func New(w io.Writer, mode Mode, verbose bool, quiet bool) *Reporter {
 		return nil
 	}
 	return &Reporter{w: w, tty: resolve(mode, w) == ModeTTY, verbose: verbose, start: time.Now()}
+}
+
+// SetContext ties r to the context of the run it reports on. Once ctx
+// is canceled (contemper was interrupted), Fail only stops the live
+// stage line and prints nothing: the step failed because of the
+// interruption, which main reports on its own, and a "✖" line carrying
+// "context canceled" or a stopped tool's output would only be noise.
+// Safe to call on a nil Reporter.
+func (r *Reporter) SetContext(ctx context.Context) {
+	if r == nil {
+		return
+	}
+	r.ctx = ctx
 }
 
 // Verbose reports whether --verbose was requested. Safe to call on a nil
@@ -162,6 +178,9 @@ func (r *Reporter) Fail(stage, reason, hint string) {
 		return
 	}
 	r.stopLive(nil)
+	if r.ctx != nil && r.ctx.Err() != nil {
+		return
+	}
 	r.println("✖  " + stage + ": " + reason)
 	if hint != "" {
 		r.println("   " + hint)
