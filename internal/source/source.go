@@ -1,14 +1,17 @@
 // Package source resolves a contemper source reference (a registry image,
-// an OCI archive, an OCI layout directory, or a docker-archive tarball)
-// into a platform-selected v1.Image, and checks the contemper readiness
-// label before any layer content is fetched.
+// an OCI archive, an OCI layout directory, a docker-archive tarball, or an
+// image already loaded into the local Docker daemon) into a
+// platform-selected v1.Image, and checks the contemper readiness label
+// before any layer content is fetched.
 package source
 
 import (
 	"archive/tar"
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"runtime"
@@ -59,35 +62,49 @@ const (
 	dockerReferenceTypeAttestation = "attestation-manifest"
 )
 
-// Kind identifies which of the four supported source forms a Ref names.
+// Kind identifies which of the five supported source forms a Ref names.
 type Kind string
 
-// The four supported Kind values, one per source form Ref.Kind can name.
+// The five supported Kind values, one per source form Ref.Kind can name.
 const (
 	KindRegistry      Kind = "registry"
 	KindOCIArchive    Kind = "oci-archive"
 	KindOCILayout     Kind = "oci"
 	KindDockerArchive Kind = "docker-archive"
+	// KindDockerDaemon names an image already loaded into the local
+	// Docker daemon's image store, read out with `docker save` (skopeo's
+	// name for this source form).
+	KindDockerDaemon Kind = "docker-daemon"
 )
 
 // Ref is a parsed source reference.
 type Ref struct {
 	Kind Kind
-	// Value is the registry reference string for KindRegistry, or a
+	// Value is the registry reference string for KindRegistry, the
+	// image reference to `docker save` for KindDockerDaemon, or a
 	// filesystem path (tarball or directory) for the other kinds.
 	Value string
 }
 
 // ParseRef parses a source reference of the form understood by contemper:
 // a plain registry reference, or one of "oci-archive:<path>",
-// "oci:<path>", "docker-archive:<path>". There is no daemon source.
+// "oci:<path>", "docker-archive:<path>", "docker-daemon:<ref>".
 func ParseRef(raw string) (Ref, error) {
-	for _, prefix := range []Kind{KindOCIArchive, KindOCILayout, KindDockerArchive} {
+	for _, prefix := range []Kind{KindOCIArchive, KindOCILayout, KindDockerArchive, KindDockerDaemon} {
 		p := string(prefix) + ":"
 		if strings.HasPrefix(raw, p) {
 			value := strings.TrimPrefix(raw, p)
 			if value == "" {
-				return Ref{}, fmt.Errorf("source ref %q: missing path after %q", raw, p)
+				what := "path"
+				if prefix == KindDockerDaemon {
+					what = "image reference"
+				}
+				return Ref{}, fmt.Errorf("source ref %q: missing %s after %q", raw, what, p)
+			}
+			if prefix == KindDockerDaemon && strings.HasPrefix(value, "-") {
+				// The value becomes an argument to `docker save`; one
+				// starting with "-" would be read as a flag there.
+				return Ref{}, fmt.Errorf("source ref %q: image reference must not start with \"-\"", raw)
 			}
 			return Ref{Kind: prefix, Value: value}, nil
 		}
@@ -153,12 +170,18 @@ func registryHost(raw string) (string, error) {
 }
 
 // String returns the reference in the form ParseRef accepts, with local
-// paths cleaned (so "a/../b.tar" is recorded as "b.tar").
+// paths cleaned (so "a/../b.tar" is recorded as "b.tar"). A
+// KindDockerDaemon Value is a Docker image reference, not a path, so it
+// is left as given.
 func (r Ref) String() string {
-	if r.Kind == KindRegistry {
+	switch r.Kind {
+	case KindRegistry:
 		return r.Value
+	case KindDockerDaemon:
+		return string(r.Kind) + ":" + r.Value
+	default:
+		return string(r.Kind) + ":" + filepath.Clean(r.Value)
 	}
-	return string(r.Kind) + ":" + filepath.Clean(r.Value)
 }
 
 // HostPlatform returns the platform to resolve a source/support image
@@ -213,6 +236,8 @@ func Load(ref Ref, platform v1.Platform) (*Image, error) {
 		return loadOCILayout(ref, platform, archiveBaseName(ref.Value))
 	case KindDockerArchive:
 		return loadDockerArchive(ref, platform)
+	case KindDockerDaemon:
+		return loadDockerDaemon(ref, platform)
 	default:
 		return nil, fmt.Errorf("unknown source kind %q", ref.Kind)
 	}
@@ -233,11 +258,7 @@ func loadRegistry(ref Ref, platform v1.Platform) (*Image, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading digest of %s: %w", ref.Value, err)
 	}
-	base := path.Base(nref.Context().RepositoryStr())
-	tag := "latest"
-	if t, ok := nref.(name.Tag); ok {
-		tag = t.TagStr()
-	}
+	base, tag := referenceName(nref)
 	return &Image{
 		Image:        img,
 		Digest:       digest,
@@ -354,6 +375,146 @@ func loadDockerArchive(ref Ref, platform v1.Platform) (*Image, error) {
 	}, nil
 }
 
+// loadDockerDaemon resolves ref (a "docker-daemon:<ref>" source, ref.Value
+// being the image reference as the Docker daemon knows it) by running
+// `docker save` into a temporary archive and reading that archive back
+// through the existing archive-loading code, exactly as if the user had
+// run `docker save` themselves and pointed contemper at the result.
+//
+// Docker 25+ writes an OCI layout tarball (index.json, oci-layout,
+// blobs/); older Docker (and the classic image store) writes a
+// docker-archive tarball (manifest.json, repositories, per-layer
+// directories). Which one `docker save` produced is detected by content
+// (an "index.json" entry at the archive's root), not by asking Docker's
+// version, since both the daemon version and its configured image store
+// affect the output format.
+//
+// The bundle is named after ref.Value itself - the reference the caller
+// asked `docker save` for - rather than any naming annotation the
+// archive happens to carry, so `docker-daemon:my-app:dev` always yields
+// a bundle named after "my-app:dev" regardless of image-store quirks.
+//
+// The returned Image's cleanup removes the temporary archive (and, for
+// the OCI-layout case, the directory it was extracted into); the caller
+// must call Close once the image's layers have been read.
+func loadDockerDaemon(ref Ref, platform v1.Platform) (*Image, error) {
+	dockerPath, err := exec.LookPath("docker")
+	if err != nil {
+		return nil, fmt.Errorf("docker not found on PATH; install Docker to use a docker-daemon: source (https://docs.docker.com/get-docker/)")
+	}
+
+	tmpDir, err := os.MkdirTemp("", "contemper-docker-daemon-")
+	if err != nil {
+		return nil, fmt.Errorf("creating temp dir: %w", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(tmpDir) }
+
+	archivePath := filepath.Join(tmpDir, "image.tar")
+	//nolint:gosec // G204: dockerPath is resolved by exec.LookPath and ref.Value is the user-given source ref, never a shell
+	cmd := exec.CommandContext(context.Background(), dockerPath, "save", "-o", archivePath, ref.Value)
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("docker save %s: %w", ref.Value, err)
+	}
+
+	isOCILayout, err := archiveHasIndexJSON(archivePath)
+	if err != nil {
+		cleanup()
+		return nil, fmt.Errorf("reading docker save output for %q: %w", ref.Value, err)
+	}
+
+	var img *Image
+	if isOCILayout {
+		layoutDir := filepath.Join(tmpDir, "layout")
+		if err := os.MkdirAll(layoutDir, 0o750); err != nil {
+			cleanup()
+			return nil, fmt.Errorf("creating layout dir: %w", err)
+		}
+		f, err := os.Open(archivePath)
+		if err != nil {
+			cleanup()
+			return nil, fmt.Errorf("opening %q: %w", archivePath, err)
+		}
+		extractErr := extractTar(f, layoutDir)
+		_ = f.Close()
+		if extractErr != nil {
+			cleanup()
+			return nil, fmt.Errorf("extracting docker save output for %q: %w", ref.Value, extractErr)
+		}
+		// Only the extracted layout is read from here on; drop the
+		// archive now rather than keep two copies of the image on disk
+		// for the whole conversion.
+		_ = os.Remove(archivePath)
+		img, err = loadOCILayout(Ref{Kind: KindOCILayout, Value: layoutDir}, platform, "image")
+		if err != nil {
+			cleanup()
+			return nil, err
+		}
+	} else {
+		img, err = loadDockerArchive(Ref{Kind: KindDockerArchive, Value: archivePath}, platform)
+		if err != nil {
+			cleanup()
+			return nil, err
+		}
+	}
+
+	img.Ref = ref
+	img.RepoBase, img.Tag = daemonRefName(ref.Value)
+	img.Reproducible = false
+	img.cleanup = cleanup
+	return img, nil
+}
+
+// daemonRefName derives the bundle-naming (basename, tag) pair for a
+// docker-daemon: reference the same way a registry reference is named
+// (see referenceName). A value that doesn't parse as an image reference
+// falls back to splitRepoTag.
+func daemonRefName(value string) (string, string) {
+	nref, err := name.ParseReference(value)
+	if err != nil {
+		return splitRepoTag(value)
+	}
+	return referenceName(nref)
+}
+
+// referenceName returns the bundle-naming (basename, tag) pair for an
+// image reference: the repository's last path component, and its tag,
+// or "latest" when it has none or is pinned by digest.
+func referenceName(nref name.Reference) (string, string) {
+	tag := "latest"
+	if t, ok := nref.(name.Tag); ok {
+		tag = t.TagStr()
+	}
+	return path.Base(nref.Context().RepositoryStr()), tag
+}
+
+// archiveHasIndexJSON reports whether the tar file at path has an
+// "index.json" entry at its root, the marker of an OCI layout tarball
+// (as opposed to a legacy docker-archive tarball's "manifest.json").
+func archiveHasIndexJSON(archivePath string) (bool, error) {
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = f.Close() }()
+
+	tr := tar.NewReader(f)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		name := strings.TrimPrefix(filepath.ToSlash(hdr.Name), "./")
+		if name == "index.json" {
+			return true, nil
+		}
+	}
+}
+
 // IndexAnnotations returns the annotations recorded on the index
 // descriptor that selects platform's manifest, for support-image
 // resolution's manifest/index-descriptor annotation fallback (see
@@ -371,6 +532,14 @@ func IndexAnnotations(ref Ref, platform v1.Platform) (map[string]string, error) 
 	case KindDockerArchive:
 		// docker-archive's manifest.json has no index-descriptor
 		// annotation concept.
+		return nil, nil
+	case KindDockerDaemon:
+		// A user can pass --support docker-daemon:<ref> directly. Reading
+		// its index-descriptor annotations would mean running `docker
+		// save` a second time (Load already ran it once); the manifest
+		// annotations support.Parse reads from the loaded image cover the
+		// same ground, so this returns no extra fallback rather than
+		// paying for another docker save.
 		return nil, nil
 	default:
 		return nil, fmt.Errorf("unknown source kind %q", ref.Kind)
