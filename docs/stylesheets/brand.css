@@ -14,3 +14,13 @@
   --md-typeset-a-color: #F2A65A;
   --md-default-bg-color: #0E151C;
 }
+
+/* Copying a console block copies only the commands. Material's copy
+   button takes the block's innerText while the block carries
+   data-md-copying, and hidden elements drop out of innerText, so the
+   "$ " prompts (.gp) and command output (.go) stay visible on the page
+   but never reach the clipboard. */
+[data-md-copying] .gp,
+[data-md-copying] .go {
+  display: none;
+}
