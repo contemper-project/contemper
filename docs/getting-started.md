@@ -103,6 +103,41 @@ your machine with the least fuss:
 
 For building the example below you also need podman or docker.
 
+### Shell completion
+
+The Homebrew cask and the `.deb`/`.rpm` packages install bash, zsh and fish
+completions for you automatically. If you're running the bare binary from a
+tarball, set it up yourself:
+
+=== "bash"
+
+    ```console
+    $ mkdir -p ~/.local/share/bash-completion/completions
+    $ contemper completion bash > ~/.local/share/bash-completion/completions/contemper
+    ```
+
+    or source it directly from your shell profile:
+    `source <(contemper completion bash)`.
+
+=== "zsh"
+
+    ```console
+    $ mkdir -p ~/.zfunc
+    $ contemper completion zsh > ~/.zfunc/_contemper
+    ```
+
+    Then add `fpath=(~/.zfunc $fpath)` to `~/.zshrc`, before the line that
+    runs `compinit`. Any other directory on `$fpath` works too.
+
+=== "fish"
+
+    ```console
+    $ mkdir -p ~/.config/fish/completions
+    $ contemper completion fish > ~/.config/fish/completions/contemper.fish
+    ```
+
+See `contemper completion <shell> --help` for shell-specific details.
+
 ### Verifying downloads
 
 Every release archive and package carries a signed build provenance
