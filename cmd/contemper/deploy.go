@@ -22,7 +22,7 @@ func newDeployCmd() *cobra.Command {
 		Short: "Deploy a contemper bundle",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDeploy(cmd, deployOptions{
+			return runDeploy(cmd.Context(), cmd, deployOptions{
 				bundleDir:    args[0],
 				to:           to,
 				name:         name,

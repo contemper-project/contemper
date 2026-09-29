@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -79,7 +80,7 @@ func newReporter(w *os.File, modeStr string, verbose, quiet bool) (*progress.Rep
 	return progress.New(w, mode, verbose, quiet), nil
 }
 
-func runConvert(cmd *cobra.Command, opts convertOptions) error {
+func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) error {
 	rep, err := newReporter(os.Stderr, opts.progressMode, opts.verbose, opts.quiet)
 	if err != nil {
 		return err
@@ -111,7 +112,7 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 	if err != nil {
 		return err
 	}
-	img, err := source.Load(ref, platform)
+	img, err := source.Load(ctx, ref, platform)
 	if err != nil {
 		rep.Fail("resolve source", err.Error(), "")
 		return err
@@ -170,7 +171,7 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 		}
 		supportRefStr = supportRef.String()
 		supportRefForBuild = redactedRefString(supportRef)
-		supportImg, err = source.Load(supportRef, platform)
+		supportImg, err = source.Load(ctx, supportRef, platform)
 		if err != nil {
 			rep.Fail("support image", err.Error(), "")
 			return fmt.Errorf("loading support image: %w", err)
@@ -182,7 +183,7 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 		if err != nil {
 			return fmt.Errorf("reading support image manifest: %w", err)
 		}
-		indexAnnotations, err := source.IndexAnnotations(supportRef, platform)
+		indexAnnotations, err := source.IndexAnnotations(ctx, supportRef, platform)
 		if err != nil {
 			return fmt.Errorf("reading support image index: %w", err)
 		}
@@ -204,7 +205,7 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 		rep.Sub("✔", "rootfs", fmt.Sprintf("%d %s · %s download", len(supportLayers), pluralize(len(supportLayers), "layer"), progress.HumanBytes(manifestDownloadSize(supportManifest))))
 
 		if len(schema.Branches) > 0 {
-			vr, err := resolveVariants(schema, supportRef, img, platform, rep)
+			vr, err := resolveVariants(ctx, schema, supportRef, img, platform, rep)
 			if err != nil {
 				rep.Fail("support image", err.Error(), "")
 				return err
@@ -232,7 +233,7 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 		if helperRef == "" {
 			helperRef = volume.DefaultHelperRef
 		}
-		hr, err := mergeVolumeHelper(helperRef, img, platform, rep)
+		hr, err := mergeVolumeHelper(ctx, helperRef, img, platform, rep)
 		if err != nil {
 			rep.Fail("volume helper", err.Error(), "")
 			return err
@@ -272,7 +273,7 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 	}
 	mergeStage := rep.BeginStage("🧬", mergeLabel)
 
-	rfs, err := rootfs.Build(baseImg, overlays...)
+	rfs, err := rootfs.Build(ctx, baseImg, overlays...)
 	if err != nil {
 		mergeStage.Fail("merge", err.Error(), "")
 		return err
@@ -395,7 +396,7 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 	}
 	defer func() { _ = os.RemoveAll(stageDir) }()
 
-	diskInfo, warnings, err := asm.Assemble(rfs, val, platform.Architecture, stageDir, target.Options{
+	diskInfo, warnings, err := asm.Assemble(ctx, rfs, val, platform.Architecture, stageDir, target.Options{
 		RootSizeBytes: rootSizeBytes,
 		KeepRaw:       opts.keepRaw,
 		Progress:      rep,
@@ -468,7 +469,7 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 // unless --image-only stops it there - converts the resulting image
 // through the docker-daemon: source with the same runConvert code path
 // `convert` uses, so every convert flag applies to build too.
-func runBuild(cmd *cobra.Command, opts buildOptions) error {
+func runBuild(ctx context.Context, cmd *cobra.Command, opts buildOptions) error {
 	platform, err := source.HostPlatform(opts.convert.arch)
 	if err != nil {
 		return err
@@ -503,12 +504,12 @@ func runBuild(cmd *cobra.Command, opts buildOptions) error {
 		BuildArgs: opts.buildArgs,
 	}
 
-	dockerPath, err := buildx.CheckAvailable(bxOpts)
+	dockerPath, err := buildx.CheckAvailable(ctx, bxOpts)
 	if err != nil {
 		return err
 	}
 
-	if err := buildx.Build(dockerPath, bxOpts); err != nil {
+	if err := buildx.Build(ctx, dockerPath, bxOpts); err != nil {
 		return fmt.Errorf("docker buildx build: %w", err)
 	}
 
@@ -518,7 +519,7 @@ func runBuild(cmd *cobra.Command, opts buildOptions) error {
 	}
 
 	opts.convert.sourceRef = "docker-daemon:" + tag
-	return runConvert(cmd, opts.convert)
+	return runConvert(ctx, cmd, opts.convert)
 }
 
 // checkConvertOptions runs the checks runConvert makes on its flags
@@ -601,7 +602,7 @@ type variantResolution struct {
 // On error, everything opened so far (the layer cache directory, any
 // variant images already loaded) is cleaned up before returning; on
 // success that cleanup is the caller's responsibility.
-func resolveVariants(schema *support.Schema, supportRef source.Ref, img *source.Image, platform v1.Platform, rep *progress.Reporter) (*variantResolution, error) {
+func resolveVariants(ctx context.Context, schema *support.Schema, supportRef source.Ref, img *source.Image, platform v1.Platform, rep *progress.Reporter) (*variantResolution, error) {
 	cacheDir, err := os.MkdirTemp("", "contemper-layer-cache-")
 	if err != nil {
 		return nil, fmt.Errorf("creating layer cache dir: %w", err)
@@ -620,7 +621,7 @@ func resolveVariants(schema *support.Schema, supportRef source.Ref, img *source.
 		}
 	}()
 
-	srcRfs, err := rootfs.Build(vr.cachedSrc)
+	srcRfs, err := rootfs.Build(ctx, vr.cachedSrc)
 	if err != nil {
 		return nil, fmt.Errorf("building source rootfs for variant resolution: %w", err)
 	}
@@ -650,7 +651,7 @@ func resolveVariants(schema *support.Schema, supportRef source.Ref, img *source.
 			if err != nil {
 				return nil, fmt.Errorf("branch %s: variant %s: %w", r.Branch, r.Variant, err)
 			}
-			variantImg, err := source.Load(variantRef, platform)
+			variantImg, err := source.Load(ctx, variantRef, platform)
 			if err != nil {
 				return nil, fmt.Errorf("branch %s: variant %s: loading %s: %w", r.Branch, r.Variant, r.Image, err)
 			}
@@ -685,7 +686,7 @@ func hintsFrom(cfg *v1.ConfigFile) bundle.Hints {
 	return h
 }
 
-func runDeploy(_ *cobra.Command, opts deployOptions) error {
+func runDeploy(ctx context.Context, _ *cobra.Command, opts deployOptions) error {
 	rep, err := newReporter(os.Stderr, opts.progressMode, opts.verbose, opts.quiet)
 	if err != nil {
 		return err
@@ -748,7 +749,7 @@ func runDeploy(_ *cobra.Command, opts deployOptions) error {
 		}
 		rep.Line("📁", "instance "+instance, stateDir)
 		for _, v := range manifest.Volumes {
-			diskPath, created, err := localqemu.EnsureVolumeDisk(stateDir, v.Name, sizes[v.Path])
+			diskPath, created, err := localqemu.EnsureVolumeDisk(ctx, stateDir, v.Name, sizes[v.Path])
 			if err != nil {
 				rep.Fail("volumes", err.Error(), "")
 				return err
@@ -763,7 +764,7 @@ func runDeploy(_ *cobra.Command, opts deployOptions) error {
 		rep.Blank()
 	}
 
-	return qemu.Deploy(qemu.Options{
+	return qemu.Deploy(ctx, qemu.Options{
 		Arch:          manifest.Arch,
 		DiskPath:      filepath.Join(opts.bundleDir, manifest.Disk.File),
 		DiskFormat:    manifest.Disk.Format,

@@ -178,7 +178,7 @@ func TestBuildKeepsStdoutClean(t *testing.T) {
 	defer func() { _ = stdout.Close() }()
 	orig := os.Stdout
 	os.Stdout = stdout
-	err = buildx.Build(dockerPath, buildx.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
+	err = buildx.Build(t.Context(), dockerPath, buildx.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
 	os.Stdout = orig
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -195,7 +195,7 @@ func TestBuildKeepsStdoutClean(t *testing.T) {
 
 func TestCheckAvailableMissingDocker(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	_, err := buildx.CheckAvailable(buildx.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
+	_, err := buildx.CheckAvailable(t.Context(), buildx.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
 	if err == nil {
 		t.Fatalf("CheckAvailable: expected an error when docker is not on PATH")
 	}
@@ -212,7 +212,7 @@ func TestCheckAvailableMissingBuildx(t *testing.T) {
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	_, err := buildx.CheckAvailable(buildx.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
+	_, err := buildx.CheckAvailable(t.Context(), buildx.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
 	if err == nil {
 		t.Fatalf("CheckAvailable: expected an error when docker buildx version fails")
 	}
@@ -229,7 +229,7 @@ func TestCheckAvailableOK(t *testing.T) {
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	dockerPath, err := buildx.CheckAvailable(buildx.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
+	dockerPath, err := buildx.CheckAvailable(t.Context(), buildx.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
 	if err != nil {
 		t.Fatalf("CheckAvailable: %v", err)
 	}

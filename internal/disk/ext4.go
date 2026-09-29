@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"sort"
@@ -20,6 +19,7 @@ import (
 	"github.com/contemper-project/contemper/internal/hostenv"
 	"github.com/contemper-project/contemper/internal/progress"
 	"github.com/contemper-project/contemper/internal/rootfs"
+	"github.com/contemper-project/contemper/internal/subprocess"
 )
 
 // debugfs error markers: debugfs exits 0 even when an individual scripted
@@ -60,8 +60,11 @@ type Ext4Options struct {
 
 // PopulateExt4 creates an ext4 image at imgPath, sized and labeled per
 // opts, and populates it from rfs. It returns non-fatal warnings (e.g.
-// unsupported tar entry types).
-func PopulateExt4(rfs *rootfs.Rootfs, imgPath string, opts Ext4Options) ([]string, error) {
+// unsupported tar entry types). Canceling ctx stops the mkfs.ext4/debugfs/
+// e2fsck subprocess currently running (see internal/subprocess) and, for
+// the (potentially long) debugfs-script build step in between, is
+// noticed at reasonable points without waiting for it to finish.
+func PopulateExt4(ctx context.Context, rfs *rootfs.Rootfs, imgPath string, opts Ext4Options) ([]string, error) {
 	mkfsPath, err := hostenv.Required("mkfs.ext4")
 	if err != nil {
 		return nil, err
@@ -96,7 +99,7 @@ func PopulateExt4(rfs *rootfs.Rootfs, imgPath string, opts Ext4Options) ([]strin
 
 	mkfsArgs := []string{"-F", "-L", opts.Label, "-E", "root_owner=0:0", imgPath}
 	opts.Progress.VerboseCmd(mkfsPath, mkfsArgs)
-	if out, err := runCmd("", mkfsPath, mkfsArgs...); err != nil {
+	if out, err := runCmd(ctx, "", mkfsPath, mkfsArgs...); err != nil {
 		return nil, fmt.Errorf("mkfs.ext4: %w\n%s", err, out)
 	}
 
@@ -106,7 +109,7 @@ func PopulateExt4(rfs *rootfs.Rootfs, imgPath string, opts Ext4Options) ([]strin
 	}
 	defer func() { _ = os.RemoveAll(payloadDir) }()
 
-	script, warnings, err := buildDebugfsScript(rfs, payloadDir, opts.Stage)
+	script, warnings, err := buildDebugfsScript(ctx, rfs, payloadDir, opts.Stage)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +124,7 @@ func PopulateExt4(rfs *rootfs.Rootfs, imgPath string, opts Ext4Options) ([]strin
 
 	debugfsArgs := []string{"-w", "-f", scriptPath, imgPath}
 	opts.Progress.VerboseCmd(debugfsPath, debugfsArgs)
-	out, runErr := runCmd(payloadDir, debugfsPath, debugfsArgs...)
+	out, runErr := runCmd(ctx, payloadDir, debugfsPath, debugfsArgs...)
 	if marker := findErrorMarker(script, out); marker != "" {
 		return nil, fmt.Errorf("debugfs reported an error while populating %s (matched %q):\n%s", imgPath, marker, out)
 	}
@@ -131,7 +134,7 @@ func PopulateExt4(rfs *rootfs.Rootfs, imgPath string, opts Ext4Options) ([]strin
 
 	fsckArgs := []string{"-fn", imgPath}
 	opts.Progress.VerboseCmd(e2fsckPath, fsckArgs)
-	fsckOut, fsckErr := runCmd("", e2fsckPath, fsckArgs...)
+	fsckOut, fsckErr := runCmd(ctx, "", e2fsckPath, fsckArgs...)
 	if fsckErr != nil {
 		return nil, fmt.Errorf("e2fsck -fn found problems in %s:\n%s", imgPath, fsckOut)
 	}
@@ -140,9 +143,10 @@ func PopulateExt4(rfs *rootfs.Rootfs, imgPath string, opts Ext4Options) ([]strin
 }
 
 // runCmd runs an argv-array subprocess, in dir if it is not empty, and
-// returns its combined output.
-func runCmd(dir, name string, args ...string) (string, error) {
-	cmd := exec.CommandContext(context.Background(), name, args...) //nolint:gosec // G204: name is always one of our own fixed host-tool names, never a shell
+// returns its combined output. Canceling ctx stops it (see
+// internal/subprocess).
+func runCmd(ctx context.Context, dir, name string, args ...string) (string, error) {
+	cmd := subprocess.Command(ctx, name, args...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	return string(out), err
@@ -207,8 +211,11 @@ func xattrs(hdr *tar.Header) map[string]string {
 // payloadDir/fNNNNNN (a name that cannot collide with, or be confused
 // for, the image's own paths), and returns a debugfs script that
 // recreates the full merged rootfs - content, ownership, mode, mtime,
-// symlinks, device nodes and hardlinks - inside an ext4 image.
-func buildDebugfsScript(rfs *rootfs.Rootfs, payloadDir string, stage *progress.Stage) (string, []string, error) {
+// symlinks, device nodes and hardlinks - inside an ext4 image. It checks
+// ctx periodically (the same cadence as the stage progress readout) so
+// an interrupt during this (potentially long, pure-Go) step is noticed
+// without waiting for it to finish.
+func buildDebugfsScript(ctx context.Context, rfs *rootfs.Rootfs, payloadDir string, stage *progress.Stage) (string, []string, error) {
 	paths := make([]string, 0, len(rfs.Index))
 	for p := range rfs.Index {
 		paths = append(paths, p)
@@ -240,8 +247,13 @@ func buildDebugfsScript(rfs *rootfs.Rootfs, payloadDir string, stage *progress.S
 	var hardlinks []string
 
 	for i, p := range paths {
-		if stage != nil && i%64 == 0 {
-			stage.SetProgressCount(int64(i), int64(len(paths)), "files")
+		if i%64 == 0 {
+			if stage != nil {
+				stage.SetProgressCount(int64(i), int64(len(paths)), "files")
+			}
+			if err := ctx.Err(); err != nil {
+				return "", nil, err
+			}
 		}
 		e := rfs.Index[p]
 		hdr := e.Header

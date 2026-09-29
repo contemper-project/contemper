@@ -9,6 +9,7 @@
 package volumehelper
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -103,12 +104,12 @@ type Result struct {
 // On error, everything Merge opened so far is closed before it returns;
 // on success that's the caller's responsibility (Result.Img and each of
 // Result.VariantImages).
-func Merge(ref string, srcImg v1.Image, platform v1.Platform) (*Result, error) {
+func Merge(ctx context.Context, ref string, srcImg v1.Image, platform v1.Platform) (*Result, error) {
 	parsedRef, err := source.ParseRef(ref)
 	if err != nil {
 		return nil, fmt.Errorf("volume helper ref %q: %w", ref, err)
 	}
-	helperImg, err := source.Load(parsedRef, platform)
+	helperImg, err := source.Load(ctx, parsedRef, platform)
 	if err != nil {
 		return nil, fmt.Errorf("loading volume helper %s: %w", ref, err)
 	}
@@ -127,7 +128,7 @@ func Merge(ref string, srcImg v1.Image, platform v1.Platform) (*Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading volume helper manifest: %w", err)
 	}
-	indexAnnotations, err := source.IndexAnnotations(parsedRef, platform)
+	indexAnnotations, err := source.IndexAnnotations(ctx, parsedRef, platform)
 	if err != nil {
 		return nil, fmt.Errorf("reading volume helper index: %w", err)
 	}
@@ -137,7 +138,7 @@ func Merge(ref string, srcImg v1.Image, platform v1.Platform) (*Result, error) {
 	}
 	result.Schema = schema
 
-	srcRfs, err := rootfs.Build(srcImg)
+	srcRfs, err := rootfs.Build(ctx, srcImg)
 	if err != nil {
 		return nil, fmt.Errorf("building source rootfs for the volume helper: %w", err)
 	}
@@ -166,7 +167,7 @@ func Merge(ref string, srcImg v1.Image, platform v1.Platform) (*Result, error) {
 				if err != nil {
 					return nil, fmt.Errorf("branch %s: variant %s: %w", r.Branch, r.Variant, err)
 				}
-				vimg, err := source.Load(vref, platform)
+				vimg, err := source.Load(ctx, vref, platform)
 				if err != nil {
 					return nil, fmt.Errorf("branch %s: variant %s: loading %s: %w", r.Branch, r.Variant, r.Image, err)
 				}

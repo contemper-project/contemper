@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -15,8 +16,8 @@ import (
 // reporting, mirroring how resolveVariants wraps a --support image's own
 // resolution (see docs/reference/support-image-annotations.md's
 // resolution algorithm, which this equally follows).
-func mergeVolumeHelper(ref string, img *source.Image, platform v1.Platform, rep *progress.Reporter) (*volumehelper.Result, error) {
-	result, err := volumehelper.Merge(ref, img.Image, platform)
+func mergeVolumeHelper(ctx context.Context, ref string, img *source.Image, platform v1.Platform, rep *progress.Reporter) (*volumehelper.Result, error) {
+	result, err := volumehelper.Merge(ctx, ref, img.Image, platform)
 	if err != nil {
 		return nil, err
 	}

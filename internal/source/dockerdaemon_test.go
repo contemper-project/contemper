@@ -154,7 +154,7 @@ func TestLoadDockerDaemonOCILayout(t *testing.T) {
 	}
 	platform := v1.Platform{OS: "linux", Architecture: runtime.GOARCH}
 
-	img, err := source.Load(ref, platform)
+	img, err := source.Load(t.Context(), ref, platform)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestLoadDockerDaemonDockerArchive(t *testing.T) {
 	}
 	platform := v1.Platform{OS: "linux", Architecture: runtime.GOARCH}
 
-	img, err := source.Load(ref, platform)
+	img, err := source.Load(t.Context(), ref, platform)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestLoadDockerDaemonCleansUpOnError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := source.Load(ref, v1.Platform{OS: "linux", Architecture: runtime.GOARCH}); err == nil {
+	if _, err := source.Load(t.Context(), ref, v1.Platform{OS: "linux", Architecture: runtime.GOARCH}); err == nil {
 		t.Fatalf("Load: expected an error when docker save fails")
 	}
 	if got := tempDirsUnder(t); len(got) != 0 {
@@ -257,7 +257,7 @@ func TestLoadDockerDaemonCleansUpOnUnreadableArchive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := source.Load(ref, v1.Platform{OS: "linux", Architecture: runtime.GOARCH}); err == nil {
+	if _, err := source.Load(t.Context(), ref, v1.Platform{OS: "linux", Architecture: runtime.GOARCH}); err == nil {
 		t.Fatalf("Load: expected an error for an unreadable docker save archive")
 	}
 	if got := tempDirsUnder(t); len(got) != 0 {
@@ -279,7 +279,7 @@ func TestLoadDockerDaemonNamesBundleFromRef(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		img, err := source.Load(ref, v1.Platform{OS: "linux", Architecture: runtime.GOARCH})
+		img, err := source.Load(t.Context(), ref, v1.Platform{OS: "linux", Architecture: runtime.GOARCH})
 		if err != nil {
 			t.Fatalf("Load(%s): %v", raw, err)
 		}
@@ -306,7 +306,7 @@ func TestLoadDockerDaemonMissingDocker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = source.Load(ref, v1.Platform{OS: "linux", Architecture: runtime.GOARCH})
+	_, err = source.Load(t.Context(), ref, v1.Platform{OS: "linux", Architecture: runtime.GOARCH})
 	if err == nil {
 		t.Fatalf("Load: expected an error when docker is not on PATH")
 	}

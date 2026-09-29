@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -20,6 +19,7 @@ import (
 
 	"github.com/contemper-project/contemper/internal/hostenv"
 	"github.com/contemper-project/contemper/internal/progress"
+	"github.com/contemper-project/contemper/internal/subprocess"
 )
 
 // archInfo carries everything about booting a given architecture that
@@ -236,7 +236,17 @@ func copyFile(src, dst string) error {
 // set, it returns nil as soon as that string appears on the serial
 // console (killing qemu), or an error (with the log tail) on timeout.
 // Without it, Deploy waits for qemu to exit on its own.
-func Deploy(opts Options) error {
+//
+// Canceling ctx stops qemu (SIGTERM, then a kill if it hasn't exited
+// after a short grace period - see internal/subprocess) and, either way,
+// Deploy's own temp files (a generated serial log or qemu work dir; see
+// opts.SerialLogPath and opts.WorkDir) are still removed before it
+// returns, the same as on any other error. Run from a terminal, Ctrl-C
+// also reaches qemu directly (it shares contemper's foreground process
+// group), which is how a user normally stops a deploy; ctx only matters
+// on its own when contemper is stopped some other way (SIGTERM, or no
+// controlling terminal).
+func Deploy(ctx context.Context, opts Options) error {
 	rep := opts.Progress
 
 	info, ok := archTable[opts.Arch]
@@ -281,7 +291,7 @@ func Deploy(opts Options) error {
 	rep.Line("🚀", "booting "+filepath.Base(opts.DiskPath), fmt.Sprintf("UEFI/%s · 1 GiB", strings.ToUpper(accel)))
 	rep.VerboseCmd(binPath, args)
 
-	cmd := exec.CommandContext(context.Background(), binPath, args...) //nolint:gosec // G204: binPath is resolved by hostenv.Required, never a shell
+	cmd := subprocess.Command(ctx, binPath, args...)
 	var toolErr bytes.Buffer
 	cmd.Stderr = io.MultiWriter(os.Stderr, &toolErr)
 	if err := cmd.Start(); err != nil {

@@ -23,6 +23,8 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/layout"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
+
+	"github.com/contemper-project/contemper/internal/subprocess"
 )
 
 // ReadyLabel is the config label that marks an image as contemper-ready.
@@ -225,30 +227,32 @@ func (img *Image) Close() {
 	}
 }
 
-// Load resolves ref to a platform-selected image.
-func Load(ref Ref, platform v1.Platform) (*Image, error) {
+// Load resolves ref to a platform-selected image. Canceling ctx stops a
+// registry pull or `docker save` (KindDockerDaemon) in progress.
+func Load(ctx context.Context, ref Ref, platform v1.Platform) (*Image, error) {
 	switch ref.Kind {
 	case KindRegistry:
-		return loadRegistry(ref, platform)
+		return loadRegistry(ctx, ref, platform)
 	case KindOCIArchive:
-		return loadOCIArchive(ref, platform)
+		return loadOCIArchive(ctx, ref, platform)
 	case KindOCILayout:
 		return loadOCILayout(ref, platform, archiveBaseName(ref.Value))
 	case KindDockerArchive:
 		return loadDockerArchive(ref, platform)
 	case KindDockerDaemon:
-		return loadDockerDaemon(ref, platform)
+		return loadDockerDaemon(ctx, ref, platform)
 	default:
 		return nil, fmt.Errorf("unknown source kind %q", ref.Kind)
 	}
 }
 
-func loadRegistry(ref Ref, platform v1.Platform) (*Image, error) {
+func loadRegistry(ctx context.Context, ref Ref, platform v1.Platform) (*Image, error) {
 	nref, err := name.ParseReference(ref.Value)
 	if err != nil {
 		return nil, fmt.Errorf("parsing registry ref %q: %w", ref.Value, err)
 	}
 	img, err := remote.Image(nref,
+		remote.WithContext(ctx),
 		remote.WithAuthFromKeychain(authn.DefaultKeychain),
 		remote.WithPlatform(platform))
 	if err != nil {
@@ -269,7 +273,7 @@ func loadRegistry(ref Ref, platform v1.Platform) (*Image, error) {
 	}, nil
 }
 
-func loadOCIArchive(ref Ref, platform v1.Platform) (*Image, error) {
+func loadOCIArchive(ctx context.Context, ref Ref, platform v1.Platform) (*Image, error) {
 	tmpDir, err := os.MkdirTemp("", "contemper-oci-archive-")
 	if err != nil {
 		return nil, fmt.Errorf("creating temp dir: %w", err)
@@ -283,7 +287,7 @@ func loadOCIArchive(ref Ref, platform v1.Platform) (*Image, error) {
 	}
 	defer func() { _ = f.Close() }()
 
-	if err := extractTar(f, tmpDir); err != nil {
+	if err := extractTar(ctx, f, tmpDir); err != nil {
 		cleanup()
 		return nil, fmt.Errorf("extracting oci-archive %q: %w", ref.Value, err)
 	}
@@ -397,7 +401,10 @@ func loadDockerArchive(ref Ref, platform v1.Platform) (*Image, error) {
 // The returned Image's cleanup removes the temporary archive (and, for
 // the OCI-layout case, the directory it was extracted into); the caller
 // must call Close once the image's layers have been read.
-func loadDockerDaemon(ref Ref, platform v1.Platform) (*Image, error) {
+//
+// Canceling ctx stops the `docker save` subprocess (see
+// internal/subprocess).
+func loadDockerDaemon(ctx context.Context, ref Ref, platform v1.Platform) (*Image, error) {
 	dockerPath, err := exec.LookPath("docker")
 	if err != nil {
 		return nil, fmt.Errorf("docker not found on PATH; install Docker to use a docker-daemon: source (https://docs.docker.com/get-docker/)")
@@ -410,8 +417,8 @@ func loadDockerDaemon(ref Ref, platform v1.Platform) (*Image, error) {
 	cleanup := func() { _ = os.RemoveAll(tmpDir) }
 
 	archivePath := filepath.Join(tmpDir, "image.tar")
-	//nolint:gosec // G204: dockerPath is resolved by exec.LookPath and ref.Value is the user-given source ref, never a shell
-	cmd := exec.CommandContext(context.Background(), dockerPath, "save", "-o", archivePath, ref.Value)
+	// ref.Value is the user-given source ref, never a shell.
+	cmd := subprocess.Command(ctx, dockerPath, "save", "-o", archivePath, ref.Value)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		cleanup()
@@ -436,7 +443,7 @@ func loadDockerDaemon(ref Ref, platform v1.Platform) (*Image, error) {
 			cleanup()
 			return nil, fmt.Errorf("opening %q: %w", archivePath, err)
 		}
-		extractErr := extractTar(f, layoutDir)
+		extractErr := extractTar(ctx, f, layoutDir)
 		_ = f.Close()
 		if extractErr != nil {
 			cleanup()
@@ -521,12 +528,12 @@ func archiveHasIndexJSON(archivePath string) (bool, error) {
 // docs/reference/support-image-annotations.md). It returns nil, nil (not
 // an error) for a reference that doesn't resolve through a multi-platform
 // index, since there is then no descriptor-level fallback to read.
-func IndexAnnotations(ref Ref, platform v1.Platform) (map[string]string, error) {
+func IndexAnnotations(ctx context.Context, ref Ref, platform v1.Platform) (map[string]string, error) {
 	switch ref.Kind {
 	case KindRegistry:
-		return registryIndexAnnotations(ref, platform)
+		return registryIndexAnnotations(ctx, ref, platform)
 	case KindOCIArchive:
-		return ociArchiveIndexAnnotations(ref, platform)
+		return ociArchiveIndexAnnotations(ctx, ref, platform)
 	case KindOCILayout:
 		return ociLayoutIndexAnnotations(ref, platform)
 	case KindDockerArchive:
@@ -546,12 +553,12 @@ func IndexAnnotations(ref Ref, platform v1.Platform) (map[string]string, error) 
 	}
 }
 
-func registryIndexAnnotations(ref Ref, platform v1.Platform) (map[string]string, error) {
+func registryIndexAnnotations(ctx context.Context, ref Ref, platform v1.Platform) (map[string]string, error) {
 	nref, err := name.ParseReference(ref.Value)
 	if err != nil {
 		return nil, fmt.Errorf("parsing registry ref %q: %w", ref.Value, err)
 	}
-	desc, err := remote.Get(nref, remote.WithAuthFromKeychain(authn.DefaultKeychain))
+	desc, err := remote.Get(nref, remote.WithContext(ctx), remote.WithAuthFromKeychain(authn.DefaultKeychain))
 	if err != nil {
 		return nil, fmt.Errorf("fetching %s: %w", ref.Value, err)
 	}
@@ -565,7 +572,7 @@ func registryIndexAnnotations(ref Ref, platform v1.Platform) (map[string]string,
 	return indexManifestAnnotations(idx, platform, ref.Value)
 }
 
-func ociArchiveIndexAnnotations(ref Ref, platform v1.Platform) (map[string]string, error) {
+func ociArchiveIndexAnnotations(ctx context.Context, ref Ref, platform v1.Platform) (map[string]string, error) {
 	tmpDir, err := os.MkdirTemp("", "contemper-oci-archive-")
 	if err != nil {
 		return nil, fmt.Errorf("creating temp dir: %w", err)
@@ -578,7 +585,7 @@ func ociArchiveIndexAnnotations(ref Ref, platform v1.Platform) (map[string]strin
 	}
 	defer func() { _ = f.Close() }()
 
-	if err := extractTar(f, tmpDir); err != nil {
+	if err := extractTar(ctx, f, tmpDir); err != nil {
 		return nil, fmt.Errorf("extracting oci-archive %q: %w", ref.Value, err)
 	}
 	return ociLayoutIndexAnnotations(Ref{Kind: KindOCILayout, Value: tmpDir}, platform)
@@ -783,10 +790,15 @@ func splitRepoTag(s string) (string, string) {
 // extractTar extracts a tar stream into dir. It is used only for OCI
 // archives, whose contents are content-addressed blobs and an index -
 // not attributable file content from an authored image - so this does
-// not run afoul of the "never extract image contents" rule.
-func extractTar(r io.Reader, dir string) error {
+// not run afoul of the "never extract image contents" rule. Canceling
+// ctx is noticed between entries, without waiting for the whole archive
+// to extract.
+func extractTar(ctx context.Context, r io.Reader, dir string) error {
 	tr := tar.NewReader(r)
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		hdr, err := tr.Next()
 		if err == io.EOF {
 			return nil

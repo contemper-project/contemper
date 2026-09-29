@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/contemper-project/contemper/internal/subprocess"
 )
 
 // Options describes one `docker buildx build --load` invocation.
@@ -74,11 +76,10 @@ func isFile(p string) bool {
 // argv only (no shell). Both its stdout and stderr go to the current
 // process's stderr (buildx writes build progress there), so the
 // caller's stdout carries only its own result; stdin is passed through
-// for a context or file read from "-".
-func Build(dockerPath string, opts Options) error {
+// for a context or file read from "-". Canceling ctx stops it.
+func Build(ctx context.Context, dockerPath string, opts Options) error {
 	args := Args(opts)
-	//nolint:gosec // G204: dockerPath is resolved by CheckAvailable via exec.LookPath, and args are built from opts.Context/File/Tag/BuildArgs, never a shell
-	cmd := exec.CommandContext(context.Background(), dockerPath, args...)
+	cmd := subprocess.Command(ctx, dockerPath, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
@@ -92,13 +93,12 @@ func Build(dockerPath string, opts Options) error {
 // convert it with `contemper convert docker-daemon:<tag>` - it names no
 // docker/buildx invocation beyond `docker buildx version`, the check
 // itself.
-func CheckAvailable(opts Options) (string, error) {
+func CheckAvailable(ctx context.Context, opts Options) (string, error) {
 	dockerPath, err := exec.LookPath("docker")
 	if err != nil {
 		return "", unavailableError(opts, "docker is not installed, or not on PATH")
 	}
-	//nolint:gosec // G204: dockerPath is resolved by exec.LookPath, fixed args
-	cmd := exec.CommandContext(context.Background(), dockerPath, "buildx", "version")
+	cmd := subprocess.Command(ctx, dockerPath, "buildx", "version")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		reason := "docker buildx is not available"
 		if trimmed := strings.TrimSpace(string(out)); trimmed != "" {

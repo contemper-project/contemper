@@ -27,7 +27,7 @@ func newBuildCmd() *cobra.Command {
 			if !imageOnly && convOpts.target == "" {
 				return fmt.Errorf("--target is required unless --image-only is given")
 			}
-			return runBuild(cmd, buildOptions{
+			return runBuild(cmd.Context(), cmd, buildOptions{
 				context:   buildContext,
 				file:      file,
 				tag:       tag,

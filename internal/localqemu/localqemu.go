@@ -14,12 +14,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/contemper-project/contemper/internal/hostenv"
+	"github.com/contemper-project/contemper/internal/subprocess"
 )
 
 // ValidateInstanceName checks that name is safe to use as a single path
@@ -102,8 +102,8 @@ func planVolumeDisk(dir, name string, sizeBytes int64, exists bool, existingSize
 // volume's size, on either a request to grow it (which would leave the
 // filesystem inside it the old size until something resizes it) or
 // shrink it (which could truncate data). Returns the disk's path and
-// whether it was just created.
-func EnsureVolumeDisk(dir, name string, sizeBytes int64) (path string, created bool, err error) {
+// whether it was just created. Canceling ctx stops `qemu-img create`.
+func EnsureVolumeDisk(ctx context.Context, dir, name string, sizeBytes int64) (path string, created bool, err error) {
 	// The state dir holds this instance's persistent volume disks, so it
 	// gets tighter permissions than a throwaway scratch dir would.
 	if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -115,7 +115,7 @@ func EnsureVolumeDisk(dir, name string, sizeBytes int64) (path string, created b
 	exists := statErr == nil
 	var existingSize int64
 	if exists {
-		existingSize, err = qcow2VirtualSize(candidate)
+		existingSize, err = qcow2VirtualSize(ctx, candidate)
 		if err != nil {
 			return "", false, err
 		}
@@ -136,7 +136,7 @@ func EnsureVolumeDisk(dir, name string, sizeBytes int64) (path string, created b
 		return "", false, err
 	}
 	args := []string{"create", "-f", "qcow2", action.Path, strconv.FormatInt(sizeBytes, 10)}
-	if out, err := exec.CommandContext(context.Background(), qemuImgPath, args...).CombinedOutput(); err != nil { //nolint:gosec // G204: qemuImgPath is resolved by hostenv.Required, never a shell
+	if out, err := subprocess.Command(ctx, qemuImgPath, args...).CombinedOutput(); err != nil {
 		return "", false, fmt.Errorf("qemu-img create: %w\n%s", err, out)
 	}
 	return action.Path, true, nil
@@ -145,13 +145,13 @@ func EnsureVolumeDisk(dir, name string, sizeBytes int64) (path string, created b
 // qcow2VirtualSize returns the virtual (guest-visible) size in bytes of
 // the qcow2 image at path, parsed from `qemu-img info --output=json`
 // (structured output only, per the provider-tooling conventions in
-// docs/design/volumes-and-providers.md).
-func qcow2VirtualSize(path string) (int64, error) {
+// docs/design/volumes-and-providers.md). Canceling ctx stops it.
+func qcow2VirtualSize(ctx context.Context, path string) (int64, error) {
 	qemuImgPath, err := hostenv.Required("qemu-img")
 	if err != nil {
 		return 0, err
 	}
-	cmd := exec.CommandContext(context.Background(), qemuImgPath, "info", "--output=json", path) //nolint:gosec // G204: qemuImgPath is resolved by hostenv.Required, never a shell
+	cmd := subprocess.Command(ctx, qemuImgPath, "info", "--output=json", path)
 	var stderr bytes.Buffer
 	cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
 	out, err := cmd.Output()

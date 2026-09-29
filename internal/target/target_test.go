@@ -115,7 +115,7 @@ func syntheticRootfs(t *testing.T) (*rootfs.Rootfs, *validate.Result) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rfs, err := rootfs.Build(img, nil)
+	rfs, err := rootfs.Build(t.Context(), img, nil)
 	if err != nil {
 		t.Fatalf("rootfs.Build: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestUEFIQcow2Assemble(t *testing.T) {
 	outDir := t.TempDir()
 
 	asm := target.UEFIQcow2{}
-	info, warnings, err := asm.Assemble(rfs, val, "arm64", outDir, target.Options{})
+	info, warnings, err := asm.Assemble(t.Context(), rfs, val, "arm64", outDir, target.Options{})
 
 	if target.QemuImgMissing() {
 		// qemu-img isn't available in this environment; the disk.raw

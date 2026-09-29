@@ -131,7 +131,7 @@ func TestLoadOCILayoutSelectsPlatform(t *testing.T) {
 	dir := t.TempDir()
 	_, amd64Digest := buildLayout(t, dir)
 
-	img, err := source.Load(source.Ref{Kind: source.KindOCILayout, Value: dir},
+	img, err := source.Load(t.Context(), source.Ref{Kind: source.KindOCILayout, Value: dir},
 		v1.Platform{OS: "linux", Architecture: "amd64"})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -151,7 +151,7 @@ func TestLoadOCILayoutWrongArch(t *testing.T) {
 	dir := t.TempDir()
 	buildLayout(t, dir)
 
-	_, err := source.Load(source.Ref{Kind: source.KindOCILayout, Value: dir},
+	_, err := source.Load(t.Context(), source.Ref{Kind: source.KindOCILayout, Value: dir},
 		v1.Platform{OS: "linux", Architecture: "riscv64"})
 	if err == nil {
 		t.Fatalf("Load: expected an error for an unmatched platform")
@@ -162,7 +162,7 @@ func TestIndexAnnotationsFallsBackToDescriptor(t *testing.T) {
 	dir := t.TempDir()
 	buildLayout(t, dir) // tags the amd64 manifest's index descriptor with RefNameAnnotation
 
-	anns, err := source.IndexAnnotations(source.Ref{Kind: source.KindOCILayout, Value: dir},
+	anns, err := source.IndexAnnotations(t.Context(), source.Ref{Kind: source.KindOCILayout, Value: dir},
 		v1.Platform{OS: "linux", Architecture: "amd64"})
 	if err != nil {
 		t.Fatalf("IndexAnnotations: %v", err)
@@ -172,7 +172,7 @@ func TestIndexAnnotationsFallsBackToDescriptor(t *testing.T) {
 	}
 
 	// The arm64 descriptor in the same index carries no such annotation.
-	anns, err = source.IndexAnnotations(source.Ref{Kind: source.KindOCILayout, Value: dir},
+	anns, err = source.IndexAnnotations(t.Context(), source.Ref{Kind: source.KindOCILayout, Value: dir},
 		v1.Platform{OS: "linux", Architecture: "arm64"})
 	if err != nil {
 		t.Fatalf("IndexAnnotations: %v", err)
@@ -319,7 +319,7 @@ func TestLoadOCILayoutNestedIndexPrefersContainerdName(t *testing.T) {
 		source.RefNameAnnotation: "dev",
 	})
 
-	img, err := source.Load(source.Ref{Kind: source.KindOCILayout, Value: dir},
+	img, err := source.Load(t.Context(), source.Ref{Kind: source.KindOCILayout, Value: dir},
 		v1.Platform{OS: "linux", Architecture: "amd64"})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -341,7 +341,7 @@ func TestLoadOCIArchiveNestedIndexBareRefNameFallsBackToArchiveName(t *testing.T
 	})
 	archivePath := tarLayout(t, dir, "myimage-save.tar")
 
-	img, err := source.Load(source.Ref{Kind: source.KindOCIArchive, Value: archivePath},
+	img, err := source.Load(t.Context(), source.Ref{Kind: source.KindOCIArchive, Value: archivePath},
 		v1.Platform{OS: "linux", Architecture: "amd64"})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -359,7 +359,7 @@ func TestLoadOCIArchiveNoAnnotationsFallsBackToArchiveName(t *testing.T) {
 	buildNestedLayout(t, dir, nil) // buildx --output type=oci: no naming annotation at all
 	archivePath := tarLayout(t, dir, "example.tar")
 
-	img, err := source.Load(source.Ref{Kind: source.KindOCIArchive, Value: archivePath},
+	img, err := source.Load(t.Context(), source.Ref{Kind: source.KindOCIArchive, Value: archivePath},
 		v1.Platform{OS: "linux", Architecture: "amd64"})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -373,7 +373,7 @@ func TestLoadOCILayoutNestedIndexSelectsPlatformAndIgnoresAttestation(t *testing
 	dir := t.TempDir()
 	arm64Digest, amd64Digest := buildNestedLayout(t, dir, nil)
 
-	img, err := source.Load(source.Ref{Kind: source.KindOCILayout, Value: dir},
+	img, err := source.Load(t.Context(), source.Ref{Kind: source.KindOCILayout, Value: dir},
 		v1.Platform{OS: "linux", Architecture: "arm64"})
 	if err != nil {
 		t.Fatalf("Load(arm64): %v", err)
@@ -382,7 +382,7 @@ func TestLoadOCILayoutNestedIndexSelectsPlatformAndIgnoresAttestation(t *testing
 		t.Errorf("Load(arm64) selected digest %s, want %s", img.Digest, arm64Digest)
 	}
 
-	img, err = source.Load(source.Ref{Kind: source.KindOCILayout, Value: dir},
+	img, err = source.Load(t.Context(), source.Ref{Kind: source.KindOCILayout, Value: dir},
 		v1.Platform{OS: "linux", Architecture: "amd64"})
 	if err != nil {
 		t.Fatalf("Load(amd64): %v", err)
@@ -396,7 +396,7 @@ func TestLoadOCILayoutNestedIndexWrongArch(t *testing.T) {
 	dir := t.TempDir()
 	buildNestedLayout(t, dir, nil)
 
-	_, err := source.Load(source.Ref{Kind: source.KindOCILayout, Value: dir},
+	_, err := source.Load(t.Context(), source.Ref{Kind: source.KindOCILayout, Value: dir},
 		v1.Platform{OS: "linux", Architecture: "riscv64"})
 	if err == nil {
 		t.Fatalf("Load: expected an error for an unmatched platform")
@@ -407,7 +407,7 @@ func TestIndexAnnotationsNestedIndexReturnsLeafAnnotations(t *testing.T) {
 	dir := t.TempDir()
 	buildNestedLayout(t, dir, nil)
 
-	anns, err := source.IndexAnnotations(source.Ref{Kind: source.KindOCILayout, Value: dir},
+	anns, err := source.IndexAnnotations(t.Context(), source.Ref{Kind: source.KindOCILayout, Value: dir},
 		v1.Platform{OS: "linux", Architecture: "amd64"})
 	if err != nil {
 		t.Fatalf("IndexAnnotations: %v", err)
@@ -416,7 +416,7 @@ func TestIndexAnnotationsNestedIndexReturnsLeafAnnotations(t *testing.T) {
 		t.Errorf("IndexAnnotations = %v, want io.contemper.leaf-marker=amd64", anns)
 	}
 
-	anns, err = source.IndexAnnotations(source.Ref{Kind: source.KindOCILayout, Value: dir},
+	anns, err = source.IndexAnnotations(t.Context(), source.Ref{Kind: source.KindOCILayout, Value: dir},
 		v1.Platform{OS: "linux", Architecture: "arm64"})
 	if err != nil {
 		t.Fatalf("IndexAnnotations: %v", err)
