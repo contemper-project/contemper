@@ -146,6 +146,12 @@ enables OpenRC, all at the paths contemper expects:
     directly; with an older Docker, read the same file with
     `docker-archive:` in place of `oci-archive:`.
 
+    `contemper build` runs these two steps (and the convert step below)
+    together, and uses a `Containerfile` without being told when the
+    directory has no `Dockerfile`; see
+    [source references](reference/sources.md) for the `docker-daemon:`
+    source it converts through.
+
 ## Convert it
 
 ```console
