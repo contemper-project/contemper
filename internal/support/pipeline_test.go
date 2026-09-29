@@ -104,7 +104,7 @@ func resolveAndMerge(t *testing.T, srcImg v1.Image, supportRef string, platform 
 	if err != nil {
 		t.Fatal(err)
 	}
-	supportImg, err := source.Load(ref, platform)
+	supportImg, err := source.Load(t.Context(), ref, platform)
 	if err != nil {
 		t.Fatalf("loading support image: %v", err)
 	}
@@ -114,7 +114,7 @@ func resolveAndMerge(t *testing.T, srcImg v1.Image, supportRef string, platform 
 	if err != nil {
 		t.Fatal(err)
 	}
-	indexAnnotations, err := source.IndexAnnotations(ref, platform)
+	indexAnnotations, err := source.IndexAnnotations(t.Context(), ref, platform)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func resolveAndMerge(t *testing.T, srcImg v1.Image, supportRef string, platform 
 		t.Fatalf("Parse: %v", err)
 	}
 
-	srcRfs, err := rootfs.Build(srcImg)
+	srcRfs, err := rootfs.Build(t.Context(), srcImg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func resolveAndMerge(t *testing.T, srcImg v1.Image, supportRef string, platform 
 		if err != nil {
 			t.Fatal(err)
 		}
-		vimg, err := source.Load(vref, platform)
+		vimg, err := source.Load(t.Context(), vref, platform)
 		if err != nil {
 			t.Fatalf("loading variant %s/%s: %v", r.Branch, r.Variant, err)
 		}
@@ -154,7 +154,7 @@ func resolveAndMerge(t *testing.T, srcImg v1.Image, supportRef string, platform 
 		overlays = append(overlays, vimg.Image)
 	}
 
-	finalRfs, err := rootfs.Build(srcImg, overlays...)
+	finalRfs, err := rootfs.Build(t.Context(), srcImg, overlays...)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

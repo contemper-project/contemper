@@ -70,7 +70,7 @@ func sourceWithTools(t *testing.T, extra ...imgtest.File) v1.Image {
 }
 
 func TestCheckPrereqsAllPresent(t *testing.T) {
-	rfs, err := rootfs.Build(sourceWithTools(t))
+	rfs, err := rootfs.Build(t.Context(), sourceWithTools(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestCheckPrereqsMissingMkfsExt4(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rfs, err := rootfs.Build(img)
+	rfs, err := rootfs.Build(t.Context(), img)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestMergeResolvesWinningVariant(t *testing.T) {
 	})
 	helperRef := pushImage(t, host, "volumes-support:v1", helperImg)
 
-	result, err := volumehelper.Merge(helperRef, src, linuxAMD64)
+	result, err := volumehelper.Merge(t.Context(), helperRef, src, linuxAMD64)
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestMergeResolvesOnMergedUsr(t *testing.T) {
 	})
 	helperRef := pushImage(t, host, "volumes-support:v1", helperImg)
 
-	result, err := volumehelper.Merge(helperRef, src, linuxAMD64)
+	result, err := volumehelper.Merge(t.Context(), helperRef, src, linuxAMD64)
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestMergeNoMatchNoDefaultMentionsNoVolumeHelper(t *testing.T) {
 	})
 	helperRef := pushImage(t, host, "volumes-support:v1", helperImg)
 
-	_, err = volumehelper.Merge(helperRef, src, linuxAMD64)
+	_, err = volumehelper.Merge(t.Context(), helperRef, src, linuxAMD64)
 	if err == nil {
 		t.Fatal("expected an error when no init-system variant matches")
 	}
@@ -248,7 +248,7 @@ func TestMergePlainOverrideWithNoBranches(t *testing.T) {
 	}
 	ref := pushImage(t, host, "custom-helper:v1", plainImg)
 
-	result, err := volumehelper.Merge(ref, src, linuxAMD64)
+	result, err := volumehelper.Merge(t.Context(), ref, src, linuxAMD64)
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}

@@ -33,7 +33,7 @@ func build(t *testing.T, files []imgtest.File) *rootfs.Rootfs {
 	if err != nil {
 		t.Fatalf("building image: %v", err)
 	}
-	rfs, err := rootfs.Build(img, nil)
+	rfs, err := rootfs.Build(t.Context(), img, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

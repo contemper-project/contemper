@@ -35,7 +35,7 @@ func TestWhiteoutsAndOpaqueDirs(t *testing.T) {
 		t.Fatalf("building image: %v", err)
 	}
 
-	rfs, err := rootfs.Build(img, nil)
+	rfs, err := rootfs.Build(t.Context(), img, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestSymlinkResolution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building image: %v", err)
 	}
-	rfs, err := rootfs.Build(img, nil)
+	rfs, err := rootfs.Build(t.Context(), img, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestResolveMergedUsr(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building image: %v", err)
 	}
-	rfs, err := rootfs.Build(img)
+	rfs, err := rootfs.Build(t.Context(), img)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestOverlayStatsOwnLayersLastWriteWins(t *testing.T) {
 		t.Fatalf("building overlay: %v", err)
 	}
 
-	rfs, err := rootfs.Build(baseImg, overlay)
+	rfs, err := rootfs.Build(t.Context(), baseImg, overlay)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestOverlayStatsWhiteoutsCounted(t *testing.T) {
 		t.Fatalf("building overlay: %v", err)
 	}
 
-	rfs, err := rootfs.Build(baseImg, overlay)
+	rfs, err := rootfs.Build(t.Context(), baseImg, overlay)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestOverlayStatsEmptyAndNil(t *testing.T) {
 		t.Fatalf("building base image: %v", err)
 	}
 
-	rfs, err := rootfs.Build(baseImg)
+	rfs, err := rootfs.Build(t.Context(), baseImg)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestOverlayStatsEmptyAndNil(t *testing.T) {
 		t.Errorf("OverlayStats = %+v, want empty (no overlays given)", rfs.OverlayStats)
 	}
 
-	rfsNil, err := rootfs.Build(baseImg, nil)
+	rfsNil, err := rootfs.Build(t.Context(), baseImg, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -262,7 +262,7 @@ func TestHardlinksAndDeviceNodes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building image: %v", err)
 	}
-	rfs, err := rootfs.Build(img, nil)
+	rfs, err := rootfs.Build(t.Context(), img, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

@@ -4,6 +4,7 @@
 package target
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -43,9 +44,11 @@ type Options struct {
 
 // Assembler takes a validated, merged rootfs view and produces this
 // target's disk output in outDir. It must not depend on the registry, so
-// it can be tested against a synthetic rootfs.
+// it can be tested against a synthetic rootfs. Canceling ctx stops any
+// subprocess the assembler is currently running (mkfs.ext4, debugfs,
+// e2fsck, qemu-img) and is noticed at reasonable points in between.
 type Assembler interface {
-	Assemble(rfs *rootfs.Rootfs, val *validate.Result, arch string, outDir string, opts Options) (*DiskInfo, []string, error)
+	Assemble(ctx context.Context, rfs *rootfs.Rootfs, val *validate.Result, arch string, outDir string, opts Options) (*DiskInfo, []string, error)
 }
 
 // RootLabel is the filesystem label contemper gives the root partition.
@@ -160,7 +163,7 @@ func SerialPattern(canonicalTarget, volumeName string) string {
 type UEFIQcow2 struct{}
 
 // Assemble implements the Assembler interface documented on UEFIQcow2.
-func (UEFIQcow2) Assemble(rfs *rootfs.Rootfs, val *validate.Result, arch string, outDir string, opts Options) (*DiskInfo, []string, error) {
+func (UEFIQcow2) Assemble(ctx context.Context, rfs *rootfs.Rootfs, val *validate.Result, arch string, outDir string, opts Options) (*DiskInfo, []string, error) {
 	var warnings []string
 
 	linuxData, warn, err := uki.PrepareKernel(val.Kernel)
@@ -202,7 +205,7 @@ func (UEFIQcow2) Assemble(rfs *rootfs.Rootfs, val *validate.Result, arch string,
 	rootSize = disk.AlignRootSize(rootSize)
 
 	rootImgPath := filepath.Join(workDir, "root.img")
-	ext4Warnings, err := disk.PopulateExt4(rfs, rootImgPath, disk.Ext4Options{
+	ext4Warnings, err := disk.PopulateExt4(ctx, rfs, rootImgPath, disk.Ext4Options{
 		Label:     RootLabel,
 		SizeBytes: rootSize,
 		Progress:  rep,
@@ -233,7 +236,7 @@ func (UEFIQcow2) Assemble(rfs *rootfs.Rootfs, val *validate.Result, arch string,
 	}
 
 	qcow2Path := filepath.Join(outDir, "disk.qcow2")
-	if err := disk.ConvertToQcow2(rawPath, qcow2Path, rep); err != nil {
+	if err := disk.ConvertToQcow2(ctx, rawPath, qcow2Path, rep); err != nil {
 		hint := ""
 		if hostenv.Find("qemu-img") == "" {
 			hint = "install qemu-img: " + hostenv.InstallHint("qemu-img")

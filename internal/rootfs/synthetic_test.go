@@ -14,7 +14,7 @@ func buildTestRootfs(t *testing.T, files []imgtest.File) *rootfs.Rootfs {
 	if err != nil {
 		t.Fatalf("building image: %v", err)
 	}
-	rfs, err := rootfs.Build(img)
+	rfs, err := rootfs.Build(t.Context(), img)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestBuildAddsMissingParentDirs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rfs, err := rootfs.Build(img)
+	rfs, err := rootfs.Build(t.Context(), img)
 	if err != nil {
 		t.Fatalf("rootfs.Build: %v", err)
 	}

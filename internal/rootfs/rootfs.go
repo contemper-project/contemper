@@ -7,6 +7,7 @@ package rootfs
 
 import (
 	"archive/tar"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -92,7 +93,11 @@ type OverlayStats struct {
 // flattening that overlay alone - never base, never any other overlay -
 // so the cost is proportional to the overlay's own (typically small)
 // size, not the base image's.
-func Build(base v1.Image, overlays ...v1.Image) (*Rootfs, error) {
+//
+// Canceling ctx is noticed at reasonable points during the flatten (the
+// potentially large, pure-Go loop over base's and every overlay's
+// layers), without waiting for it to finish.
+func Build(ctx context.Context, base v1.Image, overlays ...v1.Image) (*Rootfs, error) {
 	img := base
 	stats := make([]OverlayStats, len(overlays))
 	for i, overlay := range overlays {
@@ -130,7 +135,7 @@ func Build(base v1.Image, overlays ...v1.Image) (*Rootfs, error) {
 	rc := mutate.Extract(img)
 	defer func() { _ = rc.Close() }()
 
-	index, err := indexTar(rc, f)
+	index, err := indexTar(ctx, rc, f)
 	if err != nil {
 		_ = f.Close()
 		_ = os.RemoveAll(tmpDir)
@@ -192,13 +197,21 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 }
 
 // indexTar copies the tar stream r into w byte-for-byte while recording
-// each entry's normalized path, header and data offset.
-func indexTar(r io.Reader, w io.Writer) (map[string]*Entry, error) {
+// each entry's normalized path, header and data offset. It checks ctx
+// every 256 entries, so canceling it part way through a large merge
+// (base plus every overlay) is noticed without waiting for the whole
+// stream to drain.
+func indexTar(ctx context.Context, r io.Reader, w io.Writer) (map[string]*Entry, error) {
 	cw := &countingWriter{w: w}
 	tr := tar.NewReader(io.TeeReader(r, cw))
 
 	index := make(map[string]*Entry)
-	for {
+	for n := 0; ; n++ {
+		if n%256 == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		hdr, err := tr.Next()
 		if err == io.EOF {
 			break

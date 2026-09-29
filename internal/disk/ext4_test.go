@@ -55,14 +55,14 @@ func TestPopulateExt4(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rfs, err := rootfs.Build(img, nil)
+	rfs, err := rootfs.Build(t.Context(), img, nil)
 	if err != nil {
 		t.Fatalf("rootfs.Build: %v", err)
 	}
 	defer func() { _ = rfs.Close() }()
 
 	imgPath := t.TempDir() + "/root.img"
-	warnings, err := disk.PopulateExt4(rfs, imgPath, disk.Ext4Options{
+	warnings, err := disk.PopulateExt4(t.Context(), rfs, imgPath, disk.Ext4Options{
 		Label:     "contemper-root",
 		SizeBytes: 64 * 1024 * 1024,
 	})
@@ -167,7 +167,7 @@ func TestPopulateExt4Xattrs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rfs, err := rootfs.Build(img, nil)
+	rfs, err := rootfs.Build(t.Context(), img, nil)
 	if err != nil {
 		t.Fatalf("rootfs.Build: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestPopulateExt4Xattrs(t *testing.T) {
 	}
 
 	imgPath := t.TempDir() + "/root.img"
-	warnings, err := disk.PopulateExt4(rfs, imgPath, disk.Ext4Options{
+	warnings, err := disk.PopulateExt4(t.Context(), rfs, imgPath, disk.Ext4Options{
 		Label:     "contemper-root",
 		SizeBytes: 64 * 1024 * 1024,
 	})
@@ -254,13 +254,13 @@ func TestPopulateExt4RejectsOverlongScriptLines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rfs, err := rootfs.Build(img)
+	rfs, err := rootfs.Build(t.Context(), img)
 	if err != nil {
 		t.Fatalf("rootfs.Build: %v", err)
 	}
 	defer func() { _ = rfs.Close() }()
 
-	_, err = disk.PopulateExt4(rfs, t.TempDir()+"/root.img", disk.Ext4Options{
+	_, err = disk.PopulateExt4(t.Context(), rfs, t.TempDir()+"/root.img", disk.Ext4Options{
 		Label:     "contemper-root",
 		SizeBytes: 64 * 1024 * 1024,
 	})
@@ -282,14 +282,14 @@ func TestPopulateExt4LongPathWithinLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rfs, err := rootfs.Build(img)
+	rfs, err := rootfs.Build(t.Context(), img)
 	if err != nil {
 		t.Fatalf("rootfs.Build: %v", err)
 	}
 	defer func() { _ = rfs.Close() }()
 
 	imgPath := t.TempDir() + "/root.img"
-	if _, err := disk.PopulateExt4(rfs, imgPath, disk.Ext4Options{
+	if _, err := disk.PopulateExt4(t.Context(), rfs, imgPath, disk.Ext4Options{
 		Label:     "contemper-root",
 		SizeBytes: 64 * 1024 * 1024,
 	}); err != nil {
@@ -310,13 +310,13 @@ func TestPopulateExt4MarkerTextInPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rfs, err := rootfs.Build(img)
+	rfs, err := rootfs.Build(t.Context(), img)
 	if err != nil {
 		t.Fatalf("rootfs.Build: %v", err)
 	}
 	defer func() { _ = rfs.Close() }()
 
-	if _, err := disk.PopulateExt4(rfs, t.TempDir()+"/root.img", disk.Ext4Options{
+	if _, err := disk.PopulateExt4(t.Context(), rfs, t.TempDir()+"/root.img", disk.Ext4Options{
 		Label:     "contemper-root",
 		SizeBytes: 64 * 1024 * 1024,
 	}); err != nil {
@@ -354,13 +354,13 @@ func TestPopulateExt4BadHardlinkTargets(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			rfs, err := rootfs.Build(img)
+			rfs, err := rootfs.Build(t.Context(), img)
 			if err != nil {
 				t.Fatalf("rootfs.Build: %v", err)
 			}
 			defer func() { _ = rfs.Close() }()
 
-			_, err = disk.PopulateExt4(rfs, t.TempDir()+"/root.img", disk.Ext4Options{
+			_, err = disk.PopulateExt4(t.Context(), rfs, t.TempDir()+"/root.img", disk.Ext4Options{
 				Label:     "contemper-root",
 				SizeBytes: 64 * 1024 * 1024,
 			})
@@ -399,14 +399,14 @@ func TestPopulateExt4MtimeExact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rfs, err := rootfs.Build(img)
+	rfs, err := rootfs.Build(t.Context(), img)
 	if err != nil {
 		t.Fatalf("rootfs.Build: %v", err)
 	}
 	defer func() { _ = rfs.Close() }()
 
 	imgPath := t.TempDir() + "/root.img"
-	if _, err := disk.PopulateExt4(rfs, imgPath, disk.Ext4Options{
+	if _, err := disk.PopulateExt4(t.Context(), rfs, imgPath, disk.Ext4Options{
 		Label:     "contemper-root",
 		SizeBytes: 64 * 1024 * 1024,
 	}); err != nil {
@@ -454,14 +454,14 @@ func TestPopulateExt4HardlinkIntoFullDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rfs, err := rootfs.Build(img)
+	rfs, err := rootfs.Build(t.Context(), img)
 	if err != nil {
 		t.Fatalf("rootfs.Build: %v", err)
 	}
 	defer func() { _ = rfs.Close() }()
 
 	imgPath := t.TempDir() + "/root.img"
-	warnings, err := disk.PopulateExt4(rfs, imgPath, disk.Ext4Options{
+	warnings, err := disk.PopulateExt4(t.Context(), rfs, imgPath, disk.Ext4Options{
 		Label:     "contemper-root",
 		SizeBytes: 512 * 1024 * 1024,
 	})

@@ -20,7 +20,7 @@ func TestCheckRequiresSatisfied(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rfs, err := rootfs.Build(base, nil)
+	rfs, err := rootfs.Build(t.Context(), base, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestCheckRequiresMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rfs, err := rootfs.Build(base, nil)
+	rfs, err := rootfs.Build(t.Context(), base, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestMergeAppliesSupportOverlay(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rfs, err := rootfs.Build(base, supportImg)
+	rfs, err := rootfs.Build(t.Context(), base, supportImg)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

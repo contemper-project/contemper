@@ -15,7 +15,7 @@ func newConvertCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.sourceRef = args[0]
-			return runConvert(cmd, *opts)
+			return runConvert(cmd.Context(), cmd, *opts)
 		},
 	}
 
