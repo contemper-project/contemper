@@ -157,18 +157,27 @@ jobs:
         run: go build -o /dev/null ./cmd/contemper
 
   e2e:
-    # Boots each example end to end: podman build → convert --target
-    # qemu → deploy --to local-qemu, waiting for the boot marker. One
-    # matrix leg per init system: alpine/OpenRC, debian/systemd,
-    # archlinux/systemd (mkinitcpio instead of initramfs-tools).
+    # Boots each example end to end. The default leg per example is
+    # podman build → convert --target qemu → deploy --to local-qemu,
+    # waiting for the boot marker; one leg per init system - alpine/
+    # OpenRC, debian/systemd, archlinux/systemd (mkinitcpio instead of
+    # initramfs-tools). The extra alpine leg (build_command: true) goes
+    # through `contemper build` (docker buildx build --load, then the
+    # docker-daemon: source) instead, so that path is exercised against
+    # a real Docker daemon too; see hack/e2e.sh's --build-command.
     needs: changes
     if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
+    name: e2e (${{ matrix.example }}${{ matrix.build_command && ', contemper build' || '' }})
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         example: [alpine, debian, archlinux]
+        build_command: [false]
+        include:
+          - example: alpine
+            build_command: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -181,7 +190,8 @@ jobs:
             | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      # podman and e2fsprogs are preinstalled on ubuntu-latest.
+      # podman, docker (with the buildx plugin) and e2fsprogs are all
+      # preinstalled on ubuntu-latest.
       - name: Install qemu and UEFI firmware
         run: |
           sudo apt-get update
@@ -189,7 +199,9 @@ jobs:
       - name: Boot test
         env:
           CONTEMPER_E2E_COVERDIR: _gocover
-        run: ./hack/e2e.sh --example ${{ matrix.example }} --timeout 300s
+        run: >-
+          ./hack/e2e.sh --example ${{ matrix.example }} --timeout 300s
+          ${{ matrix.build_command && '--build-command' || '' }}
       # Integration coverage from a binary only the boot tests exercise
       # (see hack/e2e.sh's CONTEMPER_E2E_COVERDIR), merged into one
       # text-format profile Codecov can read. Also after a failing boot
@@ -215,7 +227,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: e2e-serial-log-${{ matrix.example }}
+          name: e2e-serial-log-${{ matrix.example }}${{ matrix.build_command && '-build-command' || '' }}
           path: _out/serial.log
           if-no-files-found: ignore
 
