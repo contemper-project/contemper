@@ -28,6 +28,7 @@ func TestParseRef(t *testing.T) {
 		{"oci-archive:/tmp/x.tar", source.KindOCIArchive, "/tmp/x.tar", false},
 		{"oci:/tmp/layout", source.KindOCILayout, "/tmp/layout", false},
 		{"docker-archive:/tmp/x.tar", source.KindDockerArchive, "/tmp/x.tar", false},
+		{"docker-daemon:my-app:dev", source.KindDockerDaemon, "my-app:dev", false},
 		{"", "", "", true},
 		{"oci-archive:", "", "", true},
 	}
@@ -430,6 +431,9 @@ func TestRefStringCleansLocalPaths(t *testing.T) {
 		"oci-archive:/a/dev/../contemper/_out/x.tar": "oci-archive:/a/contemper/_out/x.tar",
 		"oci:./layout/":          "oci:layout",
 		"ghcr.io/example/app:v1": "ghcr.io/example/app:v1",
+		// docker-daemon's Value is a Docker image reference, not a
+		// filesystem path, so it must not be run through filepath.Clean.
+		"docker-daemon:my-app:dev": "docker-daemon:my-app:dev",
 	} {
 		ref, err := source.ParseRef(raw)
 		if err != nil {
@@ -445,7 +449,7 @@ func TestParseVariantRef(t *testing.T) {
 	registry := source.Ref{Kind: source.KindRegistry, Value: "ghcr.io/example/support:v1"}
 	local := source.Ref{Kind: source.KindOCIArchive, Value: "support.tar"}
 
-	for _, raw := range []string{"oci-archive:/home/user/private.tar", "oci:/var/lib/layouts/x", "docker-archive:/tmp/x.tar"} {
+	for _, raw := range []string{"oci-archive:/home/user/private.tar", "oci:/var/lib/layouts/x", "docker-archive:/tmp/x.tar", "docker-daemon:my-image:dev"} {
 		if _, err := source.ParseVariantRef(registry, raw); err == nil {
 			t.Errorf("ParseVariantRef(registry parent, %q) succeeded, want an error", raw)
 		}
