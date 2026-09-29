@@ -241,7 +241,9 @@ func copyFile(src, dst string) error {
 // after a short grace period - see internal/subprocess) and, either way,
 // Deploy's own temp files (a generated serial log or qemu work dir; see
 // opts.SerialLogPath and opts.WorkDir) are still removed before it
-// returns, the same as on any other error. Run from a terminal, Ctrl-C
+// returns, the same as on any other error. Unless the expected output
+// had already appeared, Deploy then returns ctx's error, even if qemu
+// itself exited cleanly. Run from a terminal, Ctrl-C
 // also reaches qemu directly (it shares contemper's foreground process
 // group), which is how a user normally stops a deploy; ctx only matters
 // on its own when contemper is stopped some other way (SIGTERM, or no
@@ -304,6 +306,13 @@ func Deploy(ctx context.Context, opts Options) error {
 
 	if opts.Expect == "" {
 		err := cmd.Wait()
+		// Stopping qemu the usual way, with Ctrl-C on the terminal, also
+		// interrupts contemper and cancels ctx; qemu may still exit 0
+		// on its own before ctx's SIGTERM reaches it, so report the
+		// interruption rather than a clean exit (or qemu's own error).
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		if err != nil {
 			rep.Fail("deploy", "qemu exited with an error", toolErr.String())
 		}
@@ -323,6 +332,9 @@ func Deploy(ctx context.Context, opts Options) error {
 	// disk images' locks, and an immediate redeploy would fail.
 	<-exited
 	stopTail()
+	if ctxErr := ctx.Err(); waitErr != nil && ctxErr != nil {
+		return ctxErr
+	}
 	if errors.Is(waitErr, errExitedEarly) {
 		rep.Fail("deploy", waitErr.Error(), toolErr.String())
 		return waitErr
