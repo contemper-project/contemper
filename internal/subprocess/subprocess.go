@@ -18,7 +18,10 @@ import (
 
 // GraceDelay is how long a subprocess started by Command is given to
 // exit after its context is canceled and it receives SIGTERM, before
-// Cmd.Wait kills it outright with SIGKILL.
+// Cmd.Wait kills it outright with SIGKILL. As exec.Cmd.WaitDelay, it
+// also bounds how long Wait keeps copying output from a stdout/stderr
+// that isn't an *os.File once the process has exited, should something
+// the tool started still hold that pipe open.
 const GraceDelay = 5 * time.Second
 
 // Command returns an *exec.Cmd for name/args, argv only (no shell),
