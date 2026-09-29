@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.2.0](https://github.com/contemper-project/contemper/compare/v0.1.1...v0.2.0) (2026-09-29)
+
+
+### Features
+
+* **cli:** add contemper build to build and convert in one step ([59753af](https://github.com/contemper-project/contemper/commit/59753afffffce477e3e9183df735f0b84cee48f0))
+* **release:** ship shell completions in archives, packages and the cask ([1575a8c](https://github.com/contemper-project/contemper/commit/1575a8c3a38daeb29662f4961ed9ae08384dcac8))
+* **source:** read images from the local Docker daemon via docker-daemon: ([4a3cf9e](https://github.com/contemper-project/contemper/commit/4a3cf9e9c374497ee385453da2e0941d797e8417))
+
+
+### Bug Fixes
+
+* **cli:** stop subprocesses and clean up temporary files on interrupt ([f3c847d](https://github.com/contemper-project/contemper/commit/f3c847dd70b31685483d15978de0087baa47a0ec))
+* **progress:** print no failure line for a step stopped by an interrupt ([5f48f16](https://github.com/contemper-project/contemper/commit/5f48f16955274a124a3be64d3b9c8de41f8a1aaa))
+* **qemu:** report a deploy stopped by an interrupt as interrupted ([ccef0f4](https://github.com/contemper-project/contemper/commit/ccef0f476e1cff19556384064dc2e515583382ca))
+* **release:** use postflight_steps in the Homebrew cask ([db460fe](https://github.com/contemper-project/contemper/commit/db460fe717f6e17b91a939a33c869864d746f805))
+
+
+### Documentation
+
+* **install:** document shell completion ([4dc9cbb](https://github.com/contemper-project/contemper/commit/4dc9cbb3250b9985377a4727f63ba16d95a3cc1a))
+* keep shell prompts and output out of copied console blocks ([ea6b33b](https://github.com/contemper-project/contemper/commit/ea6b33bf42130c62875bbac8bdc17cf904f5f859))
+* **reference:** document the docker-daemon source and build command ([f050896](https://github.com/contemper-project/contemper/commit/f050896417310a5862937792ee9f8d9f394503f3))
+* **reference:** note docker/buildx as host tools for build ([42da965](https://github.com/contemper-project/contemper/commit/42da9656b65afe6afcbadfc3c4f025e53b193c07))
+
 ## [0.1.1](https://github.com/contemper-project/contemper/compare/v0.1.0...v0.1.1) (2026-09-28)
 
 ### Bug fixes
