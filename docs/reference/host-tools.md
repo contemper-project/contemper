@@ -65,10 +65,12 @@ falls back to (much slower) software emulation otherwise:
 No extra package installs this: `/dev/kvm` comes from the kernel, and
 Homebrew's qemu on Apple Silicon/Intel Macs already includes HVF support.
 
-These are the only programs contemper runs. Nothing from a converted
-image is ever executed on the host. Tools are run directly, never
-through a shell. Their output is shown when they fail, and with
-`--verbose` each invocation is printed.
+Nothing from a converted image is ever executed on the host. Tools are
+run directly, never through a shell. Their output is shown when they
+fail, and with `--verbose` each invocation is printed.
 
-No container runtime is needed to convert. You need one only to build
-images in the first place.
+No container runtime is needed to convert a plain registry, archive or
+layout reference. You need one only to build images in the first place,
+and `docker` specifically for `contemper build` or a `docker-daemon:`
+source: both run `docker` (`buildx` too, for `build`) as a subprocess,
+the same way as the tools above.
