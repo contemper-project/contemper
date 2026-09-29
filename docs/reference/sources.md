@@ -9,10 +9,16 @@ takes another, in the same forms.
 | `oci-archive:<path>` | an OCI archive, as written by `podman save --format oci-archive` or `docker save` (Docker 25 and later) |
 | `oci:<path>` | an OCI image layout directory |
 | `docker-archive:<path>` | a docker archive, as written by `docker save` (Docker 24 and earlier) or `podman save --format docker-archive` |
+| `docker-daemon:<ref>` | an image already loaded into the local Docker daemon, e.g. `docker-daemon:my-app:dev` |
 
-There is no container-daemon source. Save the image to an archive and
-point `convert` at that instead. Nothing needs to be pushed to a
-registry to iterate locally.
+`docker-daemon:<ref>` needs `docker` on `PATH`. It runs `docker save`
+into a temporary archive, reads that back with the same code the
+`oci-archive:`/`docker-archive:` forms use, and removes it once the
+image has been converted; nothing is kept on disk afterwards, and there
+is no dependency on the Docker API socket. `contemper build` uses this
+form to convert the image it just built; `contemper convert
+docker-daemon:my-app:dev` is also how to convert an image built (or
+pulled) by hand, without an explicit `docker save` step.
 
 `docker save` output works as `oci-archive:` regardless of which image
 store Docker is using. With the classic image store, the archive's
@@ -53,10 +59,16 @@ for example - `<base>` falls back to the archive or layout's own name
 A `docker-archive:` source is named from its `RepoTags` entry instead,
 falling back the same way when there is none.
 
+A `docker-daemon:<ref>` source is always named after `<ref>` itself
+(`docker-daemon:my-app:dev` gives `my-app-dev.<arch>`), regardless of
+what naming annotations the `docker save` output carries.
+
 ## Recorded references
 
 The bundle manifest records each reference in the same form, with local
-paths cleaned up (`a/../b.tar` becomes `b.tar`), and the digest of the
-image that was actually used. Bundles from local archives and layouts
-are marked as not reproducible, since a path can't be fetched again the
-way a registry digest can.
+paths cleaned up (`a/../b.tar` becomes `b.tar`; a `docker-daemon:<ref>`
+reference is kept as given, since `<ref>` is an image reference, not a
+path), and the digest of the image that was actually used. Bundles from
+local archives, layouts and the local Docker daemon are marked as not
+reproducible, since none of them can be fetched again the way a
+registry digest can.
