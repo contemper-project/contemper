@@ -147,12 +147,22 @@ homebrew_casks:
     # The binary isn't signed or notarized; without this, Gatekeeper quarantines
     # it on download and macOS refuses to run it ("contemper is damaged and
     # can't be opened").
-    hooks:
-      post:
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/contemper"]
-          end
+    #
+    # This is written through `custom_block` instead of `hooks.post.install`
+    # because the pinned GoReleaser version only knows how to emit
+    # `hooks.post.install` as a raw-Ruby `postflight do ... end` block, which
+    # Homebrew deprecated in favor of the declarative `postflight_steps` DSL.
+    # `{{ "{{staged_path}}" }}` is escaped so GoReleaser's own template engine
+    # (which runs over this whole file a second time) leaves the literal
+    # Homebrew token `{{staged_path}}` for Homebrew to expand itself. Move
+    # this back to `hooks.post.install_steps` once GoReleaser v2.19 ships
+    # (see goreleaser/goreleaser#6873).
+    custom_block: |
+      postflight_steps do
+        on_macos do
+          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ "{{staged_path}}" }}/contemper"]
+        end
+      end
     repository:
       owner: contemper-project
       name: homebrew-tap
