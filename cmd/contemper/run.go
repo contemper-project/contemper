@@ -72,16 +72,18 @@ type deployOptions struct {
 	progressMode string
 }
 
-func newReporter(w *os.File, modeStr string, verbose, quiet bool) (*progress.Reporter, error) {
+func newReporter(ctx context.Context, w *os.File, modeStr string, verbose, quiet bool) (*progress.Reporter, error) {
 	mode, err := progress.ParseMode(modeStr)
 	if err != nil {
 		return nil, err
 	}
-	return progress.New(w, mode, verbose, quiet), nil
+	rep := progress.New(w, mode, verbose, quiet)
+	rep.SetContext(ctx)
+	return rep, nil
 }
 
 func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) error {
-	rep, err := newReporter(os.Stderr, opts.progressMode, opts.verbose, opts.quiet)
+	rep, err := newReporter(ctx, os.Stderr, opts.progressMode, opts.verbose, opts.quiet)
 	if err != nil {
 		return err
 	}
@@ -687,7 +689,7 @@ func hintsFrom(cfg *v1.ConfigFile) bundle.Hints {
 }
 
 func runDeploy(ctx context.Context, _ *cobra.Command, opts deployOptions) error {
-	rep, err := newReporter(os.Stderr, opts.progressMode, opts.verbose, opts.quiet)
+	rep, err := newReporter(ctx, os.Stderr, opts.progressMode, opts.verbose, opts.quiet)
 	if err != nil {
 		return err
 	}
