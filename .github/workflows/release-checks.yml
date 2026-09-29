@@ -170,6 +170,27 @@ jobs:
       - name: goreleaser snapshot build (full)
         if: needs.changes.outputs.release == 'true'
         run: goreleaser release --snapshot --clean
+      # Cheap sanity check that the shell completions actually made it into
+      # what got built, on top of the config-level `goreleaser check` above:
+      # one archive and one deb, both already sitting in dist/ from the
+      # snapshot build just above.
+      - name: assert shell completions shipped
+        if: needs.changes.outputs.release == 'true'
+        run: |
+          set -euo pipefail
+          # List each artifact once instead of piping into `grep -q`, which
+          # can exit before the lister is done and fail the step under
+          # pipefail.
+          archive_files="$(tar tzf dist/*_linux_amd64.tar.gz)"
+          for f in completions/contemper.bash completions/_contemper completions/contemper.fish; do
+            grep -qx "$f" <<<"$archive_files"
+          done
+          deb_files="$(dpkg-deb -c dist/*_amd64.deb | awk '{print $6}')"
+          for f in /usr/share/bash-completion/completions/contemper \
+                   /usr/share/zsh/vendor-completions/_contemper \
+                   /usr/share/fish/vendor_completions.d/contemper.fish; do
+            grep -qx ".${f}" <<<"$deb_files"
+          done
       - name: goreleaser snapshot build (single-target)
         if: needs.changes.outputs.release != 'true'
         run: goreleaser build --snapshot --clean --single-target
