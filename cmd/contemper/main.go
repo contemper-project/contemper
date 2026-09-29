@@ -26,6 +26,7 @@ func newRootCmd() *cobra.Command {
 		SilenceErrors: true,
 	}
 
+	root.AddCommand(newBuildCmd())
 	root.AddCommand(newConvertCmd())
 	root.AddCommand(newDeployCmd())
 	root.AddCommand(newVersionCmd())

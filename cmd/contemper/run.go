@@ -8,11 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/cache"
 	"github.com/spf13/cobra"
 
 	"github.com/contemper-project/contemper/internal/buildinfo"
+	"github.com/contemper-project/contemper/internal/buildx"
 	"github.com/contemper-project/contemper/internal/bundle"
 	"github.com/contemper-project/contemper/internal/guestmeta"
 	"github.com/contemper-project/contemper/internal/localqemu"
@@ -41,6 +43,19 @@ type convertOptions struct {
 	quiet        bool
 	verbose      bool
 	progressMode string
+}
+
+type buildOptions struct {
+	context   string
+	file      string
+	tag       string
+	buildArgs []string
+	imageOnly bool
+	// convert carries every flag `build` shares with `convert` (see
+	// registerConvertFlags); convert.arch also selects the buildx
+	// --platform, and convert.sourceRef is filled in by runBuild once
+	// the tag is known, from "docker-daemon:<tag>".
+	convert convertOptions
 }
 
 type deployOptions struct {
@@ -446,6 +461,89 @@ func runConvert(cmd *cobra.Command, opts convertOptions) error {
 	rep.Finish("bundle ready", fmt.Sprintf("%-16s%s", progress.HumanBytes(diskInfo.SizeBytes), elapsed))
 
 	_, _ = fmt.Fprintln(cmd.OutOrStdout(), outBundleDir)
+	return nil
+}
+
+// runBuild builds opts.context with `docker buildx build --load`, then -
+// unless --image-only stops it there - converts the resulting image
+// through the docker-daemon: source with the same runConvert code path
+// `convert` uses, so every convert flag applies to build too.
+func runBuild(cmd *cobra.Command, opts buildOptions) error {
+	platform, err := source.HostPlatform(opts.convert.arch)
+	if err != nil {
+		return err
+	}
+	if !opts.imageOnly {
+		// Catch a bad convert flag now rather than after a full build.
+		if err := checkConvertOptions(opts.convert); err != nil {
+			return err
+		}
+	}
+
+	tag := opts.tag
+	if tag == "" {
+		tag = buildx.DefaultTag(opts.context)
+		if !opts.convert.quiet {
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "contemper: build: no --tag given, using %s\n", tag)
+		}
+	} else if _, err := name.ParseReference(tag); err != nil {
+		return fmt.Errorf("--tag %q: %w", tag, err)
+	}
+
+	file := opts.file
+	if file == "" {
+		file = buildx.DefaultFile(opts.context)
+	}
+
+	bxOpts := buildx.Options{
+		Context:   opts.context,
+		File:      file,
+		Tag:       tag,
+		Platform:  "linux/" + platform.Architecture,
+		BuildArgs: opts.buildArgs,
+	}
+
+	dockerPath, err := buildx.CheckAvailable(bxOpts)
+	if err != nil {
+		return err
+	}
+
+	if err := buildx.Build(dockerPath, bxOpts); err != nil {
+		return fmt.Errorf("docker buildx build: %w", err)
+	}
+
+	if opts.imageOnly {
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), tag)
+		return nil
+	}
+
+	opts.convert.sourceRef = "docker-daemon:" + tag
+	return runConvert(cmd, opts.convert)
+}
+
+// checkConvertOptions runs the checks runConvert makes on its flags
+// before loading anything, so `build` can reject a bad convert flag
+// before it spends a whole image build on it.
+func checkConvertOptions(opts convertOptions) error {
+	if _, err := progress.ParseMode(opts.progressMode); err != nil {
+		return err
+	}
+	if opts.noVolHelper && opts.volumeHelper != "" {
+		return fmt.Errorf("--volume-helper and --no-volume-helper are mutually exclusive")
+	}
+	if _, _, err := target.Resolve(opts.target); err != nil {
+		return err
+	}
+	if opts.rootSize != "" {
+		if _, err := volume.ParseSize(opts.rootSize); err != nil {
+			return fmt.Errorf("--root-size: %w", err)
+		}
+	}
+	if opts.supportRef != "" {
+		if _, err := source.ParseRef(opts.supportRef); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
