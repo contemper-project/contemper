@@ -1,8 +1,9 @@
 # Getting started
 
 This walks through the example image in the repository: an Alpine
-appliance with OpenRC that boots to a serial login. You build it with
-your usual container tooling, convert it, and boot it under QEMU.
+appliance with OpenRC that boots to a serial login. Two commands get you
+there: `contemper build` turns the example's `Containerfile` into a
+bundle, and `contemper deploy --to local-qemu` boots it under QEMU.
 
 ## Install
 
@@ -101,7 +102,9 @@ your machine with the least fuss:
     there is no tagged release yet) rather than the exact commit and
     build date a downloaded binary embeds.
 
-For building the example below you also need podman or docker.
+Building the example below with `contemper build` currently needs Docker
+with buildx (podman support is planned). If you only have podman, skip
+to [Build by hand](#build-by-hand), which works with either engine.
 
 ### Shell completion
 
@@ -155,11 +158,58 @@ That's on top of the usual checksum check against the release's
 `checksums.txt`, which lists every archive and package and is itself
 attested the same way.
 
-## Build the example image
+## Build and boot the example
 
 The example lives in `examples/alpine/Containerfile`. It installs a
 kernel, generates a generic initrd, writes a kernel command line and
-enables OpenRC, all at the paths contemper expects:
+enables OpenRC, all at the paths contemper expects.
+
+`contemper build` runs `docker buildx build --load` on it and converts
+the result in one step. It picks up the `Containerfile` on its own when
+the directory has no `Dockerfile`:
+
+```console
+$ contemper build --target qemu -o _out examples/alpine
+_out/alpine-dev.aarch64
+```
+
+The image is tagged after the directory (`alpine:dev`), and the bundle
+is named after the tag and the architecture (`x86_64` on an x86-64
+host). A *bundle* is a directory holding a UEFI-bootable qcow2 disk and
+a `contemper.json` manifest. The build's progress, buildx's own output
+included, goes to stderr; stdout carries only the bundle's path.
+
+Boot it:
+
+```console
+$ contemper deploy --to local-qemu _out/alpine-dev.aarch64
+```
+
+This boots the disk under QEMU (hardware-accelerated where the host
+allows it) and streams the serial console to your terminal. The disk is
+booted with a throwaway overlay, so the bundle itself stays unchanged.
+Log in as `root` with no password.
+
+To use the boot as a test, have contemper wait for a line on the serial
+console and exit once it appears. The example prints `contemper-boot-ok`
+when OpenRC finishes starting. Since `build` prints only the bundle's
+path, the two commands also chain:
+
+```console
+$ contemper deploy --to local-qemu "$(contemper build --target qemu -o _out examples/alpine)" \
+    --expect contemper-boot-ok --timeout 180s
+```
+
+`contemper build` currently requires Docker with buildx; podman support
+is planned. See [source references](reference/sources.md) for the
+`docker-daemon:` source it converts through.
+
+## Build by hand
+
+Prefer this if you use podman, or want an OCI archive to keep or push
+rather than loading the image straight into Docker's local image store.
+These are the steps `build` runs for you: build and save the image with
+your container engine, then convert the archive.
 
 === "podman"
 
@@ -181,38 +231,15 @@ enables OpenRC, all at the paths contemper expects:
     directly; with an older Docker, read the same file with
     `docker-archive:` in place of `oci-archive:`.
 
-    `contemper build` runs these two steps (and the convert step below)
-    together, and uses a `Containerfile` without being told when the
-    directory has no `Dockerfile`; see
-    [source references](reference/sources.md) for the `docker-daemon:`
-    source it converts through.
-
-## Convert it
-
 ```console
 $ contemper convert --target qemu oci-archive:example.tar -o _out
 ```
 
 contemper checks the image is marked ready, merges its layers, checks
 the kernel, initrd and command line are in place, and assembles a
-UEFI-bootable qcow2 disk. The result is a *bundle*: a directory holding
-the disk and a `contemper.json` manifest. `convert` prints the bundle's
-path on stdout, and its progress on stderr.
-
-## Boot it
-
-```console
-$ contemper deploy --to local-qemu _out/contemper-example-dev.aarch64/
-```
-
-This boots the disk under QEMU (hardware-accelerated where the host
-allows it) and streams the serial console to your terminal. The disk is
-booted with a throwaway overlay, so the bundle itself stays unchanged.
-Log in as `root` with no password.
-
-To use the boot as a test, have contemper wait for a line on the serial
-console and exit once it appears. The example prints `contemper-boot-ok`
-when OpenRC finishes starting:
+UEFI-bootable qcow2 disk. `convert` prints the bundle's path on stdout,
+and its progress on stderr, the same way `build` does. Boot it the same
+way as above:
 
 ```console
 $ contemper deploy --to local-qemu _out/contemper-example-dev.aarch64/ \

@@ -23,8 +23,9 @@ $ contemper deploy --to local-qemu my-appliance-dev.aarch64/
 ```
 
 `<tool>` is `podman` or `docker`; the two commands above are identical
-either way. See [Getting started](docs/getting-started.md) for a
-walkthrough that also covers building without a registry.
+either way. With Docker, `contemper build` runs the build and the
+convert step together and skips the registry; see
+[Getting started](docs/getting-started.md) for that walkthrough.
 
 ## Why
 
@@ -91,16 +92,16 @@ tooling already produces. More in
 
 contemper is pre-1.0: the CLI and the bundle format may still change.
 
-**Works today:** `convert` for the qemu target, and `deploy
---to local-qemu`. Support images can declare variants, selected by
-what's actually present in your image (an init system, a first-boot
-mechanism). Volumes are supported too: declare one with `VOLUME` in
-your build file, and contemper sizes, formats and mounts it in the
-guest through a first-boot helper, persisted across redeploys for
-`local-qemu` instances.
+**Works today:** `convert` for the qemu target, `build` (with Docker;
+podman support is planned), and `deploy --to local-qemu`. Support images
+can declare variants, selected by what's actually present in your image
+(an init system, a first-boot mechanism). Volumes are supported too:
+declare one with `VOLUME` in your build file, and contemper sizes,
+formats and mounts it in the guest through a first-boot helper,
+persisted across redeploys for `local-qemu` instances.
 
-**Planned:** adapters that drive `build` and `publish` through your
-usual container tooling, then an Incus target and provider. See the
+**Planned:** a `publish` adapter through your usual container tooling,
+then an Incus target and provider. See the
 [roadmap](docs/design/roadmap.md) for the rest.
 
 ## Documentation

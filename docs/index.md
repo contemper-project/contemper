@@ -14,14 +14,16 @@ $ contemper deploy --to local-qemu my-appliance-dev.aarch64/
 ```
 
 `<tool>` is `podman` or `docker`; the two commands above are identical
-either way.
+either way. With Docker, `contemper build` runs the build and the
+convert step together and skips the registry; see
+[Getting started](getting-started.md) for that walkthrough.
 
 !!! info "Status"
     contemper is pre-1.0, and the CLI and bundle format may still change.
-    `convert` and `deploy --to local-qemu` work end to end: CI boots a
-    converted image on every change. Features that are designed but not
-    built yet are marked **Planned** throughout these docs. See the
-    [roadmap](design/roadmap.md).
+    `build` (with Docker), `convert` and `deploy --to local-qemu` work end
+    to end: CI boots a converted image on every change. Features that are
+    designed but not built yet are marked **Planned** throughout these
+    docs. See the [roadmap](design/roadmap.md).
 
 ## What contemper is
 
