@@ -1,24 +1,37 @@
 #!/usr/bin/env bash
 # End-to-end volumes test: build the chosen example image (--example
 # alpine|debian, default alpine), derive a second image from it
-# (hack/e2e-volumes/Containerfile) that declares one volume and checks it
-# on boot, build and push the volume-formatting helper images to a local
-# registry with hack/volumes-support/buildimg, convert with `contemper
-# convert --volume-helper <local ref>`, then:
+# (hack/e2e-volumes/Containerfile) that declares two volumes and checks
+# them on boot, build and push the volume-formatting helper images to a
+# local registry with hack/volumes-support/buildimg, convert with
+# `contemper convert --volume-helper <local ref>`, then:
 #
 #  1. deploy with a fixed --name into a temp XDG_STATE_HOME: expect
-#     contemper-volume-fresh (the volume was blank, formatted, mounted).
+#     contemper-volume-fresh (the /data volume was blank, formatted,
+#     mounted) and contemper-volume-seeded (the image's own content at
+#     /data was copied onto it, with its original owner and mode).
 #  2. deploy the same bundle again, same --name: expect
-#     contemper-volume-persisted (the previous boot's marker survived).
+#     contemper-volume-persisted (the previous boot's marker survived)
+#     and contemper-volume-modified-persisted (a change the first boot
+#     made to the seeded file also survived - the reused disk was never
+#     reformatted or re-seeded over it).
 #  3. build a second version of the derived image (a changed file, a new
 #     tag), convert it, and deploy it *without* --name: expect
-#     contemper-volume-persisted again, since the default instance name
-#     (the source image's repository, not its tag) is the same as
-#     before, so it's the same volume disk.
+#     contemper-volume-persisted and contemper-volume-modified-persisted
+#     again, since the default instance name (the source image's
+#     repository, not its tag) is the same as before, so it's the same
+#     volume disk.
+#
+# /data-noseed, declared with io.contemper.volume./data-noseed.seed="false",
+# is checked on every boot above: it must stay mounted but empty -
+# contemper-volume-noseed-ok - never picking up the image's own content
+# at that path the way /data does.
 #
 # Every deploy also checks contemper-boot-ok (the example's own marker)
-# and contemper-volume-mounted (the label the helper gave the disk)
-# appear on the console.
+# and contemper-volume-mounted (the label the helper gave each disk)
+# appear on the console, and fails if any contemper-volume-*-missing,
+# *-mismatch or *-leaked marker (see hack/e2e-volumes/files/check-volume.sh)
+# appears at all.
 #
 # Usage: hack/e2e-volumes.sh [--example alpine|debian] [--timeout DURATION]
 #
@@ -38,7 +51,23 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${REPO}/_out/volumes"
 TIMEOUT="180s"
 BOOT_MARKER="contemper-boot-ok"
-MOUNTED_MARKER="contemper-volume-mounted label=data"
+# A trailing space (before "dev=") keeps this from also matching the
+# "label=data-noseed" line below: that label starts with "data" too, but
+# is never followed by a space at that point.
+MOUNTED_MARKER="contemper-volume-mounted label=data dev="
+MOUNTED_MARKER_NOSEED="contemper-volume-mounted label=data-noseed dev="
+NOSEED_OK_MARKER="contemper-volume-noseed-ok"
+SEEDED_MARKER="contemper-volume-seeded"
+MODIFIED_PERSISTED_MARKER="contemper-volume-modified-persisted"
+# None of these must ever appear on any boot - see
+# hack/e2e-volumes/files/check-volume.sh for what would print each one.
+FAILURE_MARKERS=(
+	"contemper-volume-not-mounted"
+	"contemper-volume-seed-missing"
+	"contemper-volume-seed-mismatch"
+	"contemper-volume-modified-missing"
+	"contemper-volume-noseed-leaked"
+)
 EXAMPLE="alpine"
 # Not 5000: macOS AirPlay Receiver listens there.
 REGISTRY_HOST="${E2E_REGISTRY:-localhost:5555}"
@@ -177,25 +206,39 @@ bundle="$("${contemper}" convert --target qemu --arch "${arch}" --volume-helper 
 
 export XDG_STATE_HOME="${OUT}/xdgstate"
 
+# deploy_and_check runs one deploy and checks its serial log: $1 label,
+# $2 bundle dir, $3 --expect string, $4 log path, $5 a space-separated
+# list of additional markers that must also appear (on top of
+# BOOT_MARKER, MOUNTED_MARKER and MOUNTED_MARKER_NOSEED, required on
+# every call), and every remaining argument is passed straight through
+# to `contemper deploy`. It also fails if any FAILURE_MARKERS string
+# appears at all, on any call.
 deploy_and_check() {
-	local label="$1" bundle_dir="$2" expect="$3" log="$4"
-	shift 4
+	local label="$1" bundle_dir="$2" expect="$3" log="$4" extra_markers="$5"
+	shift 5
 	echo "==> contemper deploy --to local-qemu (${label})" >&2
 	"${contemper}" deploy --to local-qemu "${bundle_dir}" \
 		--expect "${expect}" \
 		--timeout "${TIMEOUT}" \
 		--serial-log "${log}" \
 		"$@"
-	if ! grep -q "${BOOT_MARKER}" "${log}"; then
-		echo "e2e-volumes.sh: ${label}: ${BOOT_MARKER} (the example's own marker) never appeared" >&2
-		exit 1
-	fi
-	if ! grep -q "${MOUNTED_MARKER}" "${log}"; then
-		echo "e2e-volumes.sh: ${label}: expected \"${MOUNTED_MARKER}\" on the console; log:" >&2
-		cat "${log}" >&2
-		exit 1
-	fi
-	echo "==> ${label} OK: ${BOOT_MARKER}, ${MOUNTED_MARKER}, ${expect} all seen" >&2
+
+	local marker
+	for marker in "${BOOT_MARKER}" "${MOUNTED_MARKER}" "${MOUNTED_MARKER_NOSEED}" ${extra_markers}; do
+		if ! grep -q "${marker}" "${log}"; then
+			echo "e2e-volumes.sh: ${label}: expected \"${marker}\" on the console; log:" >&2
+			cat "${log}" >&2
+			exit 1
+		fi
+	done
+	for marker in "${FAILURE_MARKERS[@]}"; do
+		if grep -q "${marker}" "${log}"; then
+			echo "e2e-volumes.sh: ${label}: unexpected \"${marker}\" on the console; log:" >&2
+			cat "${log}" >&2
+			exit 1
+		fi
+	done
+	echo "==> ${label} OK: ${expect} and every expected marker seen, no failure marker" >&2
 }
 
 # No --name in any of these three deploys: every one relies on the
@@ -203,8 +246,10 @@ deploy_and_check() {
 # both revisions built below), which is exactly what makes the third
 # deploy - a different tag, converted separately - land on the same
 # volume disk as the first two.
-deploy_and_check "first boot" "${bundle}" "contemper-volume-fresh" "${OUT}/serial-fresh.log"
-deploy_and_check "second boot, same bundle" "${bundle}" "contemper-volume-persisted" "${OUT}/serial-persisted.log"
+deploy_and_check "first boot" "${bundle}" "contemper-volume-fresh" "${OUT}/serial-fresh.log" \
+	"${NOSEED_OK_MARKER} ${SEEDED_MARKER}"
+deploy_and_check "second boot, same bundle" "${bundle}" "contemper-volume-persisted" "${OUT}/serial-persisted.log" \
+	"${NOSEED_OK_MARKER} ${MODIFIED_PERSISTED_MARKER}"
 
 # --- an image update: same instance (source repo, no tag), new content ----
 echo "==> ${engine} build hack/e2e-volumes (revision 2, from ${IMAGE})" >&2
@@ -217,6 +262,7 @@ bundle_v2="$("${contemper}" convert --target qemu --arch "${arch}" --volume-help
 # No --name here: the default instance name is the source image's
 # repository (the same for both revisions, since only the tag changed),
 # so this reuses the first deploy's volume disk without being told to.
-deploy_and_check "image update, default instance" "${bundle_v2}" "contemper-volume-persisted" "${OUT}/serial-update.log"
+deploy_and_check "image update, default instance" "${bundle_v2}" "contemper-volume-persisted" "${OUT}/serial-update.log" \
+	"${NOSEED_OK_MARKER} ${MODIFIED_PERSISTED_MARKER}"
 
 echo "==> e2e-volumes OK" >&2

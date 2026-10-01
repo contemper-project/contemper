@@ -1,7 +1,7 @@
 # Derived from either contemper-ready example (hack/e2e-volumes.sh picks
 # which with --example alpine|debian, passing it in as BASE_IMAGE; this
-# Containerfile is never built standalone) purely to declare one volume
-# and add a boot-time check for it, so the examples themselves stay
+# Containerfile is never built standalone) purely to declare two volumes
+# and add a boot-time check for them, so the examples themselves stay
 # volume-free and the plain e2e tests never need the volume helper. See
 # hack/e2e-volumes.sh.
 #
@@ -15,8 +15,27 @@
 ARG BASE_IMAGE=contemper-example:dev
 FROM ${BASE_IMAGE}
 
+# /data seeds normally: a blank volume disk is formatted and then
+# copied onto from this seed.txt, baked in before the disk ever exists.
+# Ownership and mode (of the file and of /data itself) are set to
+# something other than mkfs.ext4's own root:root 0755 default, so a
+# correct seed can be told apart from one that merely created an empty
+# directory.
 LABEL io.contemper.volume./data.size="64MiB"
+RUN mkdir -p /data && \
+    printf 'contemper-e2e-seed\n' >/data/seed.txt && \
+    chown 1000:1000 /data /data/seed.txt && \
+    chmod 750 /data && \
+    chmod 640 /data/seed.txt
 VOLUME /data
+
+# /data-noseed opts out of seeding with its own label: it bakes in a
+# seed file the same way, which must never appear on the mounted
+# volume once it's formatted.
+LABEL io.contemper.volume./data-noseed.size="16MiB"
+LABEL io.contemper.volume./data-noseed.seed="false"
+RUN mkdir -p /data-noseed && printf 'contemper-e2e-noseed\n' >/data-noseed/seed.txt
+VOLUME /data-noseed
 
 # Changed between the two builds hack/e2e-volumes.sh makes (REVISION=1,
 # then REVISION=2 for the "deploy an image update" check), so the two
