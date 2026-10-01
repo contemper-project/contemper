@@ -4,10 +4,13 @@
 
 Persistent volumes are identified by the orchestrator when they are
 attached, for example through a device `serial=` field, not by scanning
-filesystem labels across a fleet. First attachment formats and labels an
-empty volume; later boots recognize the label. Because identity is owned
-by the orchestrator rather than by a fleet-wide lookup, label collisions
-between unrelated volumes are harmless.
+filesystem labels across a fleet. First attachment formats and labels a
+blank volume, seeding it from the image's own content at that path
+unless the volume opts out (see
+[Volumes](../guide/volumes.md#seeding-a-volume-from-the-image)), and
+later boots recognize the label. Because identity is owned by the
+orchestrator rather than by a fleet-wide lookup, label collisions between
+unrelated volumes are harmless.
 
 The exact identifier mechanism is provider-specific. contemper assumes
 *some* stable identifier exists but does not prescribe one.
@@ -28,15 +31,18 @@ Volumes are the next milestone. The decisions so far:
     and mounted, which is what lets a new image version run on the data
     of the previous one;
   - a disk whose first and last MiB are all zeros is **blank** and gets
-    formatted;
+    formatted, then seeded from the image's own content at that mount
+    point (if any), unless the volume opts out;
   - anything else is **left alone** and logged as a mismatch, so the
     failure mode is an unmounted volume, never lost data.
 - **Declaration.** `VOLUME` in the image, plus labels
   `io.contemper.volume.<path>.size`, an optional
-  `io.contemper.volume.<path>.name`, and `io.contemper.root.size` for
-  the root disk. Command-line flags override them. A volume without a
-  size is recorded without one, and deployment fails until a label or a
-  flag provides it; contemper never guesses a size.
+  `io.contemper.volume.<path>.name`, an optional
+  `io.contemper.volume.<path>.seed="false"` to opt out of the seeding
+  above, and `io.contemper.root.size` for the root disk. Command-line
+  flags override them. A volume without a size is recorded without one,
+  and deployment fails until a label or a flag provides it; contemper
+  never guesses a size.
 - **Names.** A volume is identified by its path. Its name, at most 16
   characters (the ext4 label limit), is derived from the path unless the
   optional name label overrides it, which keeps a volume attached when
@@ -60,7 +66,10 @@ Volumes are the next milestone. The decisions so far:
   build machine end up in the guest. `volumes` is
   written whenever volumes are declared, even with the fstab opt-out:
   one volume per line as `name serial-pattern fs mountpoint`, with the
-  mount path last so it may contain spaces.
+  mount path last so it may contain spaces. `volumes-noseed` is written
+  alongside it only when at least one declared volume opts out of
+  seeding: one volume *name* per line; a missing file means every volume
+  seeds normally.
 - **A shell-script helper applies that rule.** It is a POSIX `sh`
   script, identical in every image, delivered as a published support
   image with one variant per init system (OpenRC and systemd) and merged
