@@ -20,7 +20,17 @@ import (
 const (
 	BuildPath   = "/etc/contemper/build"
 	VolumesPath = "/etc/contemper/volumes"
-	FstabPath   = "/etc/fstab"
+	// NoSeedPath lists, one volume *name* per line (the same name
+	// VolumesPath's first field carries, not its path), every declared
+	// volume whose io.contemper.volume.<path>.seed label opted it out of
+	// being seeded from the image's own content on first format (see
+	// docs/guide/volumes.md). convert writes it only when at least one
+	// volume opts out; a missing file means "seed everything", which is
+	// also how the guest helper
+	// (support/volumes-support/base/usr/lib/contemper/format-volumes)
+	// treats it - it is never sourced, only read line by line.
+	NoSeedPath = "/etc/contemper/volumes-noseed"
+	FstabPath  = "/etc/fstab"
 )
 
 // ImageRef is a plain ref+digest pair, already redacted by the caller for
@@ -133,6 +143,20 @@ func RenderVolumes(lines []VolumeLine) []byte {
 	var b strings.Builder
 	for _, l := range lines {
 		fmt.Fprintf(&b, "%s %s %s %s\n", l.Name, l.SerialPattern, l.FS, l.Mountpoint)
+	}
+	return []byte(b.String())
+}
+
+// RenderNoSeed renders names (the opted-out volumes' own names, in the
+// order the caller gives them) as the newline-separated content of
+// NoSeedPath, one name per line. The caller only writes the result when
+// names is non-empty - see NoSeedPath's doc comment on why an empty file
+// is never produced.
+func RenderNoSeed(names []string) []byte {
+	var b strings.Builder
+	for _, n := range names {
+		b.WriteString(n)
+		b.WriteByte('\n')
 	}
 	return []byte(b.String())
 }

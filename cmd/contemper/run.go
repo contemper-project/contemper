@@ -330,15 +330,23 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 		rep.Line("💾", fmt.Sprintf("%d %s declared", len(specs), pluralize(len(specs), "volume")), "")
 		var lines []guestmeta.VolumeLine
 		var fstabLines []string
+		// Every mount point is created before any volume's seed report
+		// below, so a volume nested under another one (/data/sub under
+		// /data) counts as content of the outer volume: the guest helper
+		// copies that mount point onto the outer volume too, which is
+		// what lets the nested one mount on top of it.
 		for _, s := range specs {
 			if err := rfs.EnsureDir(s.Path); err != nil {
 				return fmt.Errorf("creating mount point %s: %w", s.Path, err)
 			}
+		}
+		for _, s := range specs {
 			detail := "unsized"
 			if s.SizeBytes > 0 {
 				detail = progress.HumanBytes(s.SizeBytes)
 			}
 			rep.Sub("✔", s.Path+" → "+s.Name, detail)
+			rep.SubChild("%s", seedReportLine(s, rfs.DirHasContent(s.Path)))
 			lines = append(lines, guestmeta.VolumeLine{
 				Name: s.Name, SerialPattern: target.SerialPattern(canonicalTarget, s.Name), FS: "ext4", Mountpoint: s.Path,
 			})
@@ -346,6 +354,11 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 		}
 		if err := rfs.WriteFile(guestmeta.VolumesPath, guestmeta.RenderVolumes(lines)); err != nil {
 			return fmt.Errorf("writing %s: %w", guestmeta.VolumesPath, err)
+		}
+		if names := noSeedVolumeNames(specs); len(names) > 0 {
+			if err := rfs.WriteFile(guestmeta.NoSeedPath, guestmeta.RenderNoSeed(names)); err != nil {
+				return fmt.Errorf("writing %s: %w", guestmeta.NoSeedPath, err)
+			}
 		}
 
 		if opts.noFstab || volume.FstabOptedOut(cfg.Config.Labels) {
@@ -797,6 +810,42 @@ func parseVolumeOverrides(raw []string) (map[string]int64, error) {
 		out[path] = size
 	}
 	return out, nil
+}
+
+// seedReportLine returns the report run.go prints under each declared
+// volume (see rep.SubChild's call site above) describing what happens to
+// it the first time its disk is formatted: opted out by the volume's own
+// seed label, seeded because the image has content at its path, or left
+// alone because it doesn't. hasContent is rfs.DirHasContent(s.Path), the
+// no-host-extraction check for "does the image have anything there" -
+// passed in rather than recomputed so this stays a pure function callers
+// can unit test without building a rootfs.
+func seedReportLine(s volume.Spec, hasContent bool) string {
+	switch {
+	case !s.Seed:
+		return fmt.Sprintf("seed: opted out, %s starts empty on first format", s.Path)
+	case hasContent:
+		return fmt.Sprintf("seed: image has content at %s, copied onto the volume on first format", s.Path)
+	default:
+		return fmt.Sprintf("seed: no content at %s, first format leaves it empty", s.Path)
+	}
+}
+
+// noSeedVolumeNames returns the names of every spec whose seed label
+// opted it out (see volume.Spec.Seed), in specs' own order - which
+// volume.FromConfig already sorts by path, so /etc/contemper/volumes-noseed
+// always lists them the same way /etc/contemper/volumes does. nil when
+// nothing opts out, which is the caller's signal to skip writing the
+// file at all: see guestmeta.NoSeedPath on why a missing file, not an
+// empty one, is how "seed everything" is spelled.
+func noSeedVolumeNames(specs []volume.Spec) []string {
+	var names []string
+	for _, s := range specs {
+		if !s.Seed {
+			names = append(names, s.Name)
+		}
+	}
+	return names
 }
 
 // pluralize returns unit or unit+"s" depending on n, for the common case

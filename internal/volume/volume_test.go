@@ -178,6 +178,45 @@ func TestFstabOptedOut(t *testing.T) {
 	}
 }
 
+func TestFromConfigSeedDefaultsTrue(t *testing.T) {
+	specs, err := volume.FromConfig([]string{"/data"}, nil)
+	if err != nil {
+		t.Fatalf("FromConfig: %v", err)
+	}
+	if !specs[0].Seed {
+		t.Errorf("Seed = false, want true by default")
+	}
+}
+
+func TestFromConfigSeedLabel(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want bool
+	}{
+		{"true", true},
+		{"false", false},
+	}
+	for _, c := range cases {
+		labels := map[string]string{"io.contemper.volume./data.seed": c.raw}
+		specs, err := volume.FromConfig([]string{"/data"}, labels)
+		if err != nil {
+			t.Fatalf("FromConfig(seed=%q): %v", c.raw, err)
+		}
+		if specs[0].Seed != c.want {
+			t.Errorf("FromConfig(seed=%q): Seed = %v, want %v", c.raw, specs[0].Seed, c.want)
+		}
+	}
+}
+
+func TestFromConfigInvalidSeedLabel(t *testing.T) {
+	for _, bad := range []string{"", "False", "no", "0", "TRUE"} {
+		labels := map[string]string{"io.contemper.volume./data.seed": bad}
+		if _, err := volume.FromConfig([]string{"/data"}, labels); err == nil {
+			t.Errorf("FromConfig(seed=%q): expected an error", bad)
+		}
+	}
+}
+
 func TestFromConfigRejectsInvalidPaths(t *testing.T) {
 	for _, p := range []string{"data", "/data\nLABEL=x /etc ext4 defaults 0 0", "/tab\there", "/del\x7f"} {
 		if _, err := volume.FromConfig([]string{p}, nil); err == nil {

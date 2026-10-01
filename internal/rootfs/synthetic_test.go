@@ -147,6 +147,50 @@ func TestWriteFileThenPopulateOrderIsIndexDriven(t *testing.T) {
 	}
 }
 
+func TestDirHasContentTrueForNestedFile(t *testing.T) {
+	rfs := buildTestRootfs(t, []imgtest.File{
+		{Path: "data/", Typeflag: tar.TypeDir},
+		{Path: "data/sub/", Typeflag: tar.TypeDir},
+		{Path: "data/sub/seed.txt", Data: []byte("x")},
+	})
+	if !rfs.DirHasContent("/data") {
+		t.Errorf("DirHasContent(/data) = false, want true (nested file present)")
+	}
+}
+
+func TestDirHasContentFalseForEmptyDir(t *testing.T) {
+	rfs := buildTestRootfs(t, []imgtest.File{{Path: "data/", Typeflag: tar.TypeDir}})
+	if rfs.DirHasContent("/data") {
+		t.Errorf("DirHasContent(/data) = true, want false (nothing under it)")
+	}
+}
+
+func TestDirHasContentFalseForMissingDir(t *testing.T) {
+	rfs := buildTestRootfs(t, []imgtest.File{{Path: "etc/", Typeflag: tar.TypeDir}})
+	if rfs.DirHasContent("/data") {
+		t.Errorf("DirHasContent(/data) = true, want false (/data doesn't exist at all)")
+	}
+}
+
+func TestDirHasContentFalseForNonDirectory(t *testing.T) {
+	rfs := buildTestRootfs(t, []imgtest.File{{Path: "data", Data: []byte("x")}})
+	if rfs.DirHasContent("/data") {
+		t.Errorf("DirHasContent(/data) = true, want false (/data is a regular file, not a directory)")
+	}
+}
+
+func TestDirHasContentFollowsSymlink(t *testing.T) {
+	rfs := buildTestRootfs(t, []imgtest.File{
+		{Path: "data", Typeflag: tar.TypeSymlink, Linkname: "/var/data"},
+		{Path: "var/", Typeflag: tar.TypeDir},
+		{Path: "var/data/", Typeflag: tar.TypeDir},
+		{Path: "var/data/seed.txt", Data: []byte("x")},
+	})
+	if !rfs.DirHasContent("/data") {
+		t.Errorf("DirHasContent(/data) = false, want true through the symlink to /var/data")
+	}
+}
+
 // TestBuildAddsMissingParentDirs checks that a layer listing a file but
 // not its parent directories still yields a directory entry for each
 // parent, so the ext4 population step has somewhere to create the file.
@@ -176,5 +220,40 @@ func TestBuildAddsMissingParentDirs(t *testing.T) {
 	}
 	if got, err := rfs.ReadFile("/usr/lib/app/data"); err != nil || string(got) != "x" {
 		t.Errorf("ReadFile = %q, %v", got, err)
+	}
+}
+
+func TestDirHasContentFalseWhenUpperLayerRemovesContent(t *testing.T) {
+	for name, upper := range map[string][]imgtest.File{
+		"whiteout": {imgtest.WhiteoutFile("data/seed.txt")},
+		"opaque":   {{Path: "data/", Typeflag: tar.TypeDir}, {Path: "data/.wh..wh..opq"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			img, err := imgtest.Image(linuxAMD64, nil,
+				[]imgtest.File{{Path: "data/", Typeflag: tar.TypeDir}, {Path: "data/seed.txt", Data: []byte("x")}},
+				upper)
+			if err != nil {
+				t.Fatalf("building image: %v", err)
+			}
+			rfs, err := rootfs.Build(t.Context(), img)
+			if err != nil {
+				t.Fatalf("Build: %v", err)
+			}
+			t.Cleanup(func() { _ = rfs.Close() })
+			if rfs.DirHasContent("/data") {
+				t.Errorf("DirHasContent(/data) = true, want false once an upper layer removed /data/seed.txt")
+			}
+		})
+	}
+}
+
+func TestDirHasContentDoesNotMatchSiblingPrefix(t *testing.T) {
+	rfs := buildTestRootfs(t, []imgtest.File{
+		{Path: "data/", Typeflag: tar.TypeDir},
+		{Path: "data-other/", Typeflag: tar.TypeDir},
+		{Path: "data-other/f", Data: []byte("x")},
+	})
+	if rfs.DirHasContent("/data") {
+		t.Errorf("DirHasContent(/data) = true, want false (only /data-other has content)")
 	}
 }
