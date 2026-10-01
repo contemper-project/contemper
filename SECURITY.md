@@ -4,11 +4,24 @@
 
 Please report security vulnerabilities privately, using GitHub's private
 vulnerability reporting: open the "Security" tab on this repository and
-click "Report a vulnerability". Do not open a public issue for a
-suspected vulnerability.
+click "Report a vulnerability", or go directly to
+<https://github.com/contemper-project/contemper/security/advisories/new>.
+Do not open a public issue for a suspected vulnerability.
 
-We'll acknowledge your report and follow up with next steps, and credit
-you in the advisory unless you'd rather stay anonymous.
+If you can't use GitHub's form, open a public issue asking for a private
+contact channel - please don't include any vulnerability details in it.
+
+## What to expect
+
+- Acknowledgement within 7 days.
+- An initial assessment - accepted or declined, and severity - within 14
+  days.
+- A fix or mitigation and coordinated public disclosure, via a GitHub
+  Security Advisory (with a CVE where applicable), within 90 days of the
+  report, earlier once a fix is released.
+- If a deadline can't be met, we'll tell you why and give you a new date.
+
+You'll be credited in the advisory unless you'd rather stay anonymous.
 
 ## Supported versions
 
