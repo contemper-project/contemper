@@ -49,6 +49,13 @@ type Spec struct {
 	// SizeBytes is the volume's size in bytes, or 0 if none is known
 	// yet (deploy must supply one before this volume can be used).
 	SizeBytes int64
+	// Seed is false when an explicit io.contemper.volume.<path>.seed
+	// label opts this volume out of being seeded from the image's own
+	// content the first time its disk is formatted (see
+	// docs/guide/volumes.md); true, the default, leaves the guest
+	// helper free to seed it when the image actually has content at
+	// Path.
+	Seed bool
 }
 
 // sizeLabelKey and nameLabelKey compute the two labels that customize one
@@ -59,13 +66,23 @@ type Spec struct {
 func sizeLabelKey(path string) string { return "io.contemper.volume." + path + ".size" }
 func nameLabelKey(path string) string { return "io.contemper.volume." + path + ".name" }
 
+// seedLabelKey computes the per-volume seed opt-out label: setting
+// io.contemper.volume.<path>.seed="false" skips copying the image's own
+// content onto that volume's disk the first time it is formatted (see
+// docs/guide/volumes.md). Any value other than "true" or "false" is a
+// convert error, the same as the other volume labels.
+func seedLabelKey(path string) string { return "io.contemper.volume." + path + ".seed" }
+
 // FromConfig resolves paths (an image's declared VOLUME instructions, in
 // any order) against labels (the image's config labels) into a sorted-by-
 // path list of Specs. Each volume's name is either taken from its
 // explicit io.contemper.volume.<path>.name label (validated with
 // ValidateName) or derived from its path (DeriveName); its size, if any,
-// comes from io.contemper.volume.<path>.size. Two volumes that resolve to
-// the same name fail, naming both paths and the name.
+// comes from io.contemper.volume.<path>.size; its Seed is false only when
+// io.contemper.volume.<path>.seed is exactly "false" ("true", the
+// default, and any other value are handled the same way: true, or a
+// convert error for anything but those two strings). Two volumes that
+// resolve to the same name fail, naming both paths and the name.
 func FromConfig(paths []string, labels map[string]string) ([]Spec, error) {
 	sorted := append([]string(nil), paths...)
 	sort.Strings(sorted)
@@ -95,7 +112,19 @@ func FromConfig(paths []string, labels map[string]string) ([]Spec, error) {
 			}
 		}
 
-		specs = append(specs, Spec{Path: p, Name: name, SizeBytes: size})
+		seed := true
+		if raw, ok := labels[seedLabelKey(p)]; ok {
+			switch strings.TrimSpace(raw) {
+			case "true":
+				seed = true
+			case "false":
+				seed = false
+			default:
+				return nil, fmt.Errorf("label %s: invalid value %q, want \"true\" or \"false\"", seedLabelKey(p), raw)
+			}
+		}
+
+		specs = append(specs, Spec{Path: p, Name: name, SizeBytes: size, Seed: seed})
 		byName[name] = append(byName[name], p)
 	}
 

@@ -335,6 +335,33 @@ func (r *Rootfs) resolvePath(target string, hops *int) (string, error) {
 	return r.resolvePath(normalizePath(linkTarget), hops)
 }
 
+// DirHasContent reports whether the merged rootfs has anything at dir
+// (resolved first, so a symlinked mount point is handled the same as a
+// real directory) besides the directory entry itself: at least one other
+// indexed path nested under it, at any depth. A dir that doesn't exist,
+// or doesn't resolve to a directory, or resolves to an empty one, all
+// report false. It exists for `convert` to tell whether a declared
+// volume's path has image content the guest helper will seed onto that
+// volume's disk the first time it formats it (see
+// docs/guide/volumes.md) - without ever extracting that content to the
+// host.
+func (r *Rootfs) DirHasContent(dir string) bool {
+	e, err := r.Resolve(dir)
+	if err != nil || e.Header.Typeflag != tar.TypeDir {
+		return false
+	}
+	prefix := e.Path
+	if !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
+	for p := range r.Index {
+		if p != e.Path && strings.HasPrefix(p, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // ReadFile returns the content of the regular file at p, resolving
 // symlinks first. It reads directly from the backing tar file by offset;
 // image content is never written to the host filesystem under its

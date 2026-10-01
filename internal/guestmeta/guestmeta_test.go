@@ -105,6 +105,20 @@ func TestRenderVolumes(t *testing.T) {
 	}
 }
 
+func TestRenderNoSeed(t *testing.T) {
+	out := string(guestmeta.RenderNoSeed([]string{"data", "logs"}))
+	want := "data\nlogs\n"
+	if out != want {
+		t.Errorf("RenderNoSeed = %q, want %q", out, want)
+	}
+}
+
+func TestRenderNoSeedEmpty(t *testing.T) {
+	if out := guestmeta.RenderNoSeed(nil); len(out) != 0 {
+		t.Errorf("RenderNoSeed(nil) = %q, want empty", out)
+	}
+}
+
 func TestFstabLine(t *testing.T) {
 	got := guestmeta.FstabLine("data", "/data")
 	want := "LABEL=data /data ext4 defaults,nofail 0 2"
