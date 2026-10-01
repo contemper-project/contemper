@@ -1,5 +1,5 @@
 [Unit]
-Description=contemper e2e: check the /data volume
+Description=contemper e2e: check the /data and /data-noseed volumes
 # The systemd counterpart of zzz-contemper-volume-test.start. It runs
 # once boot has finished, like examples/debian's boot marker: ordered
 # after multi-user.target explicitly, which also keeps the target from
