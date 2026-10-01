@@ -10,19 +10,31 @@
 #     as-is (this is what lets a new image version run on the data a
 #     previous version left behind);
 #   - a disk whose first and last MiB are all zero is BLANK and gets
-#     formatted (mkfs.ext4, labelled with the volume's name);
+#     formatted (mkfs.ext4, labelled with the volume's name) and then,
+#     unless the volume opted out (see NOSEED_FILE below), SEEDED: if the
+#     image itself has content at the volume's mount point, that content
+#     is copied onto the freshly formatted disk before it is ever
+#     mounted there, the same way Docker seeds a new named volume from
+#     the image - without seeding, that content would simply be hidden
+#     under the empty mount once fstab mounts the volume over it;
 #   - anything else is LEFT ALONE and logged as a mismatch, so the
 #     failure mode is an unformatted, unmounted volume, never lost data.
 #
 # Mounting itself is left to the ordinary fstab-driven mount step (the
 # LABEL=<name> lines contemper appends to /etc/fstab): this script only
-# makes sure the filesystem those lines expect is present and correctly
-# labelled before that mount step runs.
+# makes sure the filesystem those lines expect is present, correctly
+# labelled, and (for a newly formatted volume) seeded before that mount
+# step runs - while the image's own content at the mount point is still
+# what's there to see, since nothing has been mounted over it yet.
 #
-# POSIX sh, and meant to be shellcheck-clean. /etc/contemper/volumes is
-# read line by line with `read`, never sourced. Never fails the boot:
-# every problem is logged (to the console, and to syslog if a logger is
-# available) and skipped, and the script always exits 0.
+# POSIX sh, and meant to be shellcheck-clean. /etc/contemper/volumes, and
+# the optional /etc/contemper/volumes-noseed (NOSEED_FILE: one opted-out
+# volume *name* per line, missing entirely when nothing opts out), are
+# both read line by line with `read`, never sourced. Never fails the
+# boot: every problem is logged (to the console, and to syslog if a
+# logger is available) and skipped, and the script always exits 0 -
+# seeding included, so a seeding failure leaves the volume formatted and
+# empty rather than stopping the machine from booting.
 #
 # Identical across every image; only the per-init-system integration
 # that calls it (an OpenRC init script, a systemd unit) differs, and that
@@ -30,6 +42,7 @@
 set -u
 
 VOLUMES_FILE=/etc/contemper/volumes
+NOSEED_FILE=/etc/contemper/volumes-noseed
 PROG=contemper-volumes
 
 log() {
@@ -173,6 +186,123 @@ reprobe_disk() {
 	return 0
 }
 
+# noseed_contains reports whether $NOSEED_FILE lists volume name $1,
+# opting it out of seed_volume below. A missing NOSEED_FILE means
+# nothing is opted out (convert only ever writes it when at least one
+# volume is); an existing but empty one means the same thing, since an
+# empty file obviously lists no names either way - convert never writes
+# one of those in the first place, but a hand-edited image could, and
+# this treats it exactly like a missing file rather than as an error.
+noseed_contains() {
+	name=$1
+	[ -f "$NOSEED_FILE" ] || return 1
+	# "|| [ -n ... ]" still checks a last line with no trailing newline.
+	while IFS= read -r line || [ -n "$line" ]; do
+		[ "$line" = "$name" ] && return 0
+	done <"$NOSEED_FILE"
+	return 1
+}
+
+# seed_volume prepares device $1, just formatted blank and labelled $3,
+# from the image's own directory at mount point $2, before fstab mounts
+# the (otherwise empty) volume over it: it copies that directory's
+# content onto the new filesystem, and gives the filesystem's root
+# directory the directory's own owner and mode - the latter even when
+# the directory is empty, so an image that only prepares an empty,
+# non-root-owned mount point still hands its service a volume it can
+# write to. It is called once, right after a successful mkfs.ext4, and
+# only when the volume isn't listed in $NOSEED_FILE. If $2 doesn't exist
+# (or isn't a directory) there is nothing to take over and this does
+# nothing.
+#
+# The device can't simply be mounted at $2 itself to copy in place: $2
+# is a path in the *root* filesystem, which at this point in boot is
+# commonly still read-only, and is in any case not where the new
+# filesystem lives yet. Instead this mounts $1 at a fresh directory
+# under /run (a writable tmpfs on every image this helper targets) just
+# long enough to copy into it, then unmounts and removes it again; $2
+# itself is never written to. $2 is always read through "$2/.", so a
+# mount point that is a symlink to a directory is handled like that
+# directory (the same directory fstab's mount will end up on).
+#
+# cp -a is what both busybox and GNU coreutils provide for "copy
+# everything, preserving as much as possible" (mode, ownership,
+# timestamps, symlinks and special files; GNU cp also carries xattrs
+# where it can, busybox doesn't). "$2/." as the source copies the
+# directory's *content*, dotfiles included, into the destination
+# directory rather than creating a subdirectory there. The copy does not
+# stop at mount points below $2, but nothing is mounted there yet at
+# this point in boot. The root directory's owner and mode are applied
+# separately afterwards with `stat -c`, when one is on PATH (optional:
+# without it the root directory keeps mkfs.ext4's root-owned 0755).
+#
+# Never fails the boot: every problem - no /run, a mount failure, a copy
+# that fails part-way (no space left on the volume, say) - is logged,
+# and the already-formatted, already-labelled volume is left as it is
+# for fstab to mount: empty, or holding whatever was copied before the
+# failure. A seeded volume is never seeded again (a later boot finds it
+# labelled and reuses it), so a failed copy is not retried. Exactly one
+# log line reports each volume's outcome.
+seed_volume() {
+	dev=$1
+	mnt=$2
+	name=$3
+
+	[ -d "$mnt" ] || return 0
+
+	has_content=0
+	for entry in "$mnt"/* "$mnt"/.[!.]* "$mnt"/..?*; do
+		if [ -e "$entry" ] || [ -L "$entry" ]; then
+			has_content=1
+			break
+		fi
+	done
+
+	if ! tmp=$(mktemp -d /run/contemper-volume-seed.XXXXXX 2>&1) || [ ! -d "$tmp" ]; then
+		log "volume $name: could not create a temporary mount point under /run to seed $dev from $mnt, leaving it empty: $tmp"
+		return 0
+	fi
+
+	if ! mount_out=$(mount -t ext4 "$dev" "$tmp" 2>&1); then
+		log "volume $name: could not mount $dev at $tmp to seed it from $mnt, leaving it empty: $mount_out"
+		rmdir "$tmp" 2>/dev/null || true
+		return 0
+	fi
+
+	copy_ok=1
+	copy_out=
+	if [ "$has_content" -eq 1 ] && ! copy_out=$(cp -a "$mnt"/. "$tmp"/ 2>&1); then
+		copy_ok=0
+	fi
+
+	# chown before chmod: chown may clear set-id bits, chmod then sets
+	# exactly the mode the image's directory has.
+	if command -v stat >/dev/null 2>&1 && attrs=$(stat -c '%u %g %a' "$mnt"/. 2>/dev/null); then
+		uid=${attrs%% *}
+		attr_rest=${attrs#* }
+		gid=${attr_rest%% *}
+		mode=${attr_rest#* }
+		chown "$uid:$gid" "$tmp" 2>/dev/null || true
+		chmod "$mode" "$tmp" 2>/dev/null || true
+	fi
+
+	umount_note=
+	if umount_out=$(umount "$tmp" 2>&1); then
+		rmdir "$tmp" 2>/dev/null || true
+	else
+		umount_note=" (could not unmount $tmp afterwards: $umount_out)"
+	fi
+
+	if [ "$copy_ok" -eq 0 ]; then
+		log "volume $name: seeding $dev from $mnt failed part-way, the volume keeps whatever was copied: $copy_out$umount_note"
+	elif [ "$has_content" -eq 1 ]; then
+		log "volume $name: seeded $dev from $mnt$umount_note"
+	else
+		log "volume $name: $mnt is empty in the image, nothing to seed onto $dev beyond its owner and mode$umount_note"
+	fi
+	return 0
+}
+
 if [ ! -f "$VOLUMES_FILE" ]; then
 	exit 0
 fi
@@ -215,6 +345,11 @@ while IFS=' ' read -r vol_name vol_serial vol_fs vol_mount; do
 		if mkfs_out=$(mkfs.ext4 -F -L "$vol_name" "$dev" 2>&1); then
 			log "volume $vol_name: $dev was blank, formatted ext4 (label $vol_name) for $vol_mount"
 			reprobe_disk "$dev" "$vol_name"
+			if noseed_contains "$vol_name"; then
+				log "volume $vol_name: seed opted out, $vol_mount starts empty on $dev"
+			else
+				seed_volume "$dev" "$vol_mount" "$vol_name"
+			fi
 		else
 			log "volume $vol_name: $dev was blank but mkfs.ext4 failed for $vol_mount: $mkfs_out"
 		fi
