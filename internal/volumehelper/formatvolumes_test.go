@@ -325,6 +325,94 @@ func TestReprobeDiskNoUdevadmIsNoop(t *testing.T) {
 	}
 }
 
+// runNoseedContains runs the real noseed_contains() function against a
+// $NOSEED_FILE at noseedPath (which need not exist, for the "missing
+// file" case) and name, and reports whether it returned true (opted
+// out).
+func runNoseedContains(t *testing.T, noseedPath, name string) bool {
+	t.Helper()
+	dir := t.TempDir()
+	runner := filepath.Join(dir, "runner.sh")
+	script := "NOSEED_FILE=\"$1\"\n" +
+		extractFunction(t, "noseed_contains") + "\n" +
+		"noseed_contains \"$2\"\n"
+	if err := os.WriteFile(runner, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing runner script: %v", err)
+	}
+	err := exec.CommandContext(context.Background(), "sh", runner, noseedPath, name).Run()
+	return err == nil
+}
+
+// TestNoseedContains exercises format-volumes' noseed_contains()
+// function - the runtime counterpart of convert's
+// /etc/contemper/volumes-noseed opt-out file (see
+// internal/volume.Spec.Seed and guestmeta.RenderNoSeed) - against a
+// missing file, an empty one, and one listing one or more volume names.
+func TestNoseedContains(t *testing.T) {
+	dir := t.TempDir()
+
+	missing := filepath.Join(dir, "does-not-exist")
+	if runNoseedContains(t, missing, "data") {
+		t.Errorf("a missing NOSEED_FILE must mean nothing is opted out")
+	}
+
+	empty := filepath.Join(dir, "empty")
+	if err := os.WriteFile(empty, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if runNoseedContains(t, empty, "data") {
+		t.Errorf("an empty NOSEED_FILE must mean nothing is opted out")
+	}
+
+	listed := filepath.Join(dir, "listed")
+	if err := os.WriteFile(listed, []byte("logs\ncache\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !runNoseedContains(t, listed, "logs") {
+		t.Errorf("noseed_contains(logs): want true, a listed name")
+	}
+	if !runNoseedContains(t, listed, "cache") {
+		t.Errorf("noseed_contains(cache): want true, a listed name")
+	}
+	if runNoseedContains(t, listed, "data") {
+		t.Errorf("noseed_contains(data): want false, not a listed name")
+	}
+
+	unterminated := filepath.Join(dir, "unterminated")
+	if err := os.WriteFile(unterminated, []byte("logs\ncache"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !runNoseedContains(t, unterminated, "cache") {
+		t.Errorf("noseed_contains(cache): want true for a last line without a trailing newline")
+	}
+}
+
+// TestSeedVolumeCallSiteOnlyOnBlankFormat statically checks
+// format-volumes' main loop: seed_volume must be called exactly once,
+// right after a successful mkfs.ext4 (and its reprobe_disk), gated on
+// noseed_contains, and never on the REUSE path - a reused volume's
+// existing content must never be touched.
+func TestSeedVolumeCallSiteOnlyOnBlankFormat(t *testing.T) {
+	src, err := os.ReadFile(formatVolumesScript)
+	if err != nil {
+		t.Fatalf("reading %s: %v", formatVolumesScript, err)
+	}
+	text := string(src)
+
+	calls := regexp.MustCompile(`(?m)^\s*seed_volume `).FindAllString(text, -1)
+	if len(calls) != 1 {
+		t.Fatalf("expected exactly one seed_volume call site in the main loop, found %d: %v", len(calls), calls)
+	}
+
+	reuseBlock := regexp.MustCompile(`(?s)already ext4 labelled.*?\n[ \t]*fi\n`).FindString(text)
+	if reuseBlock == "" {
+		t.Fatal("could not locate the REUSE branch to check")
+	}
+	if strings.Contains(reuseBlock, "seed_volume") {
+		t.Errorf("seed_volume must not be called on the reuse path:\n%s", reuseBlock)
+	}
+}
+
 // TestReprobeDiskOnlyCalledAfterFormatting statically checks
 // format-volumes' main loop: reprobe_disk must be called exactly once,
 // right after a successful mkfs.ext4, and never on the REUSE path (an
