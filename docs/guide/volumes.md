@@ -88,7 +88,9 @@ every boot, by one rule:
   unmounted and untouched — this is what lets a new image version keep
   running on the data an earlier version left behind;
 - a disk whose first and last MiB are all zero is **blank**, and gets
-  formatted and labelled;
+  formatted, labelled, and — see [Seeding a volume from the
+  image](#seeding-a-volume-from-the-image) below — seeded from the
+  image's own content at that path, if it has any;
 - anything else is **left alone** and logged as a mismatch, so the
   failure mode is always an unformatted, unmounted volume — never lost
   data.
@@ -222,6 +224,74 @@ next to any `--support` image, in their own `volumeHelper` field in
 `/etc/contemper/build` — ref, digest, and the resolved variant, so a
 disk's exact provenance (support image and volume helper alike) is
 always readable from the bundle or the guest itself.
+
+## Seeding a volume from the image
+
+A volume's mount point doesn't have to start out empty in the image: if
+you `COPY` or otherwise write files to `/data` before (or after)
+declaring `VOLUME /data`, that content stays part of the image like any
+other file. Without seeding, mounting a blank volume there on first boot
+would simply hide it — the same surprise Docker's bind mounts would give
+you, which is exactly why Docker seeds a *named* volume from the image
+the first time it's used instead. contemper does the same: the first
+time a volume's disk is **blank** (see [How the volume helper
+works](#how-the-volume-helper-works) above), right after formatting it
+and before it is mounted, the volume helper copies whatever the image
+has at that mount point onto the new filesystem with `cp -a`, preserving
+ownership, permissions, timestamps, symlinks and special files (and, on
+images with GNU coreutils, extended attributes). The volume's root
+directory also takes over the owner and mode of the image's directory,
+even when that directory is empty, so an image that only prepares an
+empty mount point owned by its service user gets a volume that user can
+write to. A **reused** volume — one already carrying the right label —
+is never touched by this, or by anything else: whatever changes a
+running appliance made to it stay exactly as they are across every
+later redeploy or image update, seeded content included.
+
+If seeding fails (a mount error, or a copy that runs out of space on the
+volume), the helper logs it and boot carries on: the volume stays
+formatted and mounts with whatever was copied before the failure. It is
+not retried on a later boot, since by then the disk carries its label
+and counts as reused.
+
+A volume nested under another one (`/data` and `/data/cache`) works the
+same way: the outer volume is seeded with the inner one's mount point
+(and, as in Docker, whatever the image has below it, which the inner
+volume then hides), so the inner volume has a directory to mount on.
+
+Opt a volume out of seeding with its own label, the same
+`io.contemper.volume.<path>.*` scheme every other per-volume setting
+uses:
+
+```dockerfile
+LABEL io.contemper.volume./data.seed="false"
+```
+
+An opted-out volume still gets formatted and mounted exactly as before;
+it just starts empty, with mkfs.ext4's root-owned root directory, even
+when the image has content at that path. Opting out the outer one of two
+nested volumes also leaves out the inner one's mount point, which then
+has to be created some other way before the inner volume can mount.
+`convert` records every opted-out volume's name (not its path) in
+`/etc/contemper/volumes-noseed`, one per line — written only when at
+least one volume actually opts out, so a missing file means "seed
+everything" to the volume helper, the same as an image converted before
+this existed. `convert` also reports, on stderr, what it worked out for
+each declared volume — seeded, opted out, or nothing there to seed in
+the first place:
+
+```console
+    ✔ /data → data                                10.0 GiB
+      └ seed: image has content at /data, copied onto the volume on first format
+```
+
+Seeding only ever happens once, the first time a volume's disk is
+formatted — it is not a sync: an image update that adds or changes files
+at the volume's path has no effect on a volume contemper has already
+formatted and (optionally) seeded, the same way any other change to a
+reused volume's expected content doesn't. Convert still reports what a
+*fresh* volume would get seeded with, since that's the only time it
+matters.
 
 ## Deploying locally
 
