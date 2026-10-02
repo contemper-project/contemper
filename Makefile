@@ -19,7 +19,7 @@ GOLANGCI_LINT_VERSION := $(shell cat .golangci-lint-version)
 GOLANGCI_LINT_DIR     := bin/golangci-lint-$(GOLANGCI_LINT_VERSION)
 GOLANGCI_LINT         := $(GOLANGCI_LINT_DIR)/golangci-lint
 
-.PHONY: build test vet lint stubs example e2e e2e-variants e2e-volumes clean
+.PHONY: build test vet lint actionlint stubs example e2e e2e-variants e2e-volumes clean
 
 build:
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/contemper
@@ -36,6 +36,10 @@ $(GOLANGCI_LINT):
 
 lint: $(GOLANGCI_LINT)
 	$(GOLANGCI_LINT) run ./...
+	$(GO) tool actionlint
+
+actionlint:
+	$(GO) tool actionlint
 
 stubs:
 	./hack/fetch-stubs.sh
