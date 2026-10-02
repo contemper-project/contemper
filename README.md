@@ -124,4 +124,6 @@ and UEFI firmware. See [host tools](docs/reference/host-tools.md).
 ## License
 
 Apache License 2.0, see [LICENSE](LICENSE). The embedded systemd-stub
-binaries are LGPL-2.1-or-later; see [NOTICE](NOTICE).
+binaries are LGPL-2.1-or-later; see [NOTICE](NOTICE) and
+[internal/uki/stubs/README.md](internal/uki/stubs/README.md) for where
+they come from and how to verify them.
