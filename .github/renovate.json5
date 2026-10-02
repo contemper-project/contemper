@@ -2,9 +2,10 @@
 //
 // Replaces dependabot.yml's version-update entries (gomod, github-actions,
 // uv) and additionally covers the version pins Dependabot can't see: the
-// GoReleaser and golangci-lint action inputs, the `go` directive in
-// go.mod, the example/test container base images, the local end-to-end
-// test registry image, and the embedded systemd-boot-efi stub version.
+// GoReleaser version, the pinned golangci-lint version (.golangci-lint-version),
+// the `go` directive in go.mod, the example/test container base images,
+// the local end-to-end test registry image, and the embedded
+// systemd-boot-efi stub version.
 // Dependabot's security alerts stay on separately (a repository setting,
 // not config here).
 //
@@ -178,9 +179,12 @@
       datasourceTemplate: 'github-releases',
     },
     {
+      // The pin both `make lint` and ci.yml's golangci-lint-action step
+      // read (the action's `version-file` input), so a bump only has to
+      // land in this one file.
       customType: 'regex',
-      managerFilePatterns: ['/^\\.github/workflows/ci\\.yml$/'],
-      matchStrings: ['version:\\s*(?<currentValue>v\\d+\\.\\d+\\.\\d+)\\n'],
+      managerFilePatterns: ['/^\\.golangci-lint-version$/'],
+      matchStrings: ['(?<currentValue>v\\d+\\.\\d+\\.\\d+)'],
       depNameTemplate: 'golangci/golangci-lint',
       datasourceTemplate: 'github-releases',
     },
