@@ -23,15 +23,18 @@ go test -coverprofile=coverage.out -covermode=atomic ./...
 go tool cover -html=coverage.out
 ```
 
-Run the linter with [golangci-lint](https://golangci-lint.run/) (see
-`.golangci.yml` for the enabled linters and formatters) before opening a
-PR - CI runs the same check:
+Run the linter before opening a PR:
 
 ```sh
-golangci-lint run ./...
+make lint
 ```
 
-`make lint` does the same.
+This downloads the [golangci-lint](https://golangci-lint.run/) version
+pinned in `.golangci-lint-version` (the same one CI uses) into `bin/` on
+first run, then runs it with the linters and formatters configured in
+`.golangci.yml`, plus [actionlint](https://github.com/rhysd/actionlint)
+on the workflow files under `.github/workflows/`. `make actionlint` runs
+just the latter.
 
 ### Boot tests
 
