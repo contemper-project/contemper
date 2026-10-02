@@ -51,7 +51,9 @@ filesystem isn't).
 The boot image is a Unified Kernel Image (UKI), assembled in Go: an
 embedded systemd-stub with the OS release, command line, initrd and
 kernel appended as PE sections. A gzip-compressed kernel is decompressed
-first.
+first. See
+[internal/uki/stubs/README.md](https://github.com/contemper-project/contemper/blob/main/internal/uki/stubs/README.md)
+for where the embedded stub comes from and how to verify it.
 
 ## Progress output
 
