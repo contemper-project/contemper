@@ -2,6 +2,16 @@
 
 Thanks for considering a contribution to contemper.
 
+## Reporting bugs and requesting features
+
+Use the [issue tracker](https://github.com/contemper-project/contemper/issues)
+for bug reports and feature requests - search for an existing issue
+first. For a bug, include contemper's version, your OS and
+architecture, and enough of the image or command line to reproduce the
+problem. Security vulnerabilities are the one exception: report those
+privately, following [SECURITY.md](SECURITY.md), never as a public
+issue.
+
 ## Building and testing
 
 You need the Go version in `go.mod`, plus the host tools contemper
@@ -32,6 +42,12 @@ golangci-lint run ./...
 ```
 
 `make lint` does the same.
+
+When you add or change functionality, add tests for it in the same
+change: unit tests in the relevant package, or a boot test under
+`hack/e2e*.sh` when the change touches disk, boot, or support-image
+behavior (see Boot tests below). Reviewers expect new functionality to
+arrive with coverage, not as a follow-up.
 
 ### Boot tests
 
