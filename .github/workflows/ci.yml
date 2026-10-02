@@ -24,10 +24,11 @@ jobs:
     # Filter groups (add new directories to whichever applies):
     #   go: anything that can affect building, testing, linting, or
     #       booting the CLI - Go sources and modules, the Makefile, the
-    #       goreleaser config, the hack/ scripts and helper images the
-    #       e2e jobs build and run, the example images they boot, the
-    #       support images the volumes e2e job installs, the embedded
-    #       systemd-stub checksums, and this workflow file itself.
+    #       goreleaser config, the pinned golangci-lint version, the
+    #       hack/ scripts and helper images the e2e jobs build and run,
+    #       the example images they boot, the support images the volumes
+    #       e2e job installs, the embedded systemd-stub checksums, and
+    #       this workflow file itself.
     #
     # Pushes to main and manual runs always report "go" as changed:
     # running the full pipeline there is cheap enough (it already does,
@@ -48,6 +49,7 @@ jobs:
               - Makefile
               - '.goreleaser.y*ml'
               - '.golangci.y*ml'
+              - '.golangci-lint-version'
               - 'hack/**'
               - 'examples/**'
               - 'support/**'
@@ -68,9 +70,11 @@ jobs:
       # formatting diffs rather than applying them) against the whole
       # module. This also covers go vet: golangci-lint's govet linter is
       # part of the enabled default set and runs the same analysis.
+      # version-file reads the pinned version from .golangci-lint-version,
+      # the same file `make lint` reads, so the two can't drift.
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: v2.14.0
+          version-file: .golangci-lint-version
       - name: Verify embedded systemd-stub checksums
         working-directory: internal/uki/stubs
         run: sha256sum -c SHA256SUMS
