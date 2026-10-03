@@ -128,6 +128,33 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 	// A single architecture reports exactly as it always has; several
 	// get a section header each and their own elapsed time.
 	multi := len(platforms) > 1
+	// Drop a group file left by an earlier run as soon as the bundle name
+	// (and so the group file's name) is known, so a failure part-way
+	// can't leave one describing bundles that have since changed. Every
+	// run does this, a single-architecture one too: its bundle replaces
+	// one of the group's. A failure before the first image is loaded
+	// (an unreadable source, a missing architecture) leaves it alone.
+	var groupName string
+	onNamed := func(name string) error {
+		if groupName != "" {
+			// A later architecture of a group run.
+			if name != groupName {
+				return fmt.Errorf("the architectures resolve to different bundle names (%s and %s), so one group file can't describe them", groupName, name)
+			}
+			return nil
+		}
+		groupName = name
+		path := filepath.Join(opts.outDir, bundle.GroupFileName(name))
+		if _, err := os.Stat(path); err != nil {
+			return nil
+		}
+		if err := bundle.RemoveGroup(opts.outDir, name); err != nil {
+			return err
+		}
+		rep.Sub("✔", "removed stale group file", filepath.Base(path))
+		return nil
+	}
+	var converted []convertedBundle
 	for i, platform := range platforms {
 		var priorElapsed time.Duration
 		if multi {
@@ -138,50 +165,82 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 			rep.Line("🔨", "architecture "+platform.Architecture, fmt.Sprintf("%d of %d", i+1, len(platforms)))
 			rep.Blank()
 		}
-		bundleDir, err := convertPlatform(ctx, rep, opts, ref, platform, canonicalTarget, asm, rootSizeBytes, priorElapsed)
+		res, err := convertPlatform(ctx, rep, opts, ref, platform, canonicalTarget, asm, rootSizeBytes, priorElapsed, onNamed)
 		if err != nil {
 			if multi {
 				return fmt.Errorf("converting linux/%s: %w", platform.Architecture, err)
 			}
 			return err
 		}
-		_, _ = fmt.Fprintln(cmd.OutOrStdout(), bundleDir)
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.dir)
+		converted = append(converted, res)
+	}
+
+	if sel.Group {
+		group := &bundle.Group{
+			FormatVersion: bundle.GroupFormatVersion,
+			Source:        bundle.ImageRef{Ref: converted[0].source.Ref, Repo: converted[0].source.Repo},
+		}
+		for _, res := range converted {
+			group.Bundles = append(group.Bundles, bundle.GroupBundle{Arch: res.arch, Path: filepath.Base(res.dir)})
+		}
+		groupPath, err := bundle.WriteGroup(opts.outDir, converted[0].name, group)
+		if err != nil {
+			return err
+		}
+		rep.Blank()
+		rep.Line("📚", filepath.Base(groupPath), fmt.Sprintf("%d %s", len(converted), pluralize(len(converted), "bundle")))
 	}
 	return nil
 }
 
+// convertedBundle describes one finished bundle of a conversion run.
+type convertedBundle struct {
+	// dir is the bundle directory (inside --out).
+	dir string
+	// name is the bundle's name without its ".<machine-arch>" suffix,
+	// which names the group file of a multi-architecture run.
+	name   string
+	arch   string
+	source bundle.ImageRef
+}
+
 // convertPlatform converts ref's image for one platform into a bundle
-// and returns the bundle's directory. It is a complete, independent
+// and describes the bundle it wrote. It is a complete, independent
 // conversion: the same support-image and volume-helper resolution,
 // validation, bundle naming and manifest a single-architecture run
 // produces. priorElapsed is subtracted from the reporter's clock for the
 // "bundle ready" timing, so each architecture of a multi-arch run
-// reports its own.
-func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOptions, ref source.Ref, platform v1.Platform, canonicalTarget string, asm target.Assembler, rootSizeBytes int64, priorElapsed time.Duration) (string, error) {
+// reports its own. onNamed is called with the bundle's name
+// (see convertedBundle.name) once the source is loaded.
+func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOptions, ref source.Ref, platform v1.Platform, canonicalTarget string, asm target.Assembler, rootSizeBytes int64, priorElapsed time.Duration, onNamed func(name string) error) (convertedBundle, error) {
 	img, err := source.Load(ctx, ref, platform)
 	if err != nil {
 		rep.Fail("resolve source", err.Error(), "")
-		return "", err
+		return convertedBundle{}, err
 	}
 	defer img.Close()
 
 	rep.Line("📦", opts.sourceRef, platform.String())
+	if err := onNamed(fmt.Sprintf("%s-%s", img.RepoBase, img.Tag)); err != nil {
+		return convertedBundle{}, err
+	}
 
 	cfg, err := img.Image.ConfigFile()
 	if err != nil {
 		rep.Fail("readiness check", err.Error(), "")
-		return "", fmt.Errorf("reading image config: %w", err)
+		return convertedBundle{}, fmt.Errorf("reading image config: %w", err)
 	}
 	if err := source.CheckReady(cfg); err != nil {
 		rep.Fail("readiness check", err.Error(), "")
-		return "", err
+		return convertedBundle{}, err
 	}
 	rep.Line("✅", "contemper-ready", "")
 
 	bootMode, err := source.BootMode(cfg)
 	if err != nil {
 		rep.Fail("boot mode", err.Error(), "")
-		return "", err
+		return convertedBundle{}, err
 	}
 	if bootMode == source.BootBootloader {
 		rep.Line("✅", "boot mode", "bootloader")
@@ -190,14 +249,14 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 	specs, err := volume.FromConfig(bundle.SortedKeys(cfg.Config.Volumes), cfg.Config.Labels)
 	if err != nil {
 		rep.Fail("volumes", err.Error(), "")
-		return "", err
+		return convertedBundle{}, err
 	}
 	if bootMode == source.BootBootloader {
 		for _, sp := range specs {
 			if coversESPMountPoint(sp.Path) {
 				err := fmt.Errorf("volume %s covers the ESP mount point %s: a volume there would hide or double-mount the ESP", sp.Path, guestmeta.ESPMountPoint)
 				rep.Fail("volumes", err.Error(), "in bootloader mode contemper mounts the ESP at "+guestmeta.ESPMountPoint+"; declare the volume at a path that is not "+guestmeta.ESPMountPoint+" or one of its parents")
-				return "", err
+				return convertedBundle{}, err
 			}
 		}
 	}
@@ -205,7 +264,7 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 		rootSizeBytes, err = volume.RootSize(cfg.Config.Labels)
 		if err != nil {
 			rep.Fail("volumes", err.Error(), "")
-			return "", err
+			return convertedBundle{}, err
 		}
 	}
 
@@ -231,35 +290,35 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 	if resolvedSupportRef != "" {
 		supportRef, err := source.ParseRef(resolvedSupportRef)
 		if err != nil {
-			return "", err
+			return convertedBundle{}, err
 		}
 		supportRefStr = supportRef.String()
 		supportRefForBuild = redactedRefString(supportRef)
 		supportImg, err = source.Load(ctx, supportRef, platform)
 		if err != nil {
 			rep.Fail("support image", err.Error(), "")
-			return "", fmt.Errorf("loading support image: %w", err)
+			return convertedBundle{}, fmt.Errorf("loading support image: %w", err)
 		}
 		defer supportImg.Close()
 		overlays = append(overlays, supportImg.Image)
 
 		supportManifest, err := supportImg.Image.Manifest()
 		if err != nil {
-			return "", fmt.Errorf("reading support image manifest: %w", err)
+			return convertedBundle{}, fmt.Errorf("reading support image manifest: %w", err)
 		}
 		indexAnnotations, err := source.IndexAnnotations(ctx, supportRef, platform)
 		if err != nil {
-			return "", fmt.Errorf("reading support image index: %w", err)
+			return convertedBundle{}, fmt.Errorf("reading support image index: %w", err)
 		}
 		schema, err = support.Parse(support.MergeAnnotations(indexAnnotations, supportManifest.Annotations))
 		if err != nil {
 			rep.Fail("support image", err.Error(), "")
-			return "", err
+			return convertedBundle{}, err
 		}
 
 		supportLayers, err := supportImg.Image.Layers()
 		if err != nil {
-			return "", fmt.Errorf("reading support image layers: %w", err)
+			return convertedBundle{}, fmt.Errorf("reading support image layers: %w", err)
 		}
 		originLabel := "target default"
 		if supportOrigin == target.SupportFromFlag {
@@ -272,7 +331,7 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 			vr, err := resolveVariants(ctx, schema, supportRef, img, platform, rep)
 			if err != nil {
 				rep.Fail("support image", err.Error(), "")
-				return "", err
+				return convertedBundle{}, err
 			}
 			defer func() { _ = os.RemoveAll(vr.cacheDir) }()
 			for _, vi := range vr.images {
@@ -300,7 +359,7 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 		hr, err := mergeVolumeHelper(ctx, helperRef, img, platform, rep)
 		if err != nil {
 			rep.Fail("volume helper", err.Error(), "")
-			return "", err
+			return convertedBundle{}, err
 		}
 		helperResult = hr
 		defer helperResult.Img.Close()
@@ -324,7 +383,7 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 
 	sourceLayers, err := img.Image.Layers()
 	if err != nil {
-		return "", fmt.Errorf("reading source image layers: %w", err)
+		return convertedBundle{}, fmt.Errorf("reading source image layers: %w", err)
 	}
 	mergeLabel := fmt.Sprintf("merging %d %s", len(sourceLayers), pluralize(len(sourceLayers), "layer"))
 	if len(overlays) > 0 {
@@ -340,7 +399,7 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 	rfs, err := rootfs.Build(ctx, baseImg, overlays...)
 	if err != nil {
 		mergeStage.Fail("merge", err.Error(), "")
-		return "", err
+		return convertedBundle{}, err
 	}
 	defer func() { _ = rfs.Close() }()
 	mergeStage.Done("🧬", mergeLabel, "")
@@ -349,13 +408,13 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 	if schema != nil {
 		if err := schema.CheckRequires(rfs); err != nil {
 			rep.Fail("support image", err.Error(), "")
-			return "", err
+			return convertedBundle{}, err
 		}
 	}
 	if helperResult != nil && helperResult.Schema != nil {
 		if err := helperResult.Schema.CheckRequires(rfs); err != nil {
 			rep.Fail("volume helper", err.Error(), "")
-			return "", err
+			return convertedBundle{}, err
 		}
 	}
 
@@ -385,7 +444,7 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 		}
 	}
 	if err := rfs.WriteFile(guestmeta.BuildPath, guestmeta.RenderBuild(buildInfo)); err != nil {
-		return "", fmt.Errorf("writing %s: %w", guestmeta.BuildPath, err)
+		return convertedBundle{}, fmt.Errorf("writing %s: %w", guestmeta.BuildPath, err)
 	}
 
 	fstabOptedOut := opts.noFstab || volume.FstabOptedOut(cfg.Config.Labels)
@@ -400,7 +459,7 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 		// what lets the nested one mount on top of it.
 		for _, s := range specs {
 			if err := rfs.EnsureDir(s.Path); err != nil {
-				return "", fmt.Errorf("creating mount point %s: %w", s.Path, err)
+				return convertedBundle{}, fmt.Errorf("creating mount point %s: %w", s.Path, err)
 			}
 		}
 		for _, s := range specs {
@@ -416,11 +475,11 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 			fstabLines = append(fstabLines, guestmeta.FstabLine(s.Name, s.Path))
 		}
 		if err := rfs.WriteFile(guestmeta.VolumesPath, guestmeta.RenderVolumes(lines)); err != nil {
-			return "", fmt.Errorf("writing %s: %w", guestmeta.VolumesPath, err)
+			return convertedBundle{}, fmt.Errorf("writing %s: %w", guestmeta.VolumesPath, err)
 		}
 		if names := noSeedVolumeNames(specs); len(names) > 0 {
 			if err := rfs.WriteFile(guestmeta.NoSeedPath, guestmeta.RenderNoSeed(names)); err != nil {
-				return "", fmt.Errorf("writing %s: %w", guestmeta.NoSeedPath, err)
+				return convertedBundle{}, fmt.Errorf("writing %s: %w", guestmeta.NoSeedPath, err)
 			}
 		}
 
@@ -440,7 +499,7 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 	if !fstabOptedOut && (bootMode == source.BootBootloader || len(fstabLines) > 0) {
 		existingFstab, err = readFstab(rfs)
 		if err != nil {
-			return "", err
+			return convertedBundle{}, err
 		}
 	}
 	if bootMode == source.BootBootloader {
@@ -464,7 +523,7 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 	if !fstabOptedOut && len(fstabLines) > 0 {
 		if updated, changed := guestmeta.AppendFstab(existingFstab, fstabLines); changed {
 			if err := rfs.WriteFile(guestmeta.FstabPath, updated); err != nil {
-				return "", fmt.Errorf("writing %s: %w", guestmeta.FstabPath, err)
+				return convertedBundle{}, fmt.Errorf("writing %s: %w", guestmeta.FstabPath, err)
 			}
 		}
 	}
@@ -474,7 +533,7 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 		val, err = validate.CheckBootloader(rfs, platform.Architecture, disk.BootloaderESPSizeBytes)
 		if err != nil {
 			rep.Fail("validate", err.Error(), "a bootloader image must provide a bootable EFI tree at "+validate.EFIDir)
-			return "", err
+			return convertedBundle{}, err
 		}
 		reportBootloader(rep, val.Bootloader)
 		reportESPFstab(rep, espFstab)
@@ -483,7 +542,7 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 		val, err = validate.Validate(rfs)
 		if err != nil {
 			rep.Fail("validate", err.Error(), "a contemper-ready image must provide a kernel, initrd, cmdline and init at the fixed paths")
-			return "", err
+			return convertedBundle{}, err
 		}
 		reportFixedPaths(rep, rfs, val)
 		rep.Line("✅", "requirements satisfied", "kernel · initrd · init")
@@ -496,7 +555,7 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 	// population, qcow2 conversion) if --out already names something we
 	// can't safely replace.
 	if err := bundle.CheckDest(outBundleDir); err != nil {
-		return "", err
+		return convertedBundle{}, err
 	}
 
 	// The bundle is assembled in a staging directory next to outBundleDir
@@ -506,7 +565,7 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 	// mixed-version bundle at outBundleDir.
 	stageDir, err := bundle.Stage(outBundleDir)
 	if err != nil {
-		return "", err
+		return convertedBundle{}, err
 	}
 	defer func() { _ = os.RemoveAll(stageDir) }()
 
@@ -516,7 +575,7 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 		Progress:      rep,
 	})
 	if err != nil {
-		return "", err
+		return convertedBundle{}, err
 	}
 	for _, w := range warnings {
 		rep.Warn("warning", w)
@@ -564,11 +623,11 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 	}
 
 	if err := bundle.Write(stageDir, manifest); err != nil {
-		return "", err
+		return convertedBundle{}, err
 	}
 
 	if err := bundle.Commit(stageDir, outBundleDir); err != nil {
-		return "", err
+		return convertedBundle{}, err
 	}
 
 	rep.Blank()
@@ -576,7 +635,12 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 	elapsed := (rep.Elapsed() - priorElapsed).Round(100 * time.Millisecond)
 	rep.Finish("bundle ready", fmt.Sprintf("%-16s%s", progress.HumanBytes(diskInfo.SizeBytes), elapsed))
 
-	return outBundleDir, nil
+	return convertedBundle{
+		dir:    outBundleDir,
+		name:   fmt.Sprintf("%s-%s", img.RepoBase, img.Tag),
+		arch:   platform.Architecture,
+		source: manifest.Source,
+	}, nil
 }
 
 // runBuild builds opts.context with `docker buildx build --load`, then -
