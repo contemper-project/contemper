@@ -21,6 +21,13 @@
 # Third boot: check the new kernel still runs after the reinstall, then
 # print the success marker.
 #
+# On every boot, the SecureBoot EFI variable is read and printed, and the
+# boot fails if it differs from the state the image was built to expect
+# (the secure-boot file next to the offline packages). With Secure Boot
+# on, the three boots therefore cover shim, signed GRUB and a signed
+# kernel, the offline update of the signed cloud kernel, and the
+# dpkg-reconfigure reinstall.
+#
 # Every outcome is a line on the serial console. A failure prints
 # contemper-e2e-fail and powers the VM off, so the host side sees QEMU
 # exit instead of waiting out its timeout.
@@ -42,6 +49,34 @@ fail() {
 # require it to succeed; check here, since an ESP that is not mounted (or
 # only read-only) is exactly the failure to report.
 grep -q " ${esp} vfat rw[ ,]" /proc/mounts || fail "${esp} is not mounted read-write as vfat"
+
+# The variable is 4 attribute bytes followed by one data byte, 1 when
+# Secure Boot is on.
+sb_var=/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c
+want_sb="$(cat "${data}/secure-boot" 2>/dev/null || true)"
+case "${want_sb}" in
+true | false) ;;
+*) fail "${data}/secure-boot holds \"${want_sb}\", expected true or false" ;;
+esac
+# Firmware without Secure Boot support does not define the variable at
+# all, which means off. To still catch efivarfs not being mounted (where
+# the variable would be missing too), require the directory to be a
+# mounted, non-empty efivarfs first.
+efivars=/sys/firmware/efi/efivars
+grep -q " ${efivars} efivarfs " /proc/mounts || fail "${efivars} is not a mounted efivarfs"
+[ -n "$(ls -A "${efivars}" 2>/dev/null)" ] || fail "${efivars} is empty"
+if [ -e "${sb_var}" ]; then
+	[ -r "${sb_var}" ] || fail "cannot read the SecureBoot EFI variable at ${sb_var}"
+	case "$(od -An -v -tu1 "${sb_var}" | tr -s ' \n' ' ' | awk '{print $NF}')" in
+	1) got_sb=true ;;
+	0) got_sb=false ;;
+	*) fail "the SecureBoot EFI variable has an unexpected value: $(od -An -v -tu1 "${sb_var}" | tr -s ' \n' ' ')" ;;
+	esac
+else
+	got_sb=false
+fi
+say "contemper-e2e: secure boot ${got_sb} (expected ${want_sb})"
+[ "${got_sb}" = "${want_sb}" ] || fail "secure boot is ${got_sb}, expected ${want_sb}"
 
 case "$(dpkg --print-architecture)" in
 amd64)
@@ -120,6 +155,14 @@ if [ "$(cat "${state}/stage")" = installed ]; then
 	[ -f "${marker}" ] || fail "marker is gone from ${esp} after the reboot"
 	[ "$(cat "${marker}")" = "${first}" ] || fail "marker on ${esp} has unexpected content: $(cat "${marker}")"
 	say "contemper-e2e-kernel-running: ${first} -> ${running}, ${esp} marker intact"
+
+	# Under Secure Boot the signed GRUB cannot load modules from disk, so
+	# every insmod in the generated config prints an error. List them
+	# once, so the log shows which modules are refused.
+	if [ "${want_sb}" = true ]; then
+		say "contemper-e2e: insmod lines in /boot/grub/grub.cfg:"
+		grep -E '^[[:space:]]*insmod[[:space:]]' /boot/grub/grub.cfg >/dev/console || true
+	fi
 
 	# The real package path: the grub-efi-<arch> postinst reruns
 	# grub-install (with --force-extra-removable and --no-nvram from the
