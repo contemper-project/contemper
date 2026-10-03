@@ -123,7 +123,11 @@ type Manifest struct {
 	// Boot is how the image boots: "uki" (contemper assembled a UKI) or
 	// "bootloader" (the image's own bootloader is on the ESP). Manifests
 	// from before the field existed lack it; Read reports those as "uki".
-	Boot         string   `json:"boot"`
+	Boot string `json:"boot"`
+	// SecureBoot is true when the image asked for UEFI Secure Boot
+	// (bootloader images only). Manifests from before the field existed
+	// lack it, which reads as false.
+	SecureBoot   bool     `json:"secureBoot,omitempty"`
 	Arch         string   `json:"arch"`
 	Disk         DiskInfo `json:"disk"`
 	Volumes      []Volume `json:"volumes,omitempty"`
@@ -164,6 +168,9 @@ func (m *Manifest) check() error {
 	// m.Boot is deliberately not checked against the known modes: a
 	// bundle written by a newer contemper may use a mode this version
 	// does not know, and reading it should still work.
+	if m.SecureBoot && m.Boot != BootBootloader {
+		return fmt.Errorf("secureBoot needs boot %q, not %q: Secure Boot needs a bootloader image, because contemper's UKI is unsigned", BootBootloader, m.Boot)
+	}
 	for _, v := range m.Volumes {
 		if err := volume.ValidateName(v.Name); err != nil {
 			return fmt.Errorf("volume %s: %w", v.Path, err)

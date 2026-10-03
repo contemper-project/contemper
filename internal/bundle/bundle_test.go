@@ -243,4 +243,58 @@ func TestReadManifestWithoutBootField(t *testing.T) {
 	if m.Boot != bundle.BootUKI {
 		t.Errorf("Boot = %q for a manifest without the field, want %q", m.Boot, bundle.BootUKI)
 	}
+	if m.SecureBoot {
+		t.Error("SecureBoot = true for a manifest without the field, want false")
+	}
+}
+
+func TestReadRejectsSecureBootWithoutBootloader(t *testing.T) {
+	for _, boot := range []string{bundle.BootUKI, ""} {
+		dir := t.TempDir()
+		m := &bundle.Manifest{
+			FormatVersion: bundle.FormatVersion,
+			Boot:          boot,
+			SecureBoot:    true,
+			Disk:          bundle.DiskInfo{File: "disk.qcow2"},
+		}
+		if err := bundle.Write(dir, m); err != nil {
+			t.Fatal(err)
+		}
+		_, err := bundle.Read(dir)
+		if err == nil || !strings.Contains(err.Error(), "needs a bootloader image") {
+			t.Errorf("boot %q: Read error = %v, want one about needing a bootloader image", boot, err)
+		}
+	}
+}
+
+func TestSecureBootField(t *testing.T) {
+	for _, set := range []bool{false, true} {
+		dir := t.TempDir()
+		m := &bundle.Manifest{
+			FormatVersion: bundle.FormatVersion,
+			Boot:          bundle.BootBootloader,
+			SecureBoot:    set,
+			Disk:          bundle.DiskInfo{File: "disk.qcow2"},
+		}
+		if err := bundle.Write(dir, m); err != nil {
+			t.Fatal(err)
+		}
+		raw, err := os.ReadFile(dir + "/contemper.json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if has := strings.Contains(string(raw), `"secureBoot": true`); has != set {
+			t.Errorf("SecureBoot %v: manifest has the field = %v:\n%s", set, has, raw)
+		}
+		if !set && strings.Contains(string(raw), "secureBoot") {
+			t.Errorf("a false SecureBoot must be omitted:\n%s", raw)
+		}
+		got, err := bundle.Read(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.SecureBoot != set {
+			t.Errorf("SecureBoot %v: Read gives %v", set, got.SecureBoot)
+		}
+	}
 }

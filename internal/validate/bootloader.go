@@ -61,6 +61,8 @@ type Bootloader struct {
 	// and firmware match it case-insensitively).
 	FallbackPath string
 	FallbackSize int64
+	// fallbackSource is the entry holding the fallback file's content.
+	fallbackSource *rootfs.Entry
 	// ContemperIgnored reports that /boot/contemper exists but, in this
 	// mode, is not used.
 	ContemperIgnored bool
@@ -157,6 +159,7 @@ func CheckBootloader(rfs *rootfs.Rootfs, arch string, espSize uint64) (*Result, 
 		return nil, fmt.Errorf("%s/%s is a directory, not the bootloader binary", EFIDir, b.FallbackPath)
 	}
 	b.FallbackSize = fallback.Size
+	b.fallbackSource = fallback.Source
 	hdr, err := readHead(rfs, fallback.Source, peHeadBytes)
 	if err != nil {
 		return nil, fmt.Errorf("%s/%s: %w", EFIDir, b.FallbackPath, err)
@@ -175,6 +178,21 @@ func CheckBootloader(rfs *rootfs.Rootfs, arch string, espSize uint64) (*Result, 
 	b.InitMissing = initErr != nil
 
 	return &Result{Bootloader: b}, nil
+}
+
+// CheckSecureBoot checks that the fallback boot file of b carries an
+// Authenticode signature, as a bootloader needs to for the VM to boot
+// with UEFI Secure Boot enabled. See CheckSigned: it does not verify the
+// signature chain. Nothing from the image is executed.
+func CheckSecureBoot(rfs *rootfs.Rootfs, b *Bootloader) error {
+	hdr, err := readHead(rfs, b.fallbackSource, peHeadBytes)
+	if err != nil {
+		return fmt.Errorf("%s/%s: %w", EFIDir, b.FallbackPath, err)
+	}
+	if err := CheckSigned(hdr, b.FallbackSize); err != nil {
+		return fmt.Errorf("%s/%s: %w", EFIDir, b.FallbackPath, err)
+	}
+	return nil
 }
 
 // hardlinkSource follows a hardlink entry to the regular file holding its

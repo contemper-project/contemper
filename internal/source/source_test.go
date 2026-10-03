@@ -525,3 +525,38 @@ func TestParseVariantRefRegistryMatch(t *testing.T) {
 		t.Errorf("ParseVariantRef(local parent, registry ref) = %+v, %v; want a registry ref, no error", ref, err)
 	}
 }
+
+func TestSecureBoot(t *testing.T) {
+	sb := func(v string) map[string]string { return map[string]string{"io.contemper.secure-boot": v} }
+	both := func(v string) map[string]string {
+		return map[string]string{"io.contemper.secure-boot": v, "io.contemper.boot": "bootloader"}
+	}
+	cases := []struct {
+		name    string
+		labels  map[string]string
+		mode    string
+		want    bool
+		wantErr string
+	}{
+		{"absent uki", nil, "uki", false, ""},
+		{"absent bootloader", nil, "bootloader", false, ""},
+		{"true bootloader", both("true"), "bootloader", true, ""},
+		{"false bootloader", both("false"), "bootloader", false, ""},
+		{"false uki", sb("false"), "uki", false, ""},
+		{"true uki", sb("true"), "uki", false, "unsigned"},
+		{"unknown", sb("yes"), "bootloader", false, "unknown value"},
+		{"empty", sb(""), "bootloader", false, "unknown value"},
+		{"wrong case", sb("True"), "bootloader", false, "unknown value"},
+	}
+	for _, c := range cases {
+		cfg := &v1.ConfigFile{}
+		cfg.Config.Labels = c.labels
+		got, err := source.SecureBoot(cfg, c.mode)
+		if (c.wantErr == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), c.wantErr)) || got != c.want {
+			t.Errorf("%s: SecureBoot = %v, %v; want %v, error %q", c.name, got, err, c.want, c.wantErr)
+		}
+	}
+	if got, err := source.SecureBoot(nil, "uki"); err != nil || got {
+		t.Errorf("SecureBoot(nil) = %v, %v", got, err)
+	}
+}
