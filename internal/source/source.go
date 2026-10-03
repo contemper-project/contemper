@@ -30,6 +30,17 @@ import (
 // ReadyLabel is the config label that marks an image as contemper-ready.
 const ReadyLabel = "io.contemper.ready"
 
+// BootLabel is the config label that selects how the image boots: as a
+// UKI contemper assembles, or from the image's own bootloader.
+const BootLabel = "io.contemper.boot"
+
+// Boot modes BootLabel can select, also the values recorded in the bundle
+// manifest.
+const (
+	BootUKI        = "uki"
+	BootBootloader = "bootloader"
+)
+
 // RefNameAnnotation is the OCI annotation that records the original
 // "name:tag" a layout or archive source was saved from (written by
 // tools like `podman save`/`buildah push` under this well-known key).
@@ -846,4 +857,21 @@ func CheckReady(cfg *v1.ConfigFile) error {
 		return fmt.Errorf("image is not contemper-ready: label %s=\"true\" is required", ReadyLabel)
 	}
 	return nil
+}
+
+// BootMode returns the boot mode cfg selects through BootLabel: BootUKI
+// when the label is absent, an error for any value other than the two
+// documented ones.
+func BootMode(cfg *v1.ConfigFile) (string, error) {
+	if cfg == nil {
+		return BootUKI, nil
+	}
+	v, ok := cfg.Config.Labels[BootLabel]
+	switch {
+	case !ok, v == BootUKI:
+		return BootUKI, nil
+	case v == BootBootloader:
+		return BootBootloader, nil
+	}
+	return "", fmt.Errorf("label %s has the unknown value %q: use %q or %q", BootLabel, v, BootUKI, BootBootloader)
 }
