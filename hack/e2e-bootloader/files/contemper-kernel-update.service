@@ -1,0 +1,18 @@
+[Unit]
+Description=contemper e2e: update the kernel in the guest
+# Wait for the ESP mount if there is one, but run either way: a failed
+# mount then reaches the script's own check, which fails fast with
+# contemper-e2e-fail instead of the host timing out. (WantsMountsFor=
+# needs systemd 256; Debian trixie has 257.)
+WantsMountsFor=/boot/efi
+# The image's first-boot unit installs GRUB and generates grub.cfg; the
+# kernel install below must see that result, so it runs after it.
+After=contemper-grub-firstboot.service
+
+[Service]
+Type=oneshot
+Environment=DEBIAN_FRONTEND=noninteractive
+ExecStart=/usr/local/lib/contemper/e2e-kernel-update
+
+[Install]
+WantedBy=multi-user.target
