@@ -159,6 +159,13 @@ bundles' shared `<repository>-<tag>`, and a later run replaces it.
 The file lists at least one bundle, in amd64, arm64 order. Single-architecture
 runs write no group file.
 
+`contemper deploy --to local-qemu` reads the file when given its path
+instead of a bundle directory, and boots the entry for the host's
+architecture (or the one `--arch` names), after checking that the
+bundle's own manifest has the same `arch`. A script must do the same:
+resolve each `path` relative to the group file's directory, then check the
+bundle manifest's `arch`.
+
 !!! note "On \"no new artifact format\""
     contemper reads only normal OCI images. A bundle is an *output*, and a
     directory holding a disk and a JSON file barely qualifies as a format.
