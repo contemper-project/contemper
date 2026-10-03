@@ -257,21 +257,53 @@ func Load(ctx context.Context, ref Ref, platform v1.Platform) (*Image, error) {
 	}
 }
 
+// registryOptions are the remote options every registry read uses, so
+// listing a source's platforms and loading one see the same registry.
+func registryOptions(ctx context.Context) []remote.Option {
+	return []remote.Option{remote.WithContext(ctx), remote.WithAuthFromKeychain(authn.DefaultKeychain)}
+}
+
+// loadRegistry resolves a registry ref the way a layout is resolved: an
+// index (OCI or Docker manifest list, nested or not) goes through
+// resolveDescriptor, the same walk Platforms uses, and a plain manifest
+// is the image itself.
 func loadRegistry(ctx context.Context, ref Ref, platform v1.Platform) (*Image, error) {
 	nref, err := name.ParseReference(ref.Value)
 	if err != nil {
 		return nil, fmt.Errorf("parsing registry ref %q: %w", ref.Value, err)
 	}
-	img, err := remote.Image(nref,
-		remote.WithContext(ctx),
-		remote.WithAuthFromKeychain(authn.DefaultKeychain),
-		remote.WithPlatform(platform))
+	desc, err := remote.Get(nref, registryOptions(ctx)...)
 	if err != nil {
 		return nil, fmt.Errorf("pulling %s: %w", ref.Value, err)
 	}
-	digest, err := img.Digest()
-	if err != nil {
-		return nil, fmt.Errorf("reading digest of %s: %w", ref.Value, err)
+	var img v1.Image
+	var digest v1.Hash
+	if desc.MediaType.IsIndex() {
+		idx, err := desc.ImageIndex()
+		if err != nil {
+			return nil, fmt.Errorf("reading index %s: %w", ref.Value, err)
+		}
+		leaf, leafIndex, _, _, err := resolveDescriptor(idx, platform, ref.Value)
+		if err != nil {
+			return nil, fmt.Errorf("pulling %s: %w", ref.Value, err)
+		}
+		img, err = leafIndex.Image(leaf.Digest)
+		if err != nil {
+			return nil, fmt.Errorf("pulling %s: %w", ref.Value, err)
+		}
+		digest = leaf.Digest
+	} else {
+		img, err = desc.Image()
+		if err != nil {
+			return nil, fmt.Errorf("pulling %s: %w", ref.Value, err)
+		}
+		if err := checkImagePlatform(img, ref.Value, platform); err != nil {
+			return nil, err
+		}
+		digest, err = img.Digest()
+		if err != nil {
+			return nil, fmt.Errorf("reading digest of %s: %w", ref.Value, err)
+		}
 	}
 	base, tag := referenceName(nref)
 	return &Image{
@@ -313,6 +345,21 @@ func loadOCIArchive(ctx context.Context, ref Ref, platform v1.Platform) (*Image,
 	return img, nil
 }
 
+// checkImagePlatform verifies that a single image, one with no platform
+// on a descriptor to select it by, is for platform according to its own
+// config. A config that leaves the OS or architecture empty matches
+// anything, as Platforms reports.
+func checkImagePlatform(img v1.Image, name string, platform v1.Platform) error {
+	cfg, err := img.ConfigFile()
+	if err != nil {
+		return fmt.Errorf("reading config of %q: %w", name, err)
+	}
+	if cfg.OS != "" && cfg.OS != platform.OS || cfg.Architecture != "" && cfg.Architecture != platform.Architecture {
+		return fmt.Errorf("%q is %s/%s, want %s/%s", name, cfg.OS, cfg.Architecture, platform.OS, platform.Architecture)
+	}
+	return nil
+}
+
 // loadOCILayout resolves ref (an OCI layout directory) to a
 // platform-selected image. fallbackBase names the bundle when no naming
 // annotation is found on the resolved manifest's lineage of index
@@ -332,6 +379,13 @@ func loadOCILayout(ref Ref, platform v1.Platform, fallbackBase string) (*Image, 
 	img, err := leafIndex.Image(leaf.Digest)
 	if err != nil {
 		return nil, fmt.Errorf("reading image %s from %q: %w", leaf.Digest, ref.Value, err)
+	}
+	if leaf.Platform == nil {
+		// Selected only because it is the sole image: its own config
+		// must agree with the request, as Platforms reports it.
+		if err := checkImagePlatform(img, ref.Value, platform); err != nil {
+			return nil, err
+		}
 	}
 
 	base, tag := bundleName(topDescs, topDesc, fallbackBase)
@@ -362,12 +416,8 @@ func loadDockerArchive(ref Ref, platform v1.Platform) (*Image, error) {
 
 	// docker-archive is single-platform; if the caller asked for a
 	// specific architecture, verify the loaded config matches.
-	cfg, err := img.ConfigFile()
-	if err != nil {
-		return nil, fmt.Errorf("reading config of %q: %w", ref.Value, err)
-	}
-	if cfg.OS != "" && cfg.OS != platform.OS || cfg.Architecture != "" && cfg.Architecture != platform.Architecture {
-		return nil, fmt.Errorf("%q is %s/%s, want %s/%s", ref.Value, cfg.OS, cfg.Architecture, platform.OS, platform.Architecture)
+	if err := checkImagePlatform(img, ref.Value, platform); err != nil {
+		return nil, err
 	}
 
 	digest, err := img.Digest()
@@ -805,6 +855,17 @@ func splitRepoTag(s string) (string, string) {
 // ctx is noticed between entries, without waiting for the whole archive
 // to extract.
 func extractTar(ctx context.Context, r io.Reader, dir string) error {
+	return extractTarLimited(ctx, r, dir, 0)
+}
+
+// maxMetadataBlob bounds the size of a tar entry extractTarLimited keeps
+// when listing an archive's platforms: index.json and manifest, index
+// and config blobs are far smaller, layers usually are not.
+const maxMetadataBlob = 4 << 20
+
+// extractTarLimited is extractTar that, when maxSize is positive, skips
+// regular files larger than maxSize (reading past them without writing).
+func extractTarLimited(ctx context.Context, r io.Reader, dir string, maxSize int64) error {
 	tr := tar.NewReader(r)
 	for {
 		if err := ctx.Err(); err != nil {
@@ -827,6 +888,9 @@ func extractTar(ctx context.Context, r io.Reader, dir string) error {
 				return err
 			}
 		case tar.TypeReg:
+			if maxSize > 0 && hdr.Size > maxSize {
+				continue
+			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 				return err
 			}
