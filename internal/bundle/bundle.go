@@ -32,8 +32,10 @@ const (
 
 // ImageRef identifies a source image by reference and digest.
 type ImageRef struct {
-	Ref    string `json:"ref"`
-	Digest string `json:"digest"`
+	Ref string `json:"ref"`
+	// Digest is always set in a bundle manifest; the group file of a
+	// multi-architecture run leaves it empty (and omitted).
+	Digest string `json:"digest,omitempty"`
 	// Repo is the source image's repository name, without its tag (the
 	// same value convert uses to name the bundle directory, before the
 	// "-<tag>.<arch>" suffix). deploy --to local-qemu uses it as the
