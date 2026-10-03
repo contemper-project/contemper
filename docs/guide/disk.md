@@ -45,6 +45,11 @@ with its package manager, survive reboots and shutdowns, and are gone
 when you redeploy. Persistent data belongs on an attached volume, where
 it survives all of it.
 
+This describes the appliance model, the default with UKI images. A
+bootloader image keeps the same mechanics, but its purpose is usually to
+stay on one root disk and update in place. See [Long-lived VMs: what
+changes](bootloader-images.md#long-lived-vms-what-changes).
+
 This comes from the disk being replaced on redeploy, not from any
 layering trick, which is why the root is an ordinary filesystem you can
 read, write and grow with ordinary tools.

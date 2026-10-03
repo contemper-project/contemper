@@ -9,11 +9,21 @@ details.
 
 ## Choosing a boot mode
 
+With bootloader images contemper supports two ways of using a VM:
+
+- **Appliance.** The image is the unit of change. You upgrade by
+  redeploying a new image version on the same volumes, like a
+  container. UKI images are made for this.
+- **Long-lived VM.** The image only sets up the VM's first deploy. From
+  then on the guest maintains itself with its package manager, like a VM
+  image from other tooling. This needs a bootloader image.
+
 | | UKI (default) | Bootloader |
 | --- | --- | --- |
+| Usual model | appliance | long-lived VM (works as an appliance too) |
 | Kernel, initrd, command line | sealed into the boot image at build time | read from disk by the bootloader at every boot |
 | Updating the kernel | build a new image, replace the disk | the guest's package manager, in place |
-| Root disk | disposable; matches the image | long-lived; drifts from the image |
+| Root disk | disposable; matches the image | can stay for the VM's life; drifts from the image |
 | ESP | 128 MiB, holds the UKI | 512 MiB, holds your `/boot/efi` tree |
 | Who writes the boot setup | contemper | you |
 
@@ -25,6 +35,13 @@ are reproducible, and state that must survive an update lives on
 installation that updates its own kernel with `apt` or `dnf`, or when
 the image has no volumes to hold its state.
 
+!!! warning "A UKI image cannot update its kernel in the guest"
+    The kernel, initrd and command line are sealed into the UKI when
+    the bundle is built. A kernel package installed inside the guest
+    lands on the root filesystem, but nothing boots it: the next boot
+    runs the UKI as it was. That is why a long-lived VM needs
+    bootloader mode.
+
 The cost of a bootloader image is the one the
 [disk lifecycle](disk.md) already describes. Changes made inside the
 guest, kernel updates included, survive reboots and shutdowns of that
@@ -33,12 +50,43 @@ version replaces the root disk with a fresh one, and those changes are
 gone. Volumes are untouched by a redeploy and keep their data, so
 persistent data still belongs there.
 
+## Long-lived VMs: what changes
+
+In the long-lived model the running VM, not the image, is the source of
+truth after the first deploy. These features behave differently, or
+don't fit:
+
+- **Redeploy.** It replaces the root disk and discards every in-place
+  update. A new image version means a new VM, not an upgrade of the
+  existing one. Don't mix the two upgrade paths on one VM: pick the
+  package manager or redeploys.
+- **Root size.** The default, `max(1 GiB, 1.5 × content + 256 MiB)`,
+  leaves little room to grow, and every kernel with its initrd, plus
+  package caches, uses it up. Size it up front with `--root-size` or
+  the `io.contemper.root.size` label (the flag wins when both are
+  given). Or grow it later with `growpart` and `resize2fs`, since the
+  root partition is last; see [the disk](disk.md#layout).
+- **Volumes.** They are optional here, but still useful to keep data
+  apart from the OS, or to move it to a rebuilt VM. Seeding happens only
+  when a volume is first formatted, so content a later image has at a
+  volume path never reaches an existing volume, as with containers; see
+  [Seeding a volume from the image](volumes.md#seeding-a-volume-from-the-image).
+- **Image-time settings.** The fstab lines for volumes and the ESP, and
+  anything else `convert` writes into the root, are written once. After
+  that they are ordinary guest files, and a later image that changes
+  them does not reach an existing VM.
+- **The image as a record.** The source digest in the bundle manifest,
+  image scans and `deploy --expect` boot tests describe the VM at its
+  first deploy only. The running VM drifts from them.
+- **local-qemu.** The target boots with `snapshot=on`, so it is a test
+  target, not a place to run a long-lived VM; see the note below.
+
 !!! note "With `deploy --to local-qemu`"
     The local-qemu target boots the disk with `snapshot=on`: writes go
     to a throwaway overlay that lasts as long as the QEMU process. A
     guest reboot keeps its changes, but every new `deploy` starts from
-    the bundle as converted, so in-place updates do not persist across
-    deploys there. Volumes do; see [Volumes](volumes.md).
+    the bundle as converted, so in-place updates last for one deploy
+    only. Volumes do persist; see [Volumes](volumes.md).
 
 ## Making a bootloader image
 
