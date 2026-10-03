@@ -86,20 +86,29 @@ func installFakeBuildDocker(t *testing.T, archivePath string) (logPath string) {
 // fake docker script above hands back for every `docker save`.
 func buildFixtureArchive(t *testing.T) string {
 	t.Helper()
+	return buildArchive(t, map[string]string{"io.contemper.ready": "true"}, ukiFixtureFiles)
+}
+
+// ukiFixtureFiles is the file set of a minimal image that boots as a UKI.
+var ukiFixtureFiles = []imgtest.File{
+	{Path: "boot/", Typeflag: tar.TypeDir},
+	{Path: "boot/contemper/", Typeflag: tar.TypeDir},
+	{Path: "boot/contemper/vmlinuz", Data: append([]byte("MZ"), make([]byte, 128)...)},
+	{Path: "boot/contemper/initrd", Data: []byte("fake-initrd-content")},
+	{Path: "boot/contemper/cmdline", Data: []byte("rw console=ttyS0\n")},
+	{Path: "sbin/", Typeflag: tar.TypeDir},
+	{Path: "sbin/init", Data: []byte("#!/bin/sh\n"), Mode: 0o755},
+	{Path: "etc/", Typeflag: tar.TypeDir},
+	{Path: "etc/os-release", Data: []byte("NAME=Test\n")},
+}
+
+// buildArchive writes an image with the given labels and files, for the
+// host architecture, as an OCI layout tarball (see buildFixtureArchive).
+func buildArchive(t *testing.T, labels map[string]string, files []imgtest.File) string {
+	t.Helper()
 
 	plat := v1.Platform{OS: "linux", Architecture: runtime.GOARCH}
-	files := []imgtest.File{
-		{Path: "boot/", Typeflag: tar.TypeDir},
-		{Path: "boot/contemper/", Typeflag: tar.TypeDir},
-		{Path: "boot/contemper/vmlinuz", Data: append([]byte("MZ"), make([]byte, 128)...)},
-		{Path: "boot/contemper/initrd", Data: []byte("fake-initrd-content")},
-		{Path: "boot/contemper/cmdline", Data: []byte("rw console=ttyS0\n")},
-		{Path: "sbin/", Typeflag: tar.TypeDir},
-		{Path: "sbin/init", Data: []byte("#!/bin/sh\n"), Mode: 0o755},
-		{Path: "etc/", Typeflag: tar.TypeDir},
-		{Path: "etc/os-release", Data: []byte("NAME=Test\n")},
-	}
-	img, err := imgtest.Image(plat, map[string]string{"io.contemper.ready": "true"}, files)
+	img, err := imgtest.Image(plat, labels, files)
 	if err != nil {
 		t.Fatal(err)
 	}

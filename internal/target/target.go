@@ -1,6 +1,7 @@
 // Package target maps a target name to its canonical spelling and
 // Assembler, and implements the UEFI qcow2 assembler shared by the qemu
-// and incus targets: UKI, then GPT/ESP/ext4, then qcow2.
+// and incus targets: UKI (or the image's own bootloader), then
+// GPT/ESP/ext4, then qcow2.
 package target
 
 import (
@@ -156,8 +157,9 @@ func SerialPattern(canonicalTarget, volumeName string) string {
 	return identitySerialPattern(volumeName)
 }
 
-// UEFIQcow2 assembles a UEFI-bootable UKI on a GPT disk with a FAT32 ESP
-// and an ext4 root, converted to qcow2. qemu-qcow2 (the reference case,
+// UEFIQcow2 assembles a UEFI-bootable GPT disk with a FAT32 ESP (holding a
+// UKI, or the image's own bootloader when val.Bootloader is set) and an
+// ext4 root, converted to qcow2. qemu-qcow2 (the reference case,
 // no support image) and incus-qcow2 (Incus runs VMs on QEMU/OVMF) both
 // use it; the targets differ only in their support image.
 type UEFIQcow2 struct{}
@@ -166,26 +168,34 @@ type UEFIQcow2 struct{}
 func (UEFIQcow2) Assemble(ctx context.Context, rfs *rootfs.Rootfs, val *validate.Result, arch string, outDir string, opts Options) (*DiskInfo, []string, error) {
 	var warnings []string
 
-	linuxData, warn, err := uki.PrepareKernel(val.Kernel)
-	if err != nil {
-		return nil, nil, fmt.Errorf("preparing kernel: %w", err)
-	}
-	if warn != "" {
-		warnings = append(warnings, warn)
-	}
+	bl := val.Bootloader
+	mode := "UKI"
+	var ukiBytes []byte
+	if bl != nil {
+		mode = "bootloader"
+	} else {
+		linuxData, warn, err := uki.PrepareKernel(val.Kernel)
+		if err != nil {
+			return nil, nil, fmt.Errorf("preparing kernel: %w", err)
+		}
+		if warn != "" {
+			warnings = append(warnings, warn)
+		}
 
-	ukiBytes, err := uki.Build(arch, uki.Sections{
-		OSRelease: val.OSRelease,
-		Cmdline:   []byte(KernelCmdline(val.Cmdline)),
-		Initrd:    val.Initrd,
-		Linux:     linuxData,
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("building UKI: %w", err)
+		ukiBytes, err = uki.Build(arch, uki.Sections{
+			OSRelease: val.OSRelease,
+			Cmdline:   []byte(KernelCmdline(val.Cmdline)),
+			Initrd:    val.Initrd,
+			Linux:     linuxData,
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("building UKI: %w", err)
+		}
 	}
 
 	rep := opts.Progress
-	stage := rep.BeginStage("💿", fmt.Sprintf("assembling qcow2 · %s · UEFI/UKI", arch))
+	stageTitle := fmt.Sprintf("assembling qcow2 · %s · UEFI/%s", arch, mode)
+	stage := rep.BeginStage("💿", stageTitle)
 
 	workDir, err := os.MkdirTemp("", "contemper-assemble-")
 	if err != nil {
@@ -218,12 +228,19 @@ func (UEFIQcow2) Assemble(ctx context.Context, rfs *rootfs.Rootfs, val *validate
 	warnings = append(warnings, ext4Warnings...)
 
 	rawPath := filepath.Join(workDir, "disk.raw")
-	if _, err := disk.BuildGPTImage(rawPath, disk.BuildOptions{
+	espSize := disk.ESPSizeBytes
+	gptOpts := disk.BuildOptions{
 		Arch:          arch,
 		UKI:           ukiBytes,
 		RootImgPath:   rootImgPath,
 		RootSizeBytes: rootSize,
-	}); err != nil {
+	}
+	if bl != nil {
+		espSize = disk.BootloaderESPSizeBytes
+		gptOpts.ESPSizeBytes = espSize
+		gptOpts.ESPTree = espTree(rfs, bl)
+	}
+	if _, err := disk.BuildGPTImage(rawPath, gptOpts); err != nil {
 		stage.Fail("assemble", "building the GPT disk image failed", err.Error())
 		return nil, nil, fmt.Errorf("building disk image: %w", err)
 	}
@@ -251,12 +268,31 @@ func (UEFIQcow2) Assemble(ctx context.Context, rfs *rootfs.Rootfs, val *validate
 		return nil, nil, err
 	}
 
-	stage.Done("💿", fmt.Sprintf("assembling qcow2 · %s · UEFI/UKI", arch), "")
-	rep.Sub("✔", "UKI", progress.HumanBytes(int64(len(ukiBytes))))
-	rep.Sub("✔", "ESP", progress.HumanBytes(int64(disk.ESPSizeBytes)))
+	stage.Done("💿", stageTitle, "")
+	if bl != nil {
+		rep.Sub("✔", "bootloader", fmt.Sprintf("%s · %s", bl.FallbackPath, progress.HumanBytes(bl.FallbackSize)))
+	} else {
+		rep.Sub("✔", "UKI", progress.HumanBytes(int64(len(ukiBytes))))
+	}
+	rep.Sub("✔", "ESP", progress.HumanBytes(int64(espSize)))
 	rep.Sub("✔", "root fs", fmt.Sprintf("%d files · %s", len(rfs.Index), progress.HumanBytes(rootSize)))
 
 	return info, warnings, nil
+}
+
+// espTree turns the validated /boot/efi tree into the entries the disk
+// builder copies onto the ESP; file content is read straight from rfs.
+func espTree(rfs *rootfs.Rootfs, bl *validate.Bootloader) []disk.ESPEntry {
+	tree := make([]disk.ESPEntry, 0, len(bl.Files))
+	for _, f := range bl.Files {
+		e := disk.ESPEntry{Path: f.Path, Dir: f.Dir, Size: f.Size}
+		if !f.Dir {
+			src := f.Source
+			e.Open = func() (io.ReadCloser, error) { return rfs.Open(src) }
+		}
+		tree = append(tree, e)
+	}
+	return tree
 }
 
 // QemuImgMissing reports whether qemu-img could not be found, so callers
