@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -125,6 +126,68 @@ func TestConvertUKIImageRecordsMode(t *testing.T) {
 		}
 		if m.Boot != "uki" {
 			t.Errorf("%s: manifest boot = %q, want uki", name, m.Boot)
+		}
+	}
+}
+
+// signedBootloaderFixtureFiles is bootloaderFixtureFiles with a
+// Certificate Table entry in the fallback file's PE header and room in
+// the file for the certificate.
+func signedBootloaderFixtureFiles() []imgtest.File {
+	files := bootloaderFixtureFiles()
+	pe := append([]byte(nil), files[4].Data...)
+	opt := pe[0x98:]
+	binary.LittleEndian.PutUint32(opt[108:], 16)
+	binary.LittleEndian.PutUint32(opt[112+4*8:], uint32(len(pe)))
+	binary.LittleEndian.PutUint32(opt[112+4*8+4:], 64)
+	files[4].Data = slices.Concat(pe, make([]byte, 64))
+	return files
+}
+
+func TestConvertSecureBoot(t *testing.T) {
+	labels := func(v string) map[string]string {
+		return map[string]string{"io.contemper.ready": "true", "io.contemper.boot": "bootloader", "io.contemper.secure-boot": v}
+	}
+	dir, err := convertFixture(t, labels("true"), signedBootloaderFixtureFiles())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := bundle.Read(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.SecureBoot {
+		t.Error("manifest secureBoot = false, want true")
+	}
+
+	// Off, with or without the label, even for a signed bootloader.
+	for _, l := range []map[string]string{labels("false"), {"io.contemper.ready": "true", "io.contemper.boot": "bootloader"}} {
+		dir, err := convertFixture(t, l, signedBootloaderFixtureFiles())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m, err := bundle.Read(dir); err != nil || m.SecureBoot {
+			t.Errorf("labels %v: secureBoot = %v, %v; want false", l, m != nil && m.SecureBoot, err)
+		}
+	}
+
+	for _, c := range []struct {
+		name    string
+		labels  map[string]string
+		files   []imgtest.File
+		wantErr string
+	}{
+		{"unsigned bootloader", labels("true"), bootloaderFixtureFiles(), "no Authenticode signature"},
+		{"unknown value", labels("yes"), signedBootloaderFixtureFiles(), "io.contemper.secure-boot"},
+		{"UKI image", map[string]string{"io.contemper.ready": "true", "io.contemper.secure-boot": "true"}, ukiFixtureFiles, "unsigned"},
+		{"explicit UKI image", map[string]string{"io.contemper.ready": "true", "io.contemper.boot": "uki", "io.contemper.secure-boot": "true"}, ukiFixtureFiles, "unsigned"},
+	} {
+		dir, err := convertFixture(t, c.labels, c.files)
+		if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+			t.Errorf("%s: error = %v, want it to contain %q", c.name, err, c.wantErr)
+		}
+		if dir != "" {
+			t.Errorf("%s: a bundle was written despite the error", c.name)
 		}
 	}
 }

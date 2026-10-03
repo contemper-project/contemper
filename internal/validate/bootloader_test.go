@@ -74,6 +74,76 @@ func TestCheckEFIApplication(t *testing.T) {
 	}
 }
 
+// signedPE returns goodPE with a Certificate Table data directory entry
+// (offset, size) and a data directory count of numDirs.
+func signedPE(machine uint16, numDirs, certOff, certSize uint32) []byte {
+	b := goodPE(machine)
+	opt := b[0x80+24:]
+	binary.LittleEndian.PutUint32(opt[108:], numDirs)
+	binary.LittleEndian.PutUint32(opt[112+4*8:], certOff)
+	binary.LittleEndian.PutUint32(opt[112+4*8+4:], certSize)
+	return b
+}
+
+func TestCheckSigned(t *testing.T) {
+	const fileSize = 4096
+	short := signedPE(machineARM64, 16, 3000, 500)
+	binary.LittleEndian.PutUint16(short[0x80+4+16:], 112+4*8) // optional header ends before entry 4
+	pe32 := signedPE(machineARM64, 16, 3000, 500)
+	binary.LittleEndian.PutUint16(pe32[0x80+24:], 0x10b)
+	for _, c := range []struct {
+		name    string
+		head    []byte
+		wantErr string
+	}{
+		{"signed", signedPE(machineARM64, 16, 3000, 500), ""},
+		{"signed to end of file", signedPE(machineAMD64, 16, 3596, 500), ""},
+		{"unsigned", goodPE(machineARM64), "no Authenticode signature"},
+		{"zero size", signedPE(machineARM64, 16, 3000, 0), "empty"},
+		{"too few data directories", signedPE(machineARM64, 4, 3000, 500), "no certificate table"},
+		{"header too short", short, "no certificate table"},
+		{"zero offset", signedPE(machineARM64, 16, 0, 500), "not within"},
+		{"beyond file", signedPE(machineARM64, 16, 3700, 500), "not within"},
+		{"inside the headers", signedPE(machineARM64, 16, 200, 500), "inside the PE headers"},
+		{"smaller than a header", signedPE(machineARM64, 16, 3000, 7), "WIN_CERTIFICATE"},
+		{"PE32", pe32, "PE32+"},
+		{"not PE", []byte(strings.Repeat("x", 300)), "MZ"},
+	} {
+		err := validate.CheckSigned(c.head, fileSize)
+		switch {
+		case c.wantErr == "" && err != nil:
+			t.Errorf("%s: unexpected error %v", c.name, err)
+		case c.wantErr != "" && (err == nil || !strings.Contains(err.Error(), c.wantErr)):
+			t.Errorf("%s: error = %v, want it to contain %q", c.name, err, c.wantErr)
+		}
+	}
+}
+
+func TestCheckSecureBoot(t *testing.T) {
+	signed := signedPE(machineARM64, 16, 0x200, 100)
+	signed = append(signed, make([]byte, 0x300)...)
+	files := espFiles()
+	files[4].Data = signed
+	rfs := build(t, files)
+	res, err := validate.CheckBootloader(rfs, "arm64", bigESP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validate.CheckSecureBoot(rfs, res.Bootloader); err != nil {
+		t.Errorf("signed fallback: %v", err)
+	}
+
+	rfs = build(t, espFiles())
+	res, err = validate.CheckBootloader(rfs, "arm64", bigESP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = validate.CheckSecureBoot(rfs, res.Bootloader)
+	if err == nil || !strings.Contains(err.Error(), "BOOTAA64.EFI") || !strings.Contains(err.Error(), "no Authenticode signature") {
+		t.Errorf("unsigned fallback: error = %v", err)
+	}
+}
+
 func dir(p string) imgtest.File { return imgtest.File{Path: p, Typeflag: tar.TypeDir} }
 
 // espFiles is a minimal valid /boot/efi tree for arm64.

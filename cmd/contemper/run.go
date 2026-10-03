@@ -246,6 +246,15 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 		rep.Line("✅", "boot mode", "bootloader")
 	}
 
+	secureBoot, err := source.SecureBoot(cfg, bootMode)
+	if err != nil {
+		rep.Fail("secure boot", err.Error(), "")
+		return err
+	}
+	if secureBoot {
+		rep.Line("✅", "secure boot", "requested")
+	}
+
 	specs, err := volume.FromConfig(bundle.SortedKeys(cfg.Config.Volumes), cfg.Config.Labels)
 	if err != nil {
 		rep.Fail("volumes", err.Error(), "")
@@ -535,6 +544,12 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 			rep.Fail("validate", err.Error(), "a bootloader image must provide a bootable EFI tree at "+validate.EFIDir)
 			return convertedBundle{}, err
 		}
+		if secureBoot {
+			if err := validate.CheckSecureBoot(rfs, val.Bootloader); err != nil {
+				rep.Fail("secure boot", err.Error(), "with "+source.SecureBootLabel+"=\"true\" the bootloader must be signed (this only checks that a signature is present, not that firmware trusts it)")
+				return err
+			}
+		}
 		reportBootloader(rep, val.Bootloader)
 		reportESPFstab(rep, espFstab)
 		rep.Line("✅", "requirements satisfied", "bootloader · ESP tree")
@@ -595,9 +610,10 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 			Digest: img.Digest.String(),
 			Repo:   img.RepoBase,
 		},
-		Target: canonicalTarget,
-		Boot:   bootMode,
-		Arch:   platform.Architecture,
+		Target:     canonicalTarget,
+		Boot:       bootMode,
+		SecureBoot: secureBoot,
+		Arch:       platform.Architecture,
 		Disk: bundle.DiskInfo{
 			File:      diskInfo.Filename,
 			Format:    diskInfo.Format,

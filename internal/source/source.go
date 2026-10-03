@@ -34,6 +34,10 @@ const ReadyLabel = "io.contemper.ready"
 // UKI contemper assembles, or from the image's own bootloader.
 const BootLabel = "io.contemper.boot"
 
+// SecureBootLabel is the config label that asks for the VM to boot with
+// UEFI Secure Boot enabled: "true" or "false" (the default).
+const SecureBootLabel = "io.contemper.secure-boot"
+
 // Boot modes BootLabel can select, also the values recorded in the bundle
 // manifest.
 const (
@@ -938,4 +942,26 @@ func BootMode(cfg *v1.ConfigFile) (string, error) {
 		return BootBootloader, nil
 	}
 	return "", fmt.Errorf("label %s has the unknown value %q: use %q or %q", BootLabel, v, BootUKI, BootBootloader)
+}
+
+// SecureBoot returns whether cfg asks for UEFI Secure Boot through
+// SecureBootLabel: false when the label is absent or "false", an error
+// for any value other than "true" and "false", and an error for "true"
+// in any boot mode but BootBootloader, since contemper's UKI is
+// unsigned and cannot boot under Secure Boot.
+func SecureBoot(cfg *v1.ConfigFile, bootMode string) (bool, error) {
+	if cfg == nil {
+		return false, nil
+	}
+	v, ok := cfg.Config.Labels[SecureBootLabel]
+	switch {
+	case !ok, v == "false":
+		return false, nil
+	case v == "true":
+		if bootMode != BootBootloader {
+			return false, fmt.Errorf("label %s=\"true\" needs a bootloader image (%s=%q): contemper's UKI is unsigned, so it cannot boot with Secure Boot enabled", SecureBootLabel, BootLabel, BootBootloader)
+		}
+		return true, nil
+	}
+	return false, fmt.Errorf("label %s has the unknown value %q: use \"true\" or \"false\"", SecureBootLabel, v)
 }
