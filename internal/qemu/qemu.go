@@ -29,6 +29,14 @@ type archInfo struct {
 	machine          string
 	pflashCandidates []firmware
 	biosCandidates   []string
+	// secureBootCandidates are firmware pairs with Secure Boot enforced
+	// and Microsoft's keys enrolled in the variable store. Both files
+	// must exist. Homebrew's QEMU ships no such store, so macOS has no
+	// candidates.
+	secureBootCandidates []firmware
+	// secureBootSMM reports that the Secure Boot firmware needs SMM
+	// (the q35 machine with smm=on and secure pflash).
+	secureBootSMM bool
 }
 
 // firmware is a UEFI code image for pflash, optionally paired with the
@@ -53,6 +61,9 @@ var archTable = map[string]archInfo{
 			{code: "/usr/share/AAVMF/AAVMF_CODE.fd", vars: "/usr/share/AAVMF/AAVMF_VARS.fd"},
 			{code: "/usr/share/edk2/aarch64/QEMU_EFI-pflash.raw", vars: "/usr/share/edk2/aarch64/vars-template-pflash.raw"},
 		},
+		secureBootCandidates: []firmware{
+			{code: "/usr/share/AAVMF/AAVMF_CODE.secboot.fd", vars: "/usr/share/AAVMF/AAVMF_VARS.ms.fd"},
+		},
 		// QEMU_EFI.fd is not padded to the 64 MiB pflash size, so it can
 		// only be loaded with -bios.
 		biosCandidates: []string{
@@ -73,6 +84,13 @@ var archTable = map[string]archInfo{
 			// Fedora.
 			{code: "/usr/share/edk2/ovmf/OVMF_CODE.fd", vars: "/usr/share/edk2/ovmf/OVMF_VARS.fd"},
 		},
+		secureBootCandidates: []firmware{
+			// Debian/Ubuntu.
+			{code: "/usr/share/OVMF/OVMF_CODE_4M.secboot.fd", vars: "/usr/share/OVMF/OVMF_VARS_4M.ms.fd"},
+			// Fedora.
+			{code: "/usr/share/edk2/ovmf/OVMF_CODE.secboot.fd", vars: "/usr/share/edk2/ovmf/OVMF_VARS.secboot.fd"},
+		},
+		secureBootSMM: true,
 		// Combined code+vars images, which can't be mapped read-only.
 		biosCandidates: []string{
 			"/usr/share/ovmf/OVMF.fd",
@@ -99,6 +117,45 @@ func firstExistingFirmware(fws []firmware) (firmware, bool) {
 	return firmware{}, false
 }
 
+// firstExistingPair returns the first candidate whose code and vars
+// files both exist.
+func firstExistingPair(fws []firmware) (firmware, bool) {
+	for _, fw := range fws {
+		if fw.vars != "" && firstExisting([]string{fw.code}) != "" && firstExisting([]string{fw.vars}) != "" {
+			return fw, true
+		}
+	}
+	return firmware{}, false
+}
+
+// secureBootFirmware returns the Secure Boot firmware pair to boot, or
+// an error that lists the searched paths.
+func secureBootFirmware(info archInfo, arch string) (firmware, error) {
+	if fw, ok := firstExistingPair(info.secureBootCandidates); ok {
+		return fw, nil
+	}
+	var searched []string
+	for _, fw := range info.secureBootCandidates {
+		searched = append(searched, fw.code+" + "+fw.vars)
+	}
+	where := "this platform has no known location for such firmware"
+	if len(searched) > 0 {
+		where = "searched: " + strings.Join(searched, "; ")
+	}
+	return firmware{}, fmt.Errorf("this bundle needs UEFI Secure Boot, which needs OVMF/AAVMF firmware with Microsoft's keys enrolled, and none was found for %s (%s); install it (on Debian or Ubuntu the ovmf or qemu-efi-aarch64 package)", arch, where)
+}
+
+// SecureBootFirmware returns the code image of the Secure Boot firmware
+// BuildArgs would use for arch.
+func SecureBootFirmware(arch string) (string, error) {
+	info, ok := archTable[arch]
+	if !ok {
+		return "", fmt.Errorf("no qemu configuration for arch %q", arch)
+	}
+	fw, err := secureBootFirmware(info, arch)
+	return fw.code, err
+}
+
 // VolumeAttachment is one declared volume's qcow2 disk file, attached as
 // virtio-blk with serial=<name> so the guest can find it under
 // /sys/block/*/serial the same way it would on a real provider (see
@@ -117,6 +174,11 @@ type Options struct {
 	// WorkDir holds per-boot scratch files (the writable UEFI variable
 	// store). If empty, firmware is booted code-only.
 	WorkDir string
+	// SecureBoot boots Secure Boot firmware with Microsoft's keys
+	// enrolled instead of the default firmware. It needs WorkDir (the
+	// writable variable store) and fails, rather than falling back to
+	// firmware without Secure Boot, if no such firmware is installed.
+	SecureBoot bool
 	// Volumes attaches one virtio-blk drive per entry, in order, after
 	// the root disk.
 	Volumes []VolumeAttachment
@@ -167,14 +229,39 @@ func kvmUsable() bool {
 }
 
 func buildArgs(info archInfo, opts Options) (args []string, err error) {
-	args = append(args, "-M", info.machine)
+	machine := info.machine
+	var sbFW firmware
+	if opts.SecureBoot {
+		if opts.WorkDir == "" {
+			return nil, fmt.Errorf("UEFI Secure Boot needs a work directory for the writable UEFI variable store")
+		}
+		sbFW, err = secureBootFirmware(info, opts.Arch)
+		if err != nil {
+			return nil, err
+		}
+		if info.secureBootSMM {
+			machine += ",smm=on"
+		}
+	}
+	args = append(args, "-M", machine)
+	if opts.SecureBoot && info.secureBootSMM {
+		args = append(args, "-global", "driver=cfi.pflash01,property=secure,value=on")
+	}
 
 	accel, cpu := accelInfo(opts.Arch)
 	args = append(args, "-accel", accel, "-cpu", cpu)
 
 	args = append(args, "-m", "1G", "-smp", "2")
 
-	if fw, ok := firstExistingFirmware(info.pflashCandidates); ok {
+	if opts.SecureBoot {
+		vars := filepath.Join(opts.WorkDir, "efivars.fd")
+		if err := copyFile(sbFW.vars, vars); err != nil {
+			return nil, fmt.Errorf("copying UEFI variable store: %w", err)
+		}
+		args = append(args,
+			"-drive", fmt.Sprintf("if=pflash,format=raw,unit=0,readonly=on,file=%s", optValue(sbFW.code)),
+			"-drive", fmt.Sprintf("if=pflash,format=raw,unit=1,file=%s", optValue(vars)))
+	} else if fw, ok := firstExistingFirmware(info.pflashCandidates); ok {
 		args = append(args, "-drive", fmt.Sprintf("if=pflash,format=raw,unit=0,readonly=on,file=%s", optValue(fw.code)))
 		if fw.vars != "" && opts.WorkDir != "" && firstExisting([]string{fw.vars}) != "" {
 			vars := filepath.Join(opts.WorkDir, "efivars.fd")
@@ -290,6 +377,11 @@ func Deploy(ctx context.Context, opts Options) error {
 	}
 
 	accel, _ := accelInfo(opts.Arch)
+	if opts.SecureBoot {
+		// BuildArgs succeeded, so the firmware exists.
+		code, _ := SecureBootFirmware(opts.Arch)
+		rep.Line("🔒", "secure boot on", code)
+	}
 	rep.Line("🚀", "booting "+filepath.Base(opts.DiskPath), fmt.Sprintf("UEFI/%s · 1 GiB", strings.ToUpper(accel)))
 	rep.VerboseCmd(binPath, args)
 
