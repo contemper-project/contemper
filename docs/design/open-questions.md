@@ -45,3 +45,7 @@ maintaining a CLI.
 **Incus boot order.** Whether Incus's OVMF build tries network boot
 before the fallback path, which would show up as a boot delay rather than
 a failure. Unverified.
+
+**Images with their own bootloader.** The contract is recorded in
+[bootloader images](bootloader-images.md). Still open there: how the guest
+finds the ESP to mount it, and the exact GRUB recipe for Debian.

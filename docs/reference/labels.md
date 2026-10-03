@@ -9,6 +9,7 @@ annotations](support-image-annotations.md).
 | Label | Meaning |
 | --- | --- |
 | `io.contemper.ready="true"` | required; marks the image as intended for contemper (checked before any layer is pulled) |
+| `io.contemper.boot` | **Planned.** how the image boots: `uki` (the default) assembles a UKI from `/boot/contemper/`, `bootloader` copies the image's own `/boot/efi` onto the ESP; see [Bootloader images](../design/bootloader-images.md) |
 | `io.contemper.volume.<path>.size` | a declared volume's size (e.g. `10GiB`); `deploy --volume <path>=<size>` overrides it, and supplies one when it's missing |
 | `io.contemper.volume.<path>.name` | a declared volume's name, overriding the one derived from its path (at most 16 bytes, `[a-z0-9-]`) |
 | `io.contemper.volume.<path>.seed` | `"false"` opts the volume out of being seeded from the image's own content the first time its disk is formatted; any value but `"true"`/`"false"` is a convert error |
