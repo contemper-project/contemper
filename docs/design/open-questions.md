@@ -18,11 +18,6 @@ blocker (its core lives under `internal/`, so it can't be imported as a
 library without forking), leaving bundling a large binary or discovering
 `tofu` on `PATH`. Also open: who owns state.
 
-**Multi-architecture sources.** If the source is a multi-arch index,
-contemper could build every architecture present, require an explicit
-`--arch`, or default to the host's. It currently defaults to the host's;
-this is a UX question more than a technical one.
-
 **Provenance.** This is about attaching provenance to contemper's
 *output*: the bundles `convert` produces for an image you author, beyond
 what the [bundle manifest](../reference/bundle.md) already records.

@@ -60,7 +60,8 @@ for where the embedded stub comes from and how to verify it.
 `convert` narrates each stage on stderr as it runs: the source and
 platform, the readiness check, one line per layer, what each fixed path
 resolved to, and the sizes of the pieces being assembled. stdout carries
-only the bundle path, so scripts can capture it.
+the bundle path (one path per line when a run converts several
+architectures), so scripts can capture it.
 
 - `--progress auto|tty|plain`: `auto` (the default) shows a live spinner
   and timer on a terminal and plain lines otherwise, including in CI and

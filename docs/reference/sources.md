@@ -31,11 +31,17 @@ when selecting a platform.
 ## Platform selection
 
 `convert` builds for the host architecture unless `--arch amd64|arm64`
-says otherwise. When a reference names a multi-platform index, the
+says otherwise; `--arch` also takes a comma-separated list or `all` to
+convert several architectures in one run (see
+[multi-architecture](../guide/multi-arch.md#converting-several-architectures-at-once)).
+When a reference names a multi-platform index, the
 manifest for that platform is selected before any layer is fetched,
 following nested indexes and skipping attestation manifests along the
 way; if there is no manifest for the requested platform, the conversion
-fails at that point.
+fails at that point. For a list or `all`, every requested platform is
+checked against the index up front. A `docker-daemon:` source can't be
+listed without a `docker save`, so it accepts one explicit architecture
+only.
 
 ## Bundle naming
 
