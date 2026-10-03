@@ -196,3 +196,51 @@ func TestReadRejectsUnsafeValues(t *testing.T) {
 		})
 	}
 }
+
+func TestBootField(t *testing.T) {
+	for _, tc := range []struct{ set, want string }{
+		{"", "uki"},
+		{bundle.BootUKI, "uki"},
+		{bundle.BootBootloader, "bootloader"},
+	} {
+		dir := t.TempDir()
+		m := &bundle.Manifest{
+			FormatVersion: bundle.FormatVersion,
+			Boot:          tc.set,
+			Disk:          bundle.DiskInfo{File: "disk.qcow2"},
+		}
+		if err := bundle.Write(dir, m); err != nil {
+			t.Fatal(err)
+		}
+		raw, err := os.ReadFile(dir + "/contemper.json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), `"boot": "`+tc.want+`"`) {
+			t.Errorf("Boot %q: manifest lacks \"boot\": %q:\n%s", tc.set, tc.want, raw)
+		}
+		got, err := bundle.Read(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Boot != tc.want {
+			t.Errorf("Boot %q: Read gives %q, want %q", tc.set, got.Boot, tc.want)
+		}
+	}
+}
+
+func TestReadManifestWithoutBootField(t *testing.T) {
+	dir := t.TempDir()
+	old := `{"formatVersion": 1, "contemperVersion": "0.2.0", "target": "qemu-qcow2", "arch": "arm64",
+  "disk": {"file": "disk.qcow2", "format": "qcow2", "sizeBytes": 1, "sha256": "x"}}`
+	if err := os.WriteFile(dir+"/contemper.json", []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := bundle.Read(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Boot != bundle.BootUKI {
+		t.Errorf("Boot = %q for a manifest without the field, want %q", m.Boot, bundle.BootUKI)
+	}
+}
