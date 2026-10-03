@@ -5,6 +5,12 @@
 # ../../docs/design/bootloader-images.md for the contract this satisfies:
 # an EFI binary at the removable-media fallback path under /boot/efi, and
 # a configuration that finds the root filesystem by its label.
+#
+# The image is Secure Boot capable: the shim and GRUB it installs are
+# Debian's signed binaries. To boot it with UEFI Secure Boot enabled, add
+# io.contemper.secure-boot="true" to the LABEL below (deploying then
+# needs Secure Boot firmware with Microsoft's keys enrolled). It is left
+# off here so the example also deploys on hosts without such firmware.
 FROM debian:trixie-slim
 
 LABEL io.contemper.ready="true" \
