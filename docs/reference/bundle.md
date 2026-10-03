@@ -126,6 +126,38 @@ replaced as a whole, so files the new run doesn't produce (for example a
 subdirectory exists, is not empty and has no `contemper.json`, `convert`
 refuses to touch it and fails before doing any work.
 
+## Group file
+
+A `convert` run given an `--arch` list or `all` (see
+[multi-architecture](../guide/multi-arch.md)) also writes a group file
+beside its bundles, so a script can find the one for a given
+architecture. It is named `<name>.multiarch.json`, where `<name>` is the
+bundles' shared `<repository>-<tag>`, and a later run replaces it.
+
+```json
+{
+  "formatVersion": 1,
+  "source": {
+    "ref": "oci-archive:_out/example.tar",
+    "repo": "example"
+  },
+  "bundles": [
+    { "arch": "amd64", "path": "example-dev.x86_64" },
+    { "arch": "arm64", "path": "example-dev.aarch64" }
+  ]
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `formatVersion` | group file format version, currently `1` |
+| `source.ref`, `source.repo` | the source reference as given, and the source image's repository name, as in each bundle's manifest; there is no `source.digest` because every architecture resolves to its own image (each bundle's manifest records its digest) |
+| `bundles[].arch` | the image architecture (`amd64`, `arm64`), at most once each |
+| `bundles[].path` | the bundle directory, relative to the group file's own directory; never absolute and never leaving that directory |
+
+The file lists at least one bundle, in amd64, arm64 order. Single-architecture
+runs write no group file.
+
 !!! note "On \"no new artifact format\""
     contemper reads only normal OCI images. A bundle is an *output*, and a
     directory holding a disk and a JSON file barely qualifies as a format.

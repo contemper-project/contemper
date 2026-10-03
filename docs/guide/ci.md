@@ -12,7 +12,8 @@ bundle, nothing more.
 - **Sign and scan** as usual. cosign, Trivy, admission policies and
   retention rules all apply unmodified, because it's a plain OCI image.
 - **Convert** with `contemper convert --target <target> <ref>` per
-  target and architecture. No container runtime, no privileged builder,
+  target, and `--arch all` converts every architecture the index
+  provides in one run. No container runtime, no privileged builder,
   no emulation. It parallelizes trivially, since each conversion is
   independent and read-only against the source.
 - **Boot-test** with `contemper deploy --to local-qemu --expect <marker>`
