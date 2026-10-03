@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -64,6 +66,7 @@ type buildOptions struct {
 
 type deployOptions struct {
 	bundleDir    string
+	arch         string
 	to           string
 	name         string
 	volumes      []string
@@ -965,9 +968,12 @@ func runDeploy(ctx context.Context, _ *cobra.Command, opts deployOptions) error 
 		return fmt.Errorf("unknown deploy target %q (only local-qemu is supported)", opts.to)
 	}
 
-	manifest, err := bundle.Read(opts.bundleDir)
+	bundleDir, manifest, chosen, err := resolveDeployBundle(opts.bundleDir, opts.arch)
 	if err != nil {
 		return err
+	}
+	if chosen != "" {
+		rep.Line("🧭", "bundle "+filepath.Base(bundleDir), chosen)
 	}
 
 	overrides, err := parseVolumeOverrides(opts.volumes)
@@ -1035,7 +1041,7 @@ func runDeploy(ctx context.Context, _ *cobra.Command, opts deployOptions) error 
 
 	return qemu.Deploy(ctx, qemu.Options{
 		Arch:          manifest.Arch,
-		DiskPath:      filepath.Join(opts.bundleDir, manifest.Disk.File),
+		DiskPath:      filepath.Join(bundleDir, manifest.Disk.File),
 		DiskFormat:    manifest.Disk.Format,
 		Volumes:       attachments,
 		SecureBoot:    manifest.SecureBoot,
@@ -1044,6 +1050,79 @@ func runDeploy(ctx context.Context, _ *cobra.Command, opts deployOptions) error 
 		Timeout:       timeout,
 		Progress:      rep,
 	})
+}
+
+// resolveDeployBundle turns deploy's path argument into a bundle
+// directory and its manifest. path is a bundle directory, or a group
+// file (see bundle.Group), from which the bundle for arch is taken, or
+// for the host's architecture when arch is empty. chosen describes the
+// selection for the report and is empty for a plain bundle directory.
+// A plain bundle directory boots whatever its architecture is (a
+// foreign one under emulation), but an explicit arch must match it.
+func resolveDeployBundle(path, arch string) (dir string, m *bundle.Manifest, chosen string, err error) {
+	if arch != "" {
+		if _, err := source.HostPlatform(arch); err != nil {
+			return "", nil, "", err
+		}
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return "", nil, "", err
+	}
+	if fi.IsDir() {
+		m, err := bundle.Read(path)
+		if err != nil {
+			return "", nil, "", err
+		}
+		if arch != "" && m.Arch != arch {
+			return "", nil, "", fmt.Errorf("--arch %s does not match the bundle %s, which is for %s", arch, path, m.Arch)
+		}
+		return path, m, "", nil
+	}
+
+	if !strings.HasSuffix(filepath.Base(path), bundle.GroupSuffix) {
+		if filepath.Base(path) == bundle.ManifestFile {
+			return "", nil, "", fmt.Errorf("%s is a bundle manifest; pass the bundle directory %s instead", path, filepath.Dir(path))
+		}
+		return "", nil, "", fmt.Errorf("%s is neither a bundle directory nor a <name>%s group file", path, bundle.GroupSuffix)
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", nil, "", err
+	}
+	g, err := bundle.ReadGroup(resolved)
+	if err != nil {
+		return "", nil, "", err
+	}
+	var want, how string
+	if arch != "" {
+		want, how = arch, "from --arch"
+	} else {
+		// Left unmapped on purpose: an unsupported host falls through to
+		// the "no bundle for" error below instead of one about --arch.
+		want, how = runtime.GOARCH, "matches host"
+	}
+	rel, ok := g.Find(want)
+	if !ok {
+		var have []string
+		for _, b := range g.Bundles {
+			have = append(have, b.Arch)
+		}
+		msg := fmt.Sprintf("%s has no bundle for %s (available: %s)", path, want, strings.Join(have, ", "))
+		if arch == "" {
+			msg += "; pick one with --arch"
+		}
+		return "", nil, "", errors.New(msg)
+	}
+	dir = filepath.Join(filepath.Dir(resolved), filepath.FromSlash(rel))
+	m, err = bundle.Read(dir)
+	if err != nil {
+		return "", nil, "", err
+	}
+	if m.Arch != want {
+		return "", nil, "", fmt.Errorf("%s lists %s as %s, but its manifest says %s; convert again", path, rel, want, m.Arch)
+	}
+	return dir, m, fmt.Sprintf("%s, %s", want, how), nil
 }
 
 // parseVolumeOverrides parses --volume <path>=<size> flags into a

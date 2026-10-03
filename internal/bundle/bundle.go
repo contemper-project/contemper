@@ -137,9 +137,12 @@ type Manifest struct {
 	Reproducible bool     `json:"reproducible"`
 }
 
+// ManifestFile is the bundle manifest's file name inside a bundle directory.
+const ManifestFile = "contemper.json"
+
 // Read parses <dir>/contemper.json.
 func Read(dir string) (*Manifest, error) {
-	path := filepath.Join(dir, "contemper.json")
+	path := filepath.Join(dir, ManifestFile)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", path, err)
@@ -192,7 +195,7 @@ func Write(dir string, m *Manifest) error {
 		return fmt.Errorf("marshaling contemper.json: %w", err)
 	}
 	data = append(data, '\n')
-	path := filepath.Join(dir, "contemper.json")
+	path := filepath.Join(dir, ManifestFile)
 	// contemper.json is part of the bundle deliverable, meant to be read
 	// by whatever deploys it - same reasoning as the bundle directory
 	// itself (see the MkdirAll call that creates dir, in cmd/contemper).
