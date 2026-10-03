@@ -84,6 +84,7 @@ nav:
       - Image config: design/image-config.md
       - Support image resolution: design/support-images.md
       - Root filesystem: design/root-filesystem.md
+      - Bootloader images: design/bootloader-images.md
       - Lifecycle phases and the bundle: design/phases.md
       - Volumes and providers: design/volumes-and-providers.md
       - Rejected approaches: design/rejected.md

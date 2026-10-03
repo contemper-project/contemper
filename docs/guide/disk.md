@@ -12,6 +12,11 @@ Two partitions on a GPT disk, 1 MiB-aligned:
 The UKI sits at the UEFI fallback path for the architecture, so the
 firmware finds it without any boot entry being registered on the host.
 
+An image that brings its own bootloader (`io.contemper.boot=bootloader`)
+gets a 512 MiB ESP holding its `/boot/efi` tree instead of the UKI; the
+root partition is unchanged. See [Bootloader
+images](../design/bootloader-images.md).
+
 contemper adds `root=LABEL=contemper-root` to the front of the kernel
 command line, so the kernel finds the root partition without the image
 having to know about the disk layout.
