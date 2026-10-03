@@ -12,7 +12,9 @@ package guestmeta
 import (
 	"bytes"
 	"fmt"
+	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -166,6 +168,63 @@ func RenderNoSeed(names []string) []byte {
 // space or tab stays one field.
 func FstabLine(name, path string) string {
 	return fmt.Sprintf("LABEL=%s %s ext4 defaults,nofail 0 2", name, fstabEscaper.Replace(path))
+}
+
+// ESPMountPoint is where a bootloader image's ESP is mounted in the guest,
+// the path most distributions' bootloader and kernel packages expect.
+const ESPMountPoint = "/boot/efi"
+
+// ESPFstabLine renders the fstab line that mounts the ESP at
+// ESPMountPoint, finding it by its FAT volume label. The label is matched
+// case-sensitively and contemper's own ext4 volume labels are lowercase
+// ([a-z0-9-]), so an upper-case label such as "ESP" cannot collide with a
+// volume. There is deliberately no nofail: the ESP is on the boot disk
+// itself, so it is always present, and with nofail systemd would not
+// order the mount before local-fs.target, letting early writers (package
+// postinst scripts, say) put files into the root filesystem's /boot/efi
+// underneath. The pass number 2 is harmless when no fsck.fat is
+// installed: systemd-fsck skips a missing checker, and util-linux and
+// BusyBox fsck print a warning and continue.
+func ESPFstabLine(label string) string {
+	return fmt.Sprintf("LABEL=%s %s vfat umask=0077 0 2", label, ESPMountPoint)
+}
+
+// HasMountPoint reports whether fstab has an entry whose mount point
+// (second field) is mountPoint. Blank lines and comments are skipped,
+// fields are split on whitespace, and octal escapes (\040 and friends)
+// are decoded before comparing. Both sides are cleaned, so an entry
+// written with a trailing slash ("/boot/efi/") matches too.
+func HasMountPoint(fstab []byte, mountPoint string) bool {
+	want := path.Clean(mountPoint)
+	for _, line := range strings.Split(string(fstab), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || strings.HasPrefix(fields[0], "#") {
+			continue
+		}
+		if path.Clean(unescapeFstab(fields[1])) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// unescapeFstab decodes the \NNN octal escapes fstab(5) uses in fields.
+func unescapeFstab(s string) string {
+	if !strings.Contains(s, `\`) {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+4 <= len(s) {
+			if n, err := strconv.ParseUint(s[i+1:i+4], 8, 8); err == nil {
+				b.WriteByte(byte(n))
+				i += 3
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }
 
 // fstabEscaper octal-escapes the characters fstab(5) treats as field

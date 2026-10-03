@@ -128,6 +128,26 @@ func Image(platform v1.Platform, labels map[string]string, layers ...[]File) (v1
 	return mutate.ConfigFile(img, cfg)
 }
 
+// WithVolumes returns img with the given VOLUME paths declared in its
+// config.
+func WithVolumes(img v1.Image, paths ...string) (v1.Image, error) {
+	if len(paths) == 0 {
+		return img, nil
+	}
+	cfg, err := img.ConfigFile()
+	if err != nil {
+		return nil, err
+	}
+	cfg = cfg.DeepCopy()
+	if cfg.Config.Volumes == nil {
+		cfg.Config.Volumes = map[string]struct{}{}
+	}
+	for _, p := range paths {
+		cfg.Config.Volumes[p] = struct{}{}
+	}
+	return mutate.ConfigFile(img, cfg)
+}
+
 // WhiteoutFile returns a File that whites out name in a higher layer.
 func WhiteoutFile(name string) File {
 	dir, base := splitPath(name)

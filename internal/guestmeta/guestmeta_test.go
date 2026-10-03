@@ -185,3 +185,38 @@ func TestFstabLineEscapesMountPoint(t *testing.T) {
 		t.Errorf("FstabLine has %d fields, want 6: %q", n, got)
 	}
 }
+
+func TestESPFstabLine(t *testing.T) {
+	const want = "LABEL=ESP /boot/efi vfat umask=0077 0 2"
+	if got := guestmeta.ESPFstabLine("ESP"); got != want {
+		t.Errorf("ESPFstabLine = %q, want %q", got, want)
+	}
+}
+
+func TestHasMountPoint(t *testing.T) {
+	for name, tc := range map[string]struct {
+		fstab string
+		want  bool
+	}{
+		"empty":           {"", false},
+		"plain":           {"UUID=1 /boot/efi vfat defaults 0 2\n", true},
+		"tabs":            {"UUID=1\t/boot/efi\tvfat\tdefaults\t0\t2", true},
+		"trailing slash":  {"UUID=1 /boot/efi/ vfat defaults 0 2\n", true},
+		"commented out":   {"# UUID=1 /boot/efi vfat defaults 0 2\n", false},
+		"indented":        {"   UUID=1 /boot/efi vfat defaults 0 2\n", true},
+		"escaped slash":   {"UUID=1 /boot\\057efi vfat defaults 0 2\n", true},
+		"other mount":     {"UUID=1 /boot vfat defaults 0 2\nUUID=2 /boot/efi2 vfat defaults 0 2\n", false},
+		"in other field":  {"/boot/efi /mnt none bind 0 0\n", false},
+		"one field only":  {"/boot/efi\n", false},
+		"space in mount":  {"UUID=1 /boot/efi\\040x vfat defaults 0 2\n", false},
+		"later line":      {"/dev/vda2 / ext4 defaults 0 1\n\n# c\nUUID=1 /boot/efi vfat defaults 0 2\n", true},
+		"truncated octal": {"UUID=1 /boot/efi\\04 vfat defaults 0 2\n", false},
+	} {
+		if got := guestmeta.HasMountPoint([]byte(tc.fstab), "/boot/efi"); got != tc.want {
+			t.Errorf("%s: HasMountPoint = %v, want %v", name, got, tc.want)
+		}
+	}
+	if !guestmeta.HasMountPoint([]byte("UUID=1 /data\\040dir ext4 defaults 0 2\n"), "/data dir") {
+		t.Error("escaped space did not match")
+	}
+}

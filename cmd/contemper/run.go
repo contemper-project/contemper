@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -148,6 +150,15 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 	if err != nil {
 		rep.Fail("volumes", err.Error(), "")
 		return err
+	}
+	if bootMode == source.BootBootloader {
+		for _, sp := range specs {
+			if coversESPMountPoint(sp.Path) {
+				err := fmt.Errorf("volume %s covers the ESP mount point %s: a volume there would hide or double-mount the ESP", sp.Path, guestmeta.ESPMountPoint)
+				rep.Fail("volumes", err.Error(), "in bootloader mode contemper mounts the ESP at "+guestmeta.ESPMountPoint+"; declare the volume at a path that is not "+guestmeta.ESPMountPoint+" or one of its parents")
+				return err
+			}
+		}
 	}
 	if rootSizeBytes == 0 {
 		rootSizeBytes, err = volume.RootSize(cfg.Config.Labels)
@@ -336,10 +347,11 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 		return fmt.Errorf("writing %s: %w", guestmeta.BuildPath, err)
 	}
 
+	fstabOptedOut := opts.noFstab || volume.FstabOptedOut(cfg.Config.Labels)
+	var fstabLines []string
 	if len(specs) > 0 {
 		rep.Line("💾", fmt.Sprintf("%d %s declared", len(specs), pluralize(len(specs), "volume")), "")
 		var lines []guestmeta.VolumeLine
-		var fstabLines []string
 		// Every mount point is created before any volume's seed report
 		// below, so a volume nested under another one (/data/sub under
 		// /data) counts as content of the outer volume: the guest helper
@@ -371,25 +383,49 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 			}
 		}
 
-		if opts.noFstab || volume.FstabOptedOut(cfg.Config.Labels) {
+		if fstabOptedOut {
 			rep.Sub("·", "fstab", "opted out")
 		} else {
-			var existing []byte
-			if _, ok := rfs.Lookup(guestmeta.FstabPath); ok {
-				existing, err = rfs.ReadFile(guestmeta.FstabPath)
-				if err != nil {
-					return fmt.Errorf("reading %s: %w", guestmeta.FstabPath, err)
-				}
-			}
-			updated, changed := guestmeta.AppendFstab(existing, fstabLines)
-			if changed {
-				if err := rfs.WriteFile(guestmeta.FstabPath, updated); err != nil {
-					return fmt.Errorf("writing %s: %w", guestmeta.FstabPath, err)
-				}
-			}
 			rep.Sub("✔", "fstab", "LABEL=<name> <path> ext4 defaults,nofail 0 2")
 		}
 		rep.Blank()
+	}
+
+	// The ESP is mounted from fstab in bootloader mode so kernel and
+	// bootloader updates inside the guest reach it, unless the image opts
+	// out of fstab lines or already mounts its ESP directory itself.
+	var espFstab espFstabOutcome
+	var existingFstab []byte
+	if !fstabOptedOut && (bootMode == source.BootBootloader || len(fstabLines) > 0) {
+		existingFstab, err = readFstab(rfs)
+		if err != nil {
+			return err
+		}
+	}
+	if bootMode == source.BootBootloader {
+		// /boot/efi may be a symlink (to /efi, say); an entry for the
+		// directory it resolves to is the image's own ESP entry too. A
+		// missing or unusable /boot/efi is reported by the validation below.
+		espDirs := []string{guestmeta.ESPMountPoint}
+		if root, err := rfs.Resolve(validate.EFIDir); err == nil && root.Path != guestmeta.ESPMountPoint {
+			espDirs = append(espDirs, root.Path)
+		}
+		switch {
+		case fstabOptedOut:
+			espFstab = espFstabSkipped
+		case slices.ContainsFunc(espDirs, func(d string) bool { return guestmeta.HasMountPoint(existingFstab, d) }):
+			espFstab = espFstabKept
+		default:
+			espFstab = espFstabAdded
+			fstabLines = append(fstabLines, guestmeta.ESPFstabLine(disk.ESPVolumeLabel))
+		}
+	}
+	if !fstabOptedOut && len(fstabLines) > 0 {
+		if updated, changed := guestmeta.AppendFstab(existingFstab, fstabLines); changed {
+			if err := rfs.WriteFile(guestmeta.FstabPath, updated); err != nil {
+				return fmt.Errorf("writing %s: %w", guestmeta.FstabPath, err)
+			}
+		}
 	}
 
 	var val *validate.Result
@@ -400,6 +436,7 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 			return err
 		}
 		reportBootloader(rep, val.Bootloader)
+		reportESPFstab(rep, espFstab)
 		rep.Line("✅", "requirements satisfied", "bootloader · ESP tree")
 	} else {
 		val, err = validate.Validate(rfs)
@@ -635,6 +672,53 @@ func reportBootloader(rep *progress.Reporter, b *validate.Bootloader) {
 	}
 	if b.InitMissing {
 		rep.Warn(validate.InitPath, "not found in the image; the bootloader configuration must then pass init= on the kernel command line")
+	}
+}
+
+// coversESPMountPoint reports whether a volume mounted at p is the ESP
+// mount point or one of its parents (/boot, /).
+func coversESPMountPoint(p string) bool {
+	p = path.Clean(p)
+	for d := guestmeta.ESPMountPoint; ; d = path.Dir(d) {
+		if p == d {
+			return true
+		}
+		if d == "/" {
+			return false
+		}
+	}
+}
+
+// readFstab returns the merged rootfs's /etc/fstab, or nil if it has none.
+func readFstab(rfs *rootfs.Rootfs) ([]byte, error) {
+	if _, ok := rfs.Lookup(guestmeta.FstabPath); !ok {
+		return nil, nil
+	}
+	b, err := rfs.ReadFile(guestmeta.FstabPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", guestmeta.FstabPath, err)
+	}
+	return b, nil
+}
+
+// espFstabOutcome is what happened to the ESP's fstab line.
+type espFstabOutcome int
+
+const (
+	espFstabAdded espFstabOutcome = iota
+	espFstabKept
+	espFstabSkipped
+)
+
+// reportESPFstab prints the sub-line for the ESP's fstab entry.
+func reportESPFstab(rep *progress.Reporter, o espFstabOutcome) {
+	switch o {
+	case espFstabAdded:
+		rep.Sub("✔", "fstab", guestmeta.ESPFstabLine(disk.ESPVolumeLabel))
+	case espFstabKept:
+		rep.Sub("·", "fstab", "kept the image's own "+guestmeta.ESPMountPoint+" entry")
+	case espFstabSkipped:
+		rep.Sub("·", "fstab", "skipped: fstab opt-out, no "+guestmeta.ESPMountPoint+" entry added")
 	}
 }
 
