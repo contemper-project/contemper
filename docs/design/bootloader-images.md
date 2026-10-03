@@ -130,7 +130,10 @@ Without executing anything from the image, `convert` validates:
   firmware do), is a regular file, and is a PE32+ image whose
   COFF machine type matches the target architecture (`0x8664` for amd64,
   `0xAA64` for arm64) and whose optional-header subsystem is EFI
-  application (10).
+  application (10);
+- with `io.contemper.secure-boot="true"`, that the image is a bootloader
+  image and that the fallback file carries an Authenticode signature (see
+  [Secure Boot](#secure-boot)).
 
 `/sbin/init` is not required in this mode, since the bootloader
 configuration may pass `init=`; `convert` prints a warning when it does not
@@ -146,8 +149,8 @@ before shipping.
   ships its bootloader already installed under `/boot/efi`.
 - It does not check that the kernels or configuration the bootloader will
   look for exist.
-- It does not provide Secure Boot support. See [Secure
-  Boot](#secure-boot).
+- It does not sign anything or manage Secure Boot keys. The image brings
+  its own signed bootloader; see [Secure Boot](#secure-boot).
 
 ## In-place updates
 
@@ -193,19 +196,57 @@ this.
 
 An image may ship shim plus a signed bootloader at the fallback path;
 the example does. With Secure Boot disabled, shim simply loads the signed
-bootloader from its own directory. Booting with Secure Boot enabled is
-tracked separately. Shim
-is a PE32+ EFI application, so the check on the fallback file accepts it.
+bootloader from its own directory. Shim is a PE32+ EFI application, so the
+check on the fallback file accepts it.
+
+**The label.** An image asks for the VM to boot with UEFI Secure Boot
+enabled with the label `io.contemper.secure-boot="true"`. Absent or
+`"false"` means off; any other value is a convert error. There is no
+deploy flag: the image declares it, like the boot mode.
+
+**Convert checks**, when it is `"true"`:
+
+- The image must be a bootloader image. The label on a UKI image
+  (`io.contemper.boot` absent or `uki`) is a convert error, because the
+  UKI contemper assembles is unsigned and cannot boot under Secure Boot.
+  Signing UKIs is not supported.
+- The fallback EFI binary must carry an Authenticode signature: the
+  Certificate Table data directory (index 4) of its PE optional header
+  has a non-zero size and lies within the file. This is a sanity check
+  that catches an unsigned bootloader early. It does not verify the
+  signature or its chain, so it says nothing about whether the firmware's
+  keys trust it. A binary signed by a key the firmware does not trust
+  passes `convert` and fails to boot.
+
+**Firmware.** The bundle manifest records the request as `secureBoot`.
+For such a bundle, `deploy --to local-qemu` boots Secure Boot firmware
+with Microsoft's keys enrolled, using a writable copy of its variable
+store. Both files of a pair must exist:
+
+| Architecture | Firmware (code + variable store) |
+| --- | --- |
+| amd64 | `/usr/share/OVMF/OVMF_CODE_4M.secboot.fd` + `/usr/share/OVMF/OVMF_VARS_4M.ms.fd` (Debian, Ubuntu) |
+| amd64 | `/usr/share/edk2/ovmf/OVMF_CODE.secboot.fd` + `/usr/share/edk2/ovmf/OVMF_VARS.secboot.fd` (Fedora) |
+| arm64 | `/usr/share/AAVMF/AAVMF_CODE.secboot.fd` + `/usr/share/AAVMF/AAVMF_VARS.ms.fd` (Debian, Ubuntu) |
+
+On amd64 the machine is started as `q35,smm=on` with secure pflash
+(`-global driver=cfi.pflash01,property=secure,value=on`), which the
+Secure Boot OVMF build needs; arm64 needs neither. Homebrew's QEMU ships
+no variable store with keys enrolled, so there is no candidate on macOS.
+If no pair exists, deploy fails before starting QEMU and lists the paths
+it searched; it never falls back to firmware without Secure Boot.
 
 ## Bundle manifest
 
 The [bundle manifest](../reference/bundle.md) records the mode in an
-additive field, `boot`, with the value `"uki"` or `"bootloader"`.
+additive field, `boot`, with the value `"uki"` or `"bootloader"`, and
+records a Secure Boot request in a second additive field, `secureBoot`.
 
 ## Interaction with other features
 
 - **Targets.** `deploy --to local-qemu` needs nothing new: the firmware
-  boots the fallback path either way.
+  boots the fallback path either way. With `secureBoot` in the manifest it
+  picks Secure Boot firmware; see [Secure Boot](#secure-boot).
 - **Support images and volumes** work as in UKI mode.
 - **Volumes and in-place updates.** An image that updates itself in place
   keeps its root disk, which is at odds with replacing the disk on

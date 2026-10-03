@@ -193,12 +193,13 @@ hook, which runs `update-grub`, and a GRUB package upgrade runs
 
 ## What convert checks
 
-`convert` checks that the label value is valid, that `/boot/efi` is a
+`convert` checks that the label values are valid, that `/boot/efi` is a
 directory, and that the fallback file exists and is a PE32+ EFI
 application for the target architecture. It also checks the FAT rules
 above and that the tree fits the ESP. `/sbin/init` is not required,
 since your bootloader configuration may pass `init=`; `convert` warns if
-it does not resolve.
+it does not resolve. With `io.contemper.secure-boot="true"` it also
+checks that the fallback file carries a signature.
 
 It does not check the bootloader's configuration, or that the kernels it
 will look for exist. A wrong configuration shows up at boot. Boot the
@@ -236,5 +237,26 @@ it for the mount point.
 
 An image may ship shim and a signed bootloader at the fallback path; the
 Debian example does. With Secure Boot disabled, shim simply loads the
-bootloader. Booting with Secure Boot enabled is not supported yet, so
-don't rely on it.
+bootloader.
+
+To boot with Secure Boot enabled, declare it in the image. For the
+Debian example, add one label:
+
+```dockerfile
+LABEL io.contemper.ready="true" \
+      io.contemper.boot="bootloader" \
+      io.contemper.secure-boot="true"
+```
+
+`convert` then checks that the fallback binary carries a signature (the
+example's shim does) and records the request in the manifest. It does
+not verify the signature's chain, so a bootloader signed with a key the
+firmware does not trust fails at boot, not at convert. The label is only
+valid on bootloader images: contemper's UKI is unsigned. Locally,
+`deploy --to local-qemu` then needs Secure Boot firmware with Microsoft's
+keys enrolled; see [Deploying locally](deploying.md) and the
+[design](../design/bootloader-images.md#secure-boot).
+
+With Secure Boot on, GRUB prints `error: prohibited by secure boot policy.`
+for the modules Debian's generated configuration loads from disk (such as
+`bli`). The signed GRUB cannot load them, and booting continues.

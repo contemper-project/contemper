@@ -18,6 +18,12 @@ $ contemper deploy --to local-qemu _out/my-appliance-dev.aarch64/
 - UEFI firmware is found in Homebrew's qemu and in the usual distro
   packages (OVMF, AAVMF, `qemu-efi-aarch64`). Where a distro ships a
   variable-store template, the VM gets a writable copy of it.
+- A bundle that asks for UEFI Secure Boot needs OVMF/AAVMF firmware with
+  Microsoft's keys enrolled (on Debian or Ubuntu, the `ovmf` or
+  `qemu-efi-aarch64` package). Deploy fails, listing the paths it
+  searched, if there is none; it does not boot without Secure Boot
+  instead. See [Secure
+  Boot](../design/bootloader-images.md#secure-boot).
 - The VM's serial console streams to your terminal.
 
 ## Boot tests

@@ -33,6 +33,7 @@ tool.
 | `volumeHelper.ref`, `volumeHelper.digest`, `volumeHelper.variants` | the automatically merged volume-formatting support image, in the same shape as `support` (without `origin`), if the source image declares volumes and `--no-volume-helper` wasn't given |
 | `target` | the canonical target name, for example `qemu-qcow2`, never the alias |
 | `boot` | how the image boots: `"uki"` (contemper assembled a UKI) or `"bootloader"` (the image's own bootloader is on the ESP, see [Bootloader images](../design/bootloader-images.md)). Manifests written before this field existed lack it; read them as `"uki"` |
+| `secureBoot` | `true` when the image asked for UEFI Secure Boot with `io.contemper.secure-boot` (bootloader images only); omitted otherwise. `deploy --to local-qemu` then boots Secure Boot firmware, see [Secure Boot](../design/bootloader-images.md#secure-boot). Manifests written before this field existed lack it; read them as `false` |
 | `arch` | the image architecture (`arm64`, `amd64`) |
 | `disk.file`, `disk.format`, `disk.sizeBytes`, `disk.sha256` | the disk file and its checksum |
 | `volumes` | one object per volume declared with `VOLUME`: `name`, `path`, `size` (bytes; omitted if unsized), `fs` (always `"ext4"`) |
