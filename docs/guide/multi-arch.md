@@ -82,3 +82,30 @@ architecture, leaves an existing group file as it was. All architectures
 of a run must resolve to the same bundle name; if they don't, the run
 stops, since one group file can't describe them. See the [bundle
 reference](../reference/bundle.md#group-file) for the format.
+
+## Deploying from a group file
+
+`deploy --to local-qemu` accepts the group file in place of a bundle
+directory and boots the bundle for the host's architecture:
+
+```console
+$ contemper deploy --to local-qemu _out/my-appliance-dev.multiarch.json
+```
+
+The report names the bundle it chose. `--arch amd64` or `--arch arm64`
+picks a specific one instead; a bundle for a foreign architecture runs
+under software emulation, so it is slow. If the group has no bundle for
+the host and no `--arch` is given, deploy fails and lists the
+architectures the group does have. It also fails if a bundle's manifest
+disagrees with the architecture the group file lists it under, which
+means the files are stale: convert again.
+
+Everything else behaves as if you had passed the chosen bundle directory:
+volumes and boot-test flags work as usual. The default instance name comes
+from the source repository recorded in the bundle, so it is the same for
+every architecture of a group, and so is the instance's volume state:
+booting the amd64 bundle and then the arm64 one under the default name
+reuses the same volume disks, and fails if a volume's size differs from
+the existing disk's. Pass `--name` to
+keep the architectures apart, and don't boot both at once under the same
+name.

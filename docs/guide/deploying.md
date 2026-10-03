@@ -8,6 +8,12 @@ image boots, and the basis of automated boot tests.
 $ contemper deploy --to local-qemu _out/my-appliance-dev.aarch64/
 ```
 
+- The argument is a bundle directory, or the `<name>.multiarch.json`
+  group file of a [multi-architecture](multi-arch.md#deploying-from-a-group-file)
+  run, in which case the bundle for the host's architecture is booted
+  (`--arch` picks another). With a bundle directory, `--arch` is
+  optional and must match the bundle's architecture; without it, any
+  bundle boots.
 - The disk is booted with `snapshot=on`: writes go to a throwaway
   overlay, so the bundle stays unchanged and can be booted again from
   scratch.
