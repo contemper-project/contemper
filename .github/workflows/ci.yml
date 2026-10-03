@@ -101,6 +101,7 @@ jobs:
             support/volumes-support/systemd/etc/systemd/system-generators/contemper-volumes \
             hack/e2e-volumes/files/check-volume.sh \
             hack/e2e-volumes/files/zzz-contemper-volume-test.start
+          shellcheck -s sh hack/e2e-bootloader/files/kernel-update.sh
 
   test:
     needs: changes
@@ -180,7 +181,8 @@ jobs:
     # podman build → convert --target qemu → deploy --to local-qemu,
     # waiting for the boot marker; one leg per init system - alpine/
     # OpenRC, debian/systemd, archlinux/systemd (mkinitcpio instead of
-    # initramfs-tools). The extra alpine leg (build_command: true) goes
+    # initramfs-tools), and debian-grub, which boots with its own GRUB
+    # instead of a UKI. The extra alpine leg (build_command: true) goes
     # through `contemper build` (docker buildx build --load, then the
     # docker-daemon: source) instead, so that path is exercised against
     # a real Docker daemon too; see hack/e2e.sh's --build-command.
@@ -192,7 +194,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        example: [alpine, debian, archlinux]
+        example: [alpine, debian, debian-grub, archlinux]
         build_command: [false]
         include:
           - example: alpine
@@ -370,6 +372,61 @@ jobs:
           path: _out/volumes/serial-*.log
           if-no-files-found: ignore
 
+  e2e-bootloader:
+    # Bootloader images end to end: examples/debian-grub with a second
+    # kernel added (hack/e2e-bootloader/), booted, updated to that
+    # kernel from inside the guest, rebooted, and checked to run it with
+    # the ESP still mounted. See hack/e2e-bootloader.sh.
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # The runner has /dev/kvm, but not accessible to the runner user.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      # podman and e2fsprogs are preinstalled on ubuntu-latest.
+      - name: Install qemu and UEFI firmware
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils ovmf
+      - name: Boot test with an in-guest kernel update
+        env:
+          CONTEMPER_E2E_COVERDIR: _gocover
+        run: ./hack/e2e-bootloader.sh --timeout 600s
+      # See the `e2e` job's "Convert integration coverage" step.
+      - name: Convert integration coverage
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -d _gocover ] && [ -n "$(ls -A _gocover)" ]; then
+            go tool covdata textfmt -i=_gocover -o e2e-coverage.out
+          else
+            echo "no integration coverage data in _gocover; skipping"
+          fi
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: e2e-coverage.out
+          flags: e2e
+          fail_ci_if_error: false
+      - name: Upload serial log
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-bootloader-serial-log
+          path: _out/bootloader/serial.log
+          if-no-files-found: ignore
+
   ci-result:
     # The one check to mark required in branch protection instead of any
     # job above. A matrix job skipped by its own `if:` reports a single
@@ -379,7 +436,7 @@ jobs:
     # docs-only PR, since that exact check never gets created. This job
     # always runs and always has a stable name, and succeeds whenever
     # every job it depends on is either "success" or "skipped".
-    needs: [changes, lint, test, build, e2e, e2e-variants, e2e-volumes]
+    needs: [changes, lint, test, build, e2e, e2e-variants, e2e-volumes, e2e-bootloader]
     if: always()
     runs-on: ubuntu-latest
     steps:
