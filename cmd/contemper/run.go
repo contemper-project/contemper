@@ -17,6 +17,7 @@ import (
 	"github.com/contemper-project/contemper/internal/buildinfo"
 	"github.com/contemper-project/contemper/internal/buildx"
 	"github.com/contemper-project/contemper/internal/bundle"
+	"github.com/contemper-project/contemper/internal/disk"
 	"github.com/contemper-project/contemper/internal/guestmeta"
 	"github.com/contemper-project/contemper/internal/localqemu"
 	"github.com/contemper-project/contemper/internal/progress"
@@ -133,6 +134,15 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 		return err
 	}
 	rep.Line("✅", "contemper-ready", "")
+
+	bootMode, err := source.BootMode(cfg)
+	if err != nil {
+		rep.Fail("boot mode", err.Error(), "")
+		return err
+	}
+	if bootMode == source.BootBootloader {
+		rep.Line("✅", "boot mode", "bootloader")
+	}
 
 	specs, err := volume.FromConfig(bundle.SortedKeys(cfg.Config.Volumes), cfg.Config.Labels)
 	if err != nil {
@@ -382,13 +392,24 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 		rep.Blank()
 	}
 
-	val, err := validate.Validate(rfs)
-	if err != nil {
-		rep.Fail("validate", err.Error(), "a contemper-ready image must provide a kernel, initrd, cmdline and init at the fixed paths")
-		return err
+	var val *validate.Result
+	if bootMode == source.BootBootloader {
+		val, err = validate.CheckBootloader(rfs, platform.Architecture, disk.BootloaderESPSizeBytes)
+		if err != nil {
+			rep.Fail("validate", err.Error(), "a bootloader image must provide a bootable EFI tree at "+validate.EFIDir)
+			return err
+		}
+		reportBootloader(rep, val.Bootloader)
+		rep.Line("✅", "requirements satisfied", "bootloader · ESP tree")
+	} else {
+		val, err = validate.Validate(rfs)
+		if err != nil {
+			rep.Fail("validate", err.Error(), "a contemper-ready image must provide a kernel, initrd, cmdline and init at the fixed paths")
+			return err
+		}
+		reportFixedPaths(rep, rfs, val)
+		rep.Line("✅", "requirements satisfied", "kernel · initrd · init")
 	}
-	reportFixedPaths(rep, rfs, val)
-	rep.Line("✅", "requirements satisfied", "kernel · initrd · init")
 	rep.Blank()
 
 	bundleName := fmt.Sprintf("%s-%s.%s", img.RepoBase, img.Tag, machineArch(platform.Architecture))
@@ -438,6 +459,7 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 			Repo:   img.RepoBase,
 		},
 		Target: canonicalTarget,
+		Boot:   bootMode,
 		Arch:   platform.Architecture,
 		Disk: bundle.DiskInfo{
 			File:      diskInfo.Filename,
@@ -589,6 +611,30 @@ func reportFixedPaths(rep *progress.Reporter, rfs *rootfs.Rootfs, val *validate.
 	rep.Sub("✔", validate.InitPath, "")
 	if val.OSRelease != nil {
 		rep.Sub("✔", validate.OSReleasePath, "")
+	}
+}
+
+// reportBootloader prints the sub-lines for a bootloader image's /boot/efi
+// tree: where it resolved to, the fallback file, and whether
+// /boot/contemper was left unused.
+func reportBootloader(rep *progress.Reporter, b *validate.Bootloader) {
+	label := validate.EFIDir
+	if b.EFIRoot != validate.EFIDir {
+		label += " → " + b.EFIRoot
+	}
+	files := 0
+	for _, f := range b.Files {
+		if !f.Dir {
+			files++
+		}
+	}
+	rep.Sub("✔", label, fmt.Sprintf("%d %s · %s", files, pluralize(files, "file"), progress.HumanBytes(b.TotalBytes)))
+	rep.Sub("✔", b.FallbackPath, fmt.Sprintf("EFI application · %s", progress.HumanBytes(b.FallbackSize)))
+	if b.ContemperIgnored {
+		rep.Sub("·", "/boot/contemper", "present, ignored in bootloader mode")
+	}
+	if b.InitMissing {
+		rep.Warn(validate.InitPath, "not found in the image; the bootloader configuration must then pass init= on the kernel command line")
 	}
 }
 

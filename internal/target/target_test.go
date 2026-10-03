@@ -2,14 +2,22 @@ package target_test
 
 import (
 	"archive/tar"
+	"bytes"
+	"encoding/binary"
+	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
+	diskfs "github.com/diskfs/go-diskfs"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 
 	"github.com/contemper-project/contemper/internal/disk"
 	"github.com/contemper-project/contemper/internal/hostenv"
 	"github.com/contemper-project/contemper/internal/imgtest"
+	"github.com/contemper-project/contemper/internal/progress"
 	"github.com/contemper-project/contemper/internal/rootfs"
 	"github.com/contemper-project/contemper/internal/target"
 	"github.com/contemper-project/contemper/internal/uki"
@@ -202,5 +210,147 @@ func TestPrepareKernelUsedByAssembler(t *testing.T) {
 	out, warn, err := uki.PrepareKernel([]byte("MZfake"))
 	if err != nil || warn != "" || string(out) != "MZfake" {
 		t.Errorf("PrepareKernel(MZ...) = %q, %q, %v", out, warn, err)
+	}
+}
+
+// captureQemuImg puts a fake qemu-img on PATH that moves the raw disk it
+// is asked to convert to the returned path, so a test can read the disk
+// the assembler built.
+func captureQemuImg(t *testing.T) string {
+	t.Helper()
+	bin := t.TempDir()
+	capture := filepath.Join(t.TempDir(), "disk.raw")
+	script := "#!/bin/sh\nmv \"$4\" \"" + capture + "\" && printf 'placeholder qcow2\\n' > \"$5\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "qemu-img"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return capture
+}
+
+func bootloaderRootfs(t *testing.T, arch string, extra ...imgtest.File) (*rootfs.Rootfs, *validate.Result) {
+	t.Helper()
+	for _, name := range []string{"mkfs.ext4", "debugfs", "e2fsck"} {
+		if hostenv.Find(name) == "" {
+			t.Skipf("%s not found; skipping assembler test", name)
+		}
+	}
+	pe := make([]byte, 0x80+24+240)
+	pe[0], pe[1] = 'M', 'Z'
+	pe[0x3c] = 0x80
+	copy(pe[0x80:], "PE\x00\x00")
+	machine := map[string]uint16{"arm64": 0xAA64, "amd64": 0x8664}[arch]
+	binary.LittleEndian.PutUint16(pe[0x84:], machine)
+	binary.LittleEndian.PutUint16(pe[0x84+16:], 240)
+	binary.LittleEndian.PutUint16(pe[0x98:], 0x20b)
+	binary.LittleEndian.PutUint16(pe[0x98+68:], 10)
+
+	fallback := map[string]string{"arm64": "BOOTAA64.EFI", "amd64": "BOOTX64.EFI"}[arch]
+	files := append([]imgtest.File{
+		{Path: "boot/", Typeflag: tar.TypeDir},
+		{Path: "boot/efi/", Typeflag: tar.TypeDir},
+		{Path: "boot/efi/EFI/", Typeflag: tar.TypeDir},
+		{Path: "boot/efi/EFI/BOOT/", Typeflag: tar.TypeDir},
+		{Path: "boot/efi/EFI/BOOT/" + fallback, Data: pe},
+		{Path: "boot/efi/EFI/debian/", Typeflag: tar.TypeDir},
+		{Path: "boot/efi/EFI/debian/grub.cfg", Data: []byte("search --label contemper-root\n")},
+		{Path: "boot/efi/EFI/debian/a-rather-long-file-name.cfg", Data: []byte("long\n")},
+		{Path: "sbin/", Typeflag: tar.TypeDir},
+		{Path: "sbin/init", Data: []byte("#!/bin/sh\n"), Mode: 0o755},
+	}, extra...)
+	img, err := imgtest.Image(v1.Platform{OS: "linux", Architecture: arch}, map[string]string{
+		"io.contemper.ready": "true",
+		"io.contemper.boot":  "bootloader",
+	}, files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rfs, err := rootfs.Build(t.Context(), img, nil)
+	if err != nil {
+		t.Fatalf("rootfs.Build: %v", err)
+	}
+	t.Cleanup(func() { _ = rfs.Close() })
+	val, err := validate.CheckBootloader(rfs, arch, disk.BootloaderESPSizeBytes)
+	if err != nil {
+		t.Fatalf("validate.CheckBootloader: %v", err)
+	}
+	return rfs, val
+}
+
+func TestUEFIQcow2AssembleBootloader(t *testing.T) {
+	for _, arch := range []string{"arm64", "amd64"} {
+		t.Run(arch, func(t *testing.T) {
+			rfs, val := bootloaderRootfs(t, arch)
+			capture := captureQemuImg(t)
+			outDir := t.TempDir()
+			var report bytes.Buffer
+
+			if _, _, err := (target.UEFIQcow2{}).Assemble(t.Context(), rfs, val, arch, outDir, target.Options{Progress: progress.New(&report, progress.ModePlain, false, false)}); err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+
+			d, err := diskfs.Open(capture)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = d.Close() }()
+			table, err := d.GetPartitionTable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			parts := table.GetPartitions()
+			if len(parts) != 2 {
+				t.Fatalf("%d partitions, want 2", len(parts))
+			}
+			if got := parts[0].GetSize(); got != 512<<20 {
+				t.Errorf("ESP is %d bytes, want 512 MiB", got)
+			}
+			fs, err := d.GetFilesystem(1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			read := func(p string) string {
+				f, err := fs.OpenFile(p, os.O_RDONLY)
+				if err != nil {
+					t.Errorf("opening %s on the ESP: %v", p, err)
+					return ""
+				}
+				b, _ := io.ReadAll(f)
+				return string(b)
+			}
+			fallback := map[string]string{"arm64": "BOOTAA64.EFI", "amd64": "BOOTX64.EFI"}[arch]
+			if got := read("/EFI/BOOT/" + fallback); len(got) != 0x80+24+240 || got[:2] != "MZ" {
+				t.Errorf("fallback file on the ESP has %d bytes, want the image's PE file", len(got))
+			}
+			if got := read("/EFI/debian/grub.cfg"); got != "search --label contemper-root\n" {
+				t.Errorf("grub.cfg = %q", got)
+			}
+			if got := read("/EFI/debian/a-rather-long-file-name.cfg"); got != "long\n" {
+				t.Errorf("long-named file = %q", got)
+			}
+
+			// The whole image root, /boot/efi included, is on the ext4
+			// root: the ext4 magic is at offset 1080 of the partition.
+			var root bytes.Buffer
+			if _, err := d.ReadPartitionContents(2, &root); err != nil {
+				t.Fatal(err)
+			}
+			if b := root.Bytes(); len(b) < 1082 || b[1080] != 0x53 || b[1081] != 0xEF {
+				t.Errorf("root partition does not start with an ext4 superblock")
+			}
+			rootImg := filepath.Join(t.TempDir(), "root.img")
+			if err := os.WriteFile(rootImg, root.Bytes(), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			for _, p := range []string{"/boot/efi/EFI/BOOT/" + fallback, "/boot/efi/EFI/debian/grub.cfg"} {
+				out, err := exec.CommandContext(t.Context(), hostenv.Find("debugfs"), "-R", "stat "+p, rootImg).CombinedOutput()
+				if err != nil || !strings.Contains(string(out), "Type: regular") {
+					t.Errorf("%s is not on the ext4 root: %v\n%s", p, err, out)
+				}
+			}
+			if !strings.Contains(report.String(), "UEFI/bootloader") {
+				t.Errorf("stage title lacks the boot mode:\n%s", report.String())
+			}
+		})
 	}
 }
