@@ -11,6 +11,9 @@ import (
 	"github.com/contemper-project/contemper/internal/bundle"
 )
 
+// groupFile is the group file the fixture archive's bundles are listed in.
+const groupFile = "docker-save-latest.multiarch.json"
+
 // runConvertCmd runs `contemper convert` with args against a fake
 // qemu-img (the real ext4 host tools, which the caller must have checked
 // for) and returns its stdout.
@@ -91,6 +94,18 @@ func TestConvertAllArchitectures(t *testing.T) {
 				t.Errorf("%s manifest arch = %q, want %q", dir, m.Arch, arch)
 			}
 		}
+
+		g, err := bundle.ReadGroup(filepath.Join(outDir, groupFile))
+		if err != nil {
+			t.Fatalf("reading the group file: %v", err)
+		}
+		if len(g.Bundles) != 2 || g.Bundles[0] != (bundle.GroupBundle{Arch: "amd64", Path: "docker-save-latest.x86_64"}) ||
+			g.Bundles[1] != (bundle.GroupBundle{Arch: "arm64", Path: "docker-save-latest.aarch64"}) {
+			t.Errorf("group bundles = %+v", g.Bundles)
+		}
+		if g.Source.Ref != "oci-archive:"+archive || g.Source.Repo != "docker-save" {
+			t.Errorf("group source = %+v", g.Source)
+		}
 	}
 }
 
@@ -104,6 +119,122 @@ func TestConvertAllOnSinglePlatformSource(t *testing.T) {
 	}
 	if want := filepath.Join(outDir, "docker-save-latest.aarch64") + "\n"; stdout != want {
 		t.Errorf("stdout = %q, want %q", stdout, want)
+	}
+	// Asking for all still yields a group file, so scripts get a stable artifact.
+	g, err := bundle.ReadGroup(filepath.Join(outDir, groupFile))
+	if err != nil || len(g.Bundles) != 1 || g.Bundles[0].Arch != "arm64" {
+		t.Errorf("group file = %+v, %v", g, err)
+	}
+}
+
+func TestConvertSingleArchWritesNoGroupFile(t *testing.T) {
+	requireExt4HostTools(t)
+	archive := buildFixtureArchiveFor(t, "arm64", "amd64")
+	outDir := t.TempDir()
+	stdout, err := runConvertCmd(t, "--arch", "arm64", "-o", outDir, "oci-archive:"+archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(outDir, "docker-save-latest.aarch64") + "\n"; stdout != want {
+		t.Errorf("stdout = %q, want %q", stdout, want)
+	}
+	if names := tempDirEntries(t, outDir); len(names) != 1 {
+		t.Errorf("out dir = %v, want just the one bundle", names)
+	}
+}
+
+func TestConvertGroupRunReplacesStaleGroupFile(t *testing.T) {
+	requireExt4HostTools(t)
+	archive := buildFixtureArchiveFor(t, "arm64", "amd64")
+	outDir := t.TempDir()
+	stale := filepath.Join(outDir, groupFile)
+	if err := os.WriteFile(stale, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A failing run (the second arch's bundle path is blocked by a file)
+	// must not leave the stale group file behind.
+	if err := os.WriteFile(filepath.Join(outDir, "docker-save-latest.aarch64"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := runConvertCmd(t, "--arch", "all", "-o", outDir, "oci-archive:"+archive)
+	if err == nil || !strings.Contains(err.Error(), "linux/arm64") {
+		t.Fatalf("error = %v, want a failure naming linux/arm64", err)
+	}
+	if want := filepath.Join(outDir, "docker-save-latest.x86_64") + "\n"; stdout != want {
+		t.Errorf("stdout = %q, want the finished amd64 bundle only", stdout)
+	}
+	if _, err := bundle.Read(filepath.Join(outDir, "docker-save-latest.x86_64")); err != nil {
+		t.Errorf("the finished bundle was not kept: %v", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("stale group file still present after a failed run: %v", err)
+	}
+}
+
+func TestConvertSingleArchRunRemovesStaleGroupFile(t *testing.T) {
+	requireExt4HostTools(t)
+	archive := buildFixtureArchiveFor(t, "arm64", "amd64")
+	outDir := t.TempDir()
+	if _, err := runConvertCmd(t, "--arch", "all", "-o", outDir, "oci-archive:"+archive); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, groupFile)); err != nil {
+		t.Fatalf("first run wrote no group file: %v", err)
+	}
+	// The tag has since moved: a run for one architecture replaces that
+	// bundle, so the group file can't be left describing the old pair.
+	_, stderr, err := runConvertCmdReport(t, "--arch", "amd64", "-o", outDir, "oci-archive:"+archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, groupFile)); !os.IsNotExist(err) {
+		t.Errorf("group file still present after a single-architecture run: %v", err)
+	}
+	if !strings.Contains(stderr, "removed stale group file") || !strings.Contains(stderr, groupFile) {
+		t.Errorf("stderr doesn't mention the removal:\n%s", stderr)
+	}
+
+	// With no group file there is nothing to report.
+	_, stderr, err = runConvertCmdReport(t, "--arch", "amd64", "-o", outDir, "oci-archive:"+archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stderr, "stale group file") {
+		t.Errorf("stderr mentions a removal that didn't happen:\n%s", stderr)
+	}
+}
+
+func TestConvertResolveFailureLeavesGroupFile(t *testing.T) {
+	requireExt4HostTools(t)
+	archive := buildFixtureArchiveFor(t, "arm64")
+	outDir := t.TempDir()
+	old := filepath.Join(outDir, groupFile)
+	if err := os.WriteFile(old, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The failure is at the index, before any image is loaded, so the
+	// bundle (and group file) name isn't known yet.
+	if _, err := runConvertCmd(t, "--arch", "amd64,arm64", "-o", outDir, "oci-archive:"+archive); err == nil {
+		t.Fatal("expected a missing-architecture error")
+	}
+	if data, err := os.ReadFile(old); err != nil || string(data) != "old" {
+		t.Errorf("group file = %q, %v; want it left alone", data, err)
+	}
+}
+
+func TestConvertArchitecturesWithDifferentNamesRejected(t *testing.T) {
+	requireExt4HostTools(t)
+	archive := buildFixtureArchiveNamed(t, map[string]string{"amd64": "alpha:v1", "arm64": "beta:v1"}, "amd64", "arm64")
+	outDir := t.TempDir()
+	stdout, err := runConvertCmd(t, "--arch", "all", "-o", outDir, "oci-archive:"+archive)
+	if err == nil || !strings.Contains(err.Error(), "different bundle names (alpha-v1 and beta-v1)") || !strings.Contains(err.Error(), "linux/arm64") {
+		t.Fatalf("error = %v", err)
+	}
+	if want := filepath.Join(outDir, "alpha-v1.x86_64") + "\n"; stdout != want {
+		t.Errorf("stdout = %q, want only the first bundle %q", stdout, want)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "alpha-v1.multiarch.json")); !os.IsNotExist(err) {
+		t.Errorf("a group file was written for mismatched names: %v", err)
 	}
 }
 

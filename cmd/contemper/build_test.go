@@ -18,6 +18,7 @@ import (
 	"github.com/contemper-project/contemper/internal/bundle"
 	"github.com/contemper-project/contemper/internal/hostenv"
 	"github.com/contemper-project/contemper/internal/imgtest"
+	"github.com/contemper-project/contemper/internal/source"
 )
 
 // fakeBuildDockerScript stands in for the real `docker` binary: it
@@ -94,7 +95,15 @@ func buildFixtureArchive(t *testing.T) string {
 // index (an index with a single entry when only one is given).
 func buildFixtureArchiveFor(t *testing.T, archs ...string) string {
 	t.Helper()
-	return buildIndexArchive(t, archs, map[string]string{"io.contemper.ready": "true"}, ukiFixtureFiles, nil)
+	return buildFixtureArchiveNamed(t, nil, archs...)
+}
+
+// buildFixtureArchiveNamed is buildFixtureArchiveFor with a naming
+// annotation (an "name:tag" reference) on the descriptors of the
+// architectures names has an entry for.
+func buildFixtureArchiveNamed(t *testing.T, names map[string]string, archs ...string) string {
+	t.Helper()
+	return buildIndexArchive(t, names, archs, map[string]string{"io.contemper.ready": "true"}, ukiFixtureFiles, nil)
 }
 
 // ukiFixtureFiles is the file set of a minimal image that boots as a UKI.
@@ -121,13 +130,14 @@ func buildArchive(t *testing.T, labels map[string]string, files []imgtest.File) 
 // the given VOLUME paths.
 func buildArchiveWithVolumes(t *testing.T, labels map[string]string, files []imgtest.File, volumes []string) string {
 	t.Helper()
-	return buildIndexArchive(t, []string{runtime.GOARCH}, labels, files, volumes)
+	return buildIndexArchive(t, nil, []string{runtime.GOARCH}, labels, files, volumes)
 }
 
 // buildIndexArchive writes one image per architecture, each with the given
 // labels, files and VOLUME paths, into one multi-platform index and returns
-// it as an OCI layout tarball.
-func buildIndexArchive(t *testing.T, archs []string, labels map[string]string, files []imgtest.File, volumes []string) string {
+// it as an OCI layout tarball. names optionally maps an architecture to a
+// reference-name annotation on its descriptor.
+func buildIndexArchive(t *testing.T, names map[string]string, archs []string, labels map[string]string, files []imgtest.File, volumes []string) string {
 	t.Helper()
 
 	var idx v1.ImageIndex = empty.Index
@@ -140,10 +150,11 @@ func buildIndexArchive(t *testing.T, archs []string, labels map[string]string, f
 		if img, err = imgtest.WithVolumes(img, volumes...); err != nil {
 			t.Fatal(err)
 		}
-		idx = mutate.AppendManifests(idx, mutate.IndexAddendum{
-			Add:        img,
-			Descriptor: v1.Descriptor{Platform: &plat},
-		})
+		desc := v1.Descriptor{Platform: &plat}
+		if name := names[arch]; name != "" {
+			desc.Annotations = map[string]string{source.RefNameAnnotation: name}
+		}
+		idx = mutate.AppendManifests(idx, mutate.IndexAddendum{Add: img, Descriptor: desc})
 	}
 
 	layoutDir := t.TempDir()
