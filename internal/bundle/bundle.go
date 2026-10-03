@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/contemper-project/contemper/internal/source"
 	"github.com/contemper-project/contemper/internal/volume"
 )
 
@@ -22,6 +23,12 @@ import (
 // objects, and the support image's resolved variants moved from a
 // top-level "support.variants" key to Support.Variants) without a bump.
 const FormatVersion = 1
+
+// Boot modes recorded in Manifest.Boot.
+const (
+	BootUKI        = source.BootUKI
+	BootBootloader = source.BootBootloader
+)
 
 // ImageRef identifies a source image by reference and digest.
 type ImageRef struct {
@@ -113,11 +120,15 @@ type Manifest struct {
 	// volumes. See docs/reference/bundle.md for why.
 	VolumeHelper *SupportRef `json:"volumeHelper,omitempty"`
 	Target       string      `json:"target"`
-	Arch         string      `json:"arch"`
-	Disk         DiskInfo    `json:"disk"`
-	Volumes      []Volume    `json:"volumes,omitempty"`
-	Hints        Hints       `json:"hints"`
-	Reproducible bool        `json:"reproducible"`
+	// Boot is how the image boots: "uki" (contemper assembled a UKI) or
+	// "bootloader" (the image's own bootloader is on the ESP). Manifests
+	// from before the field existed lack it; Read reports those as "uki".
+	Boot         string   `json:"boot"`
+	Arch         string   `json:"arch"`
+	Disk         DiskInfo `json:"disk"`
+	Volumes      []Volume `json:"volumes,omitempty"`
+	Hints        Hints    `json:"hints"`
+	Reproducible bool     `json:"reproducible"`
 }
 
 // Read parses <dir>/contemper.json.
@@ -130,6 +141,9 @@ func Read(dir string) (*Manifest, error) {
 	var m Manifest
 	if err := json.Unmarshal(data, &m); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	}
+	if m.Boot == "" {
+		m.Boot = BootUKI
 	}
 	if err := m.check(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
@@ -147,6 +161,9 @@ func (m *Manifest) check() error {
 	if f == "" || f == "." || f == ".." || strings.ContainsAny(f, "/\\") {
 		return fmt.Errorf("disk.file %q must be a plain file name", f)
 	}
+	// m.Boot is deliberately not checked against the known modes: a
+	// bundle written by a newer contemper may use a mode this version
+	// does not know, and reading it should still work.
 	for _, v := range m.Volumes {
 		if err := volume.ValidateName(v.Name); err != nil {
 			return fmt.Errorf("volume %s: %w", v.Path, err)
@@ -157,7 +174,11 @@ func (m *Manifest) check() error {
 
 // Write marshals m as indented JSON to <dir>/contemper.json.
 func Write(dir string, m *Manifest) error {
-	data, err := json.MarshalIndent(m, "", "  ")
+	out := *m
+	if out.Boot == "" {
+		out.Boot = BootUKI
+	}
+	data, err := json.MarshalIndent(&out, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshaling contemper.json: %w", err)
 	}
