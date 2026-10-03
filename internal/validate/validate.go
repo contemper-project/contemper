@@ -26,6 +26,9 @@ type Result struct {
 	Initrd    []byte
 	Cmdline   string
 	OSRelease []byte // nil if the image has none
+	// Bootloader is set instead of the fields above for an image that
+	// brings its own bootloader (see CheckBootloader).
+	Bootloader *Bootloader
 }
 
 // Validate checks rfs against the fixed-path contract and returns the
