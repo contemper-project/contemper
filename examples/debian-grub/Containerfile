@@ -1,0 +1,206 @@
+# A Debian image that boots with its own GRUB instead of a UKI sealed by
+# contemper, so the kernel can be updated in place with apt like on a
+# regular installation. Compare ../debian, which is the appliance model
+# (kernel and initrd baked in at build time). See
+# ../../docs/design/bootloader-images.md for the contract this satisfies:
+# an EFI binary at the removable-media fallback path under /boot/efi, and
+# a configuration that finds the root filesystem by its label.
+FROM debian:trixie-slim
+
+LABEL io.contemper.ready="true" \
+      io.contemper.boot="bootloader"
+
+ARG TARGETARCH
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Same package set as ../debian, minus the contemper-specific initrd step:
+# Debian's own kernel package builds the initrd (initramfs-tools, default
+# MODULES=most, generic rather than host-only) and keeps the /vmlinuz and
+# /initrd.img symlinks in / pointing at the most recently installed kernel
+# (on removal, the highest remaining version), as linux-base's
+# linux-update-symlinks does.
+#
+# Debian's full GRUB packages go in, so the installed VM updates in place
+# like a regular installation: grub-efi-<arch> brings grub2-common
+# (update-grub, grub-install) and the kernel hook zz-update-grub, which
+# regenerates /boot/grub/grub.cfg on every kernel install or removal;
+# a GRUB package upgrade reinstalls the bootloader. shim-signed and
+# grub-efi-<arch>-signed ship ready-made signed binaries, copied onto the
+# ESP below.
+#
+# All of this installs cleanly in a container build: the grub-efi-<arch>
+# postinst skips grub-install there, and the kernel hook exits early in a
+# container or while /boot/grub/grub.cfg does not exist. What cannot run
+# at build time is anything that probes the root device (update-grub,
+# grub-install: they fail resolving the overlay root filesystem), which is
+# why the files below are placed by copying and the first generated
+# configuration only appears in the guest.
+#
+# The debconf answers below are for every grub-install run inside the
+# guest. A fresh VM has no persistent boot entries (its NVRAM starts
+# empty), so installs must keep the removable-media fallback path current
+# and leave NVRAM alone.
+RUN case "$TARGETARCH" in \
+      amd64) grub=grub-efi-amd64 ;; \
+      arm64) grub=grub-efi-arm64 ;; \
+      *) echo "examples/debian-grub: unsupported TARGETARCH '$TARGETARCH'" >&2; exit 1 ;; \
+    esac && \
+    printf '%s\n' \
+      "${grub} grub2/force_efi_extra_removable boolean true" \
+      "${grub} grub2/update_nvram boolean false" \
+      | debconf-set-selections && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+      "linux-image-${TARGETARCH}" systemd-sysv udev initramfs-tools e2fsprogs \
+      "${grub}" "${grub}-signed" shim-signed && \
+    rm -rf /var/lib/apt/lists/*
+
+# Lay out the ESP by copying files only. contemper copies the image's
+# /boot/efi tree onto the ESP and the guest mounts the ESP at /boot/efi,
+# so this is also where a package update writes to.
+#
+# EFI/BOOT is the removable-media fallback path the firmware loads:
+#  - BOOT<ARCH>.EFI is shim, which loads grub<arch>.efi from its own
+#    directory (the signed GRUB) and the MOK manager mm<arch>.efi when
+#    asked to;
+#  - the signed GRUB has /EFI/debian built in as its prefix, so it reads
+#    EFI/debian/grub.cfg from the ESP. That file is a stub that finds the
+#    root filesystem by the label contemper gives it, never by a device
+#    name or UUID, and loads the real /boot/grub/grub.cfg from there. The
+#    ESP therefore never needs to change when the kernel does.
+#
+# shim's fallback tool (fb<arch>.efi) is deliberately not shipped: it
+# writes NVRAM boot entries and resets the machine, which a VM without
+# persistent NVRAM would do on every boot.
+RUN case "$TARGETARCH" in \
+      amd64) shim=/usr/lib/shim/shimx64.efi.signed; \
+             grub=/usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed; \
+             mm=/usr/lib/shim/mmx64.efi.signed; \
+             boot=BOOTX64.EFI; grubname=grubx64.efi; mmname=mmx64.efi ;; \
+      arm64) shim=/usr/lib/shim/shimaa64.efi.signed; \
+             grub=/usr/lib/grub/arm64-efi-signed/grubaa64.efi.signed; \
+             mm=/usr/lib/shim/mmaa64.efi.signed; \
+             boot=BOOTAA64.EFI; grubname=grubaa64.efi; mmname=mmaa64.efi ;; \
+    esac && \
+    mkdir -p /boot/efi/EFI/BOOT /boot/efi/EFI/debian /boot/grub && \
+    cp "${shim}" "/boot/efi/EFI/BOOT/${boot}" && \
+    cp "${grub}" "/boot/efi/EFI/BOOT/${grubname}" && \
+    cp "${mm}" "/boot/efi/EFI/BOOT/${mmname}" && \
+    printf '%s\n' \
+      'search --no-floppy --label contemper-root --set=root' \
+      'set prefix=($root)/boot/grub' \
+      'configfile $prefix/grub.cfg' \
+      >/boot/efi/EFI/debian/grub.cfg
+
+# Settings update-grub applies when it generates the configuration in the
+# guest: the kernel console is the architecture's serial console (same
+# split as ../debian), the menu waits one second, and GRUB itself talks on
+# the console and the serial port. The root device is not set here:
+# update-grub writes root=UUID= of the real filesystem.
+RUN case "$TARGETARCH" in \
+      amd64) console=ttyS0 ;; \
+      arm64) console=ttyAMA0 ;; \
+    esac && \
+    mkdir -p /etc/default/grub.d && \
+    printf '%s\n' \
+      "GRUB_CMDLINE_LINUX=\"console=${console}\"" \
+      'GRUB_TIMEOUT=1' \
+      'GRUB_TERMINAL="console serial"' \
+      >/etc/default/grub.d/contemper.cfg
+
+# Bootstrap configuration. It is only used for the very first boot: the
+# first-boot unit below runs update-grub, which replaces this file with
+# Debian's generated config, with root=UUID= of the real filesystem,
+# which can only be known once contemper has created the disk. The file's
+# existence is also what makes the kernel hook zz-update-grub run at all.
+#
+# It names the kernel and initrd through Debian's /vmlinuz and /initrd.img
+# symlinks (see above). A second entry boots the previous kernel through
+# /vmlinuz.old and /initrd.img.old, which the same linux-base tool
+# maintains, so a bad kernel can be recovered from over the serial
+# console: the first entry stays the default, and the 1 second timeout
+# leaves a moment to pick the other.
+RUN case "$TARGETARCH" in \
+      amd64) console=ttyS0 ;; \
+      arm64) console=ttyAMA0 ;; \
+    esac && \
+    printf '%s\n' \
+      'set default=0' \
+      'set timeout=1' \
+      "menuentry 'Debian' {" \
+      "  linux /vmlinuz root=LABEL=contemper-root rw console=${console}" \
+      '  initrd /initrd.img' \
+      '}' \
+      "menuentry 'Debian (previous kernel)' {" \
+      "  linux /vmlinuz.old root=LABEL=contemper-root rw console=${console}" \
+      '  initrd /initrd.img.old' \
+      '}' \
+      >/boot/grub/grub.cfg
+
+# The ESP is mounted at /boot/efi by contemper's own fstab entry in the
+# guest, so only the root needs one here, as in ../debian.
+RUN echo 'LABEL=contemper-root / ext4 rw,relatime 0 1' >>/etc/fstab
+
+# Passwordless root for interactive testing over the serial console, as
+# in ../debian.
+RUN passwd -d root
+
+# First-boot GRUB install: makes the VM an ordinary Debian GRUB
+# installation. A container build cannot run grub-install (see above), and
+# two things are missing in the guest until one has run:
+#  - the GRUB modules in /boot/grub/<target>/. Debian's generated
+#    grub.cfg does `insmod bli`, so without them every boot prints
+#    "error: file '/boot/grub/<target>/bli.mod' not found";
+#  - /boot/grub/<target>/core.efi, which grub-install creates. The
+#    grub-efi-<arch> postinst only reruns grub-install on a package
+#    upgrade if it exists, so without it an upgrade would never refresh
+#    the ESP.
+# The unit runs grub-install with exactly what that postinst passes given
+# the debconf answers above, then update-grub to generate the real
+# /boot/grub/grub.cfg. A stamp file, written only after both succeeded,
+# is the condition, so a run that failed part-way is retried on the next
+# boot (grub-install is safe to repeat) and shows up as a failed unit
+# meanwhile. The unit is ordered before the boot marker below; that is
+# ordering only, the marker does not mean the install succeeded.
+RUN case "$TARGETARCH" in \
+      amd64) target=x86_64-efi ;; \
+      arm64) target=arm64-efi ;; \
+    esac && \
+    printf '%s\n' \
+      '[Unit]' \
+      'Description=contemper: install GRUB on first boot' \
+      'ConditionPathExists=!/var/lib/contemper-grub-firstboot/done' \
+      'RequiresMountsFor=/boot/efi' \
+      'Before=contemper-boot-ok.service' \
+      '' \
+      '[Service]' \
+      'Type=oneshot' \
+      "ExecStart=/usr/sbin/grub-install --target=${target} --force-extra-removable --no-nvram" \
+      'ExecStart=/usr/sbin/update-grub' \
+      'ExecStart=/usr/bin/touch /var/lib/contemper-grub-firstboot/done' \
+      'StateDirectory=contemper-grub-firstboot' \
+      '' \
+      '[Install]' \
+      'WantedBy=multi-user.target' \
+      >/etc/systemd/system/contemper-grub-firstboot.service && \
+    mkdir -p /etc/systemd/system/multi-user.target.wants && \
+    ln -sf ../contemper-grub-firstboot.service /etc/systemd/system/multi-user.target.wants/contemper-grub-firstboot.service
+
+# Proof-of-boot marker, as in ../debian: printed to the serial console
+# once systemd reaches multi-user.target, and what `contemper deploy
+# --expect` waits for in hack/e2e.sh.
+RUN printf '%s\n' \
+      '[Unit]' \
+      'Description=contemper: boot-completion marker' \
+      'After=multi-user.target' \
+      '' \
+      '[Service]' \
+      'Type=oneshot' \
+      'RemainAfterExit=yes' \
+      "ExecStart=/bin/sh -c 'echo contemper-boot-ok >/dev/console'" \
+      '' \
+      '[Install]' \
+      'WantedBy=multi-user.target' \
+      >/etc/systemd/system/contemper-boot-ok.service && \
+    mkdir -p /etc/systemd/system/multi-user.target.wants && \
+    ln -sf ../contemper-boot-ok.service /etc/systemd/system/multi-user.target.wants/contemper-boot-ok.service
