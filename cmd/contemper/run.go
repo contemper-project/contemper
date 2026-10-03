@@ -930,6 +930,7 @@ func runDeploy(ctx context.Context, _ *cobra.Command, opts deployOptions) error 
 		DiskPath:      filepath.Join(opts.bundleDir, manifest.Disk.File),
 		DiskFormat:    manifest.Disk.Format,
 		Volumes:       attachments,
+		SecureBoot:    manifest.SecureBoot,
 		SerialLogPath: opts.serialLog,
 		Expect:        opts.expect,
 		Timeout:       timeout,

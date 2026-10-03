@@ -116,6 +116,122 @@ func TestBuildArgsAttachesVolumes(t *testing.T) {
 	}
 }
 
+func secureBootInfo(t *testing.T, smm bool) (info archInfo, code, vars string) {
+	t.Helper()
+	code = writeFakeFile(t, "OVMF_CODE.secboot.fd")
+	vars = writeFakeFile(t, "OVMF_VARS.ms.fd")
+	plain := writeFakeFile(t, "OVMF_CODE.fd")
+	machine := "virt"
+	if smm {
+		machine = "q35"
+	}
+	return archInfo{
+		machine:              machine,
+		pflashCandidates:     []firmware{{code: plain, vars: vars}},
+		secureBootCandidates: []firmware{{code: "/nonexistent/code.fd", vars: vars}, {code: code, vars: "/nonexistent/vars.fd"}, {code: code, vars: vars}},
+		secureBootSMM:        smm,
+	}, code, vars
+}
+
+func TestBuildArgsSecureBootAMD64(t *testing.T) {
+	info, code, vars := secureBootInfo(t, true)
+	work := t.TempDir()
+	args, err := buildArgs(info, Options{Arch: "amd64", SecureBoot: true, DiskPath: "/tmp/d.qcow2", SerialLogPath: "/tmp/s.log", WorkDir: work})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
+	joined := strings.Join(args, " ")
+	for _, want := range []string{
+		"-M q35,smm=on",
+		"-global driver=cfi.pflash01,property=secure,value=on",
+		"if=pflash,format=raw,unit=0,readonly=on,file=" + code,
+		"if=pflash,format=raw,unit=1,file=" + work + "/efivars.fd",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("args %q missing %q", joined, want)
+		}
+	}
+	if strings.Contains(joined, "OVMF_CODE.fd") || strings.Contains(joined, "file="+vars) {
+		t.Errorf("args use non-Secure-Boot firmware or the vars template itself: %q", joined)
+	}
+	if data, err := os.ReadFile(work + "/efivars.fd"); err != nil || string(data) != "fake firmware" {
+		t.Errorf("vars copy = %q, %v", data, err)
+	}
+}
+
+func TestBuildArgsSecureBootARM64(t *testing.T) {
+	info, code, _ := secureBootInfo(t, false)
+	work := t.TempDir()
+	args, err := buildArgs(info, Options{Arch: "arm64", SecureBoot: true, DiskPath: "/tmp/d.qcow2", SerialLogPath: "/tmp/s.log", WorkDir: work})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
+	joined := strings.Join(args, " ")
+	for _, want := range []string{"-M virt ", "if=pflash,format=raw,unit=0,readonly=on,file=" + code, "unit=1,file=" + work + "/efivars.fd"} {
+		if !strings.Contains(joined+" ", want) {
+			t.Errorf("args %q missing %q", joined, want)
+		}
+	}
+	for _, bad := range []string{"smm", "cfi.pflash01"} {
+		if strings.Contains(joined, bad) {
+			t.Errorf("arm64 args must not contain %q: %q", bad, joined)
+		}
+	}
+}
+
+func TestBuildArgsWithoutSecureBootUnchanged(t *testing.T) {
+	info, _, _ := secureBootInfo(t, true)
+	args, err := buildArgs(info, Options{Arch: "amd64", DiskPath: "/tmp/d.qcow2", SerialLogPath: "/tmp/s.log", WorkDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-M q35 ") || strings.Contains(joined, "smm") || strings.Contains(joined, "cfi.pflash01") || strings.Contains(joined, "secboot") {
+		t.Errorf("args changed without Secure Boot: %q", joined)
+	}
+}
+
+func TestBuildArgsSecureBootErrors(t *testing.T) {
+	info, _, _ := secureBootInfo(t, true)
+	if _, err := buildArgs(info, Options{Arch: "amd64", SecureBoot: true, DiskPath: "/d", SerialLogPath: "/s"}); err == nil || !strings.Contains(err.Error(), "work directory") {
+		t.Errorf("without WorkDir: error = %v", err)
+	}
+
+	// Never falls back to the plain firmware, which exists here.
+	missing := archInfo{
+		machine:              "q35",
+		pflashCandidates:     info.pflashCandidates,
+		secureBootCandidates: []firmware{{code: "/nonexistent/CODE.secboot.fd", vars: "/nonexistent/VARS.ms.fd"}},
+	}
+	_, err := buildArgs(missing, Options{Arch: "amd64", SecureBoot: true, DiskPath: "/d", SerialLogPath: "/s", WorkDir: t.TempDir()})
+	if err == nil {
+		t.Fatal("buildArgs fell back to firmware without Secure Boot")
+	}
+	for _, want := range []string{"/nonexistent/CODE.secboot.fd", "/nonexistent/VARS.ms.fd", "Microsoft", "ovmf"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q lacks %q", err, want)
+		}
+	}
+
+	none := archInfo{machine: "virt", pflashCandidates: info.pflashCandidates}
+	if _, err := buildArgs(none, Options{Arch: "arm64", SecureBoot: true, DiskPath: "/d", SerialLogPath: "/s", WorkDir: t.TempDir()}); err == nil || !strings.Contains(err.Error(), "Microsoft") {
+		t.Errorf("no candidates: error = %v", err)
+	}
+}
+
+func TestSecureBootCandidatesAreFixed(t *testing.T) {
+	for arch, info := range archTable {
+		for _, fw := range info.secureBootCandidates {
+			if fw.vars == "" || !strings.Contains(fw.code, "secboot") {
+				t.Errorf("%s: secure boot candidate %+v needs a vars file and a secboot code image", arch, fw)
+			}
+		}
+	}
+	if !archTable["amd64"].secureBootSMM || archTable["arm64"].secureBootSMM {
+		t.Error("only amd64 Secure Boot firmware needs SMM")
+	}
+}
+
 func TestBuildArgsNoFirmwareFound(t *testing.T) {
 	info := archInfo{machine: "virt"}
 	if _, err := buildArgs(info, Options{}); err == nil {
