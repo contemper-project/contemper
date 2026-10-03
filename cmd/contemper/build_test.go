@@ -106,10 +106,20 @@ var ukiFixtureFiles = []imgtest.File{
 // host architecture, as an OCI layout tarball (see buildFixtureArchive).
 func buildArchive(t *testing.T, labels map[string]string, files []imgtest.File) string {
 	t.Helper()
+	return buildArchiveWithVolumes(t, labels, files, nil)
+}
+
+// buildArchiveWithVolumes is buildArchive for an image that also declares
+// the given VOLUME paths.
+func buildArchiveWithVolumes(t *testing.T, labels map[string]string, files []imgtest.File, volumes []string) string {
+	t.Helper()
 
 	plat := v1.Platform{OS: "linux", Architecture: runtime.GOARCH}
 	img, err := imgtest.Image(plat, labels, files)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if img, err = imgtest.WithVolumes(img, volumes...); err != nil {
 		t.Fatal(err)
 	}
 

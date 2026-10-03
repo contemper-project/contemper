@@ -14,6 +14,9 @@ import (
 const (
 	sectorSize     uint64 = 512
 	alignmentBytes uint64 = 1 * 1024 * 1024 // 1 MiB
+	// ESPVolumeLabel is the FAT volume label of the ESP. The guest's fstab
+	// line for /boot/efi finds the partition by it.
+	ESPVolumeLabel = "ESP"
 	// ESPSizeBytes is the size of the ESP partition BuildGPTImage
 	// creates for a UKI, unless BuildOptions.ESPSizeBytes says otherwise.
 	ESPSizeBytes uint64 = 128 * 1024 * 1024
@@ -200,7 +203,7 @@ func BuildGPTImage(rawPath string, opts BuildOptions) (*Layout, error) {
 }
 
 func writeESP(d *diskpkg.Disk, bootFile string, uki []byte) error {
-	fs, err := d.CreateFilesystem(diskpkg.FilesystemSpec{Partition: 1, FSType: filesystem.TypeFat32, VolumeLabel: "ESP"})
+	fs, err := d.CreateFilesystem(diskpkg.FilesystemSpec{Partition: 1, FSType: filesystem.TypeFat32, VolumeLabel: ESPVolumeLabel})
 	if err != nil {
 		return fmt.Errorf("creating ESP filesystem: %w", err)
 	}
@@ -219,7 +222,7 @@ func writeESP(d *diskpkg.Disk, bootFile string, uki []byte) error {
 
 // writeESPTree creates the ESP's FAT32 filesystem and copies tree onto it.
 func writeESPTree(d *diskpkg.Disk, tree []ESPEntry) error {
-	fs, err := d.CreateFilesystem(diskpkg.FilesystemSpec{Partition: 1, FSType: filesystem.TypeFat32, VolumeLabel: "ESP"})
+	fs, err := d.CreateFilesystem(diskpkg.FilesystemSpec{Partition: 1, FSType: filesystem.TypeFat32, VolumeLabel: ESPVolumeLabel})
 	if err != nil {
 		return fmt.Errorf("creating ESP filesystem: %w", err)
 	}
