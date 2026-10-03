@@ -15,7 +15,8 @@ firmware finds it without any boot entry being registered on the host.
 An image that brings its own bootloader (`io.contemper.boot=bootloader`)
 gets a 512 MiB ESP holding its `/boot/efi` tree instead of the UKI; the
 root partition is unchanged. See [Bootloader
-images](../design/bootloader-images.md).
+images](bootloader-images.md), and the
+[design page](../design/bootloader-images.md) for the details.
 
 contemper adds `root=LABEL=contemper-root` to the front of the kernel
 command line, so the kernel finds the root partition without the image

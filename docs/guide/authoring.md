@@ -76,6 +76,10 @@ mkinitcpio, Alpine's mkinitfs) supports it. Refer to the same label in
 LABEL=contemper-root / ext4 rw,relatime 0 1
 ```
 
+Prefer to bring your own bootloader and update the kernel in place
+instead? That is a different mode with its own contract; see
+[Bootloader images](bootloader-images.md).
+
 ## Marking the image ready
 
 Mark an image as intended for contemper in the build file:
