@@ -21,17 +21,25 @@
 #     kernel from the reinstalled bootloader and prints
 #     contemper-e2e-kernel-updated.
 #
+# With --secure-boot, the derived image also carries
+# io.contemper.secure-boot="true", the VM boots Secure Boot firmware, and
+# the guest checks on every boot that the firmware reports Secure Boot
+# on (and, without the flag, that it reports it off). The three boots then
+# cover booting shim, signed GRUB and a signed kernel, the offline update
+# of the signed cloud kernel, and the bootloader reinstall.
+#
 # Any failure in the guest prints contemper-e2e-fail: <reason> on the
 # console and powers the VM off; this script reports it. The serial log
 # holds all three boots; a GRUB "error: " line in it (a module or file it
 # could not load) fails the test too, as does GRUB never having printed
 # anything there.
 #
-# Usage: hack/e2e-bootloader.sh [--timeout DURATION]
+# Usage: hack/e2e-bootloader.sh [--timeout DURATION] [--secure-boot]
 #
 # Requires: go, podman or docker (CONTAINER_ENGINE selects one
 # explicitly), e2fsprogs (mkfs.ext4, debugfs, e2fsck), qemu-img,
-# qemu-system-<arch> and UEFI firmware for it. Output, including the
+# qemu-system-<arch> and UEFI firmware for it (with --secure-boot, OVMF or
+# AAVMF firmware with Microsoft's keys enrolled, e.g. Debian's ovmf package). Output, including the
 # serial log, goes to _out/bootloader/.
 #
 # Set CONTEMPER_E2E_COVERDIR to a directory to build contemper with Go's
@@ -49,12 +57,17 @@ SUCCESS_MARKER="contemper-e2e-kernel-updated"
 FAIL_MARKER="contemper-e2e-fail"
 IMAGE="contemper-example-debian-grub:dev"
 DERIVED_IMAGE="contemper-example-bootloader-update:e2e"
+SECURE_BOOT=false
 
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--timeout)
 		TIMEOUT="$2"
 		shift 2
+		;;
+	--secure-boot)
+		SECURE_BOOT=true
+		shift
 		;;
 	*)
 		echo "e2e-bootloader.sh: unknown argument: $1" >&2
@@ -102,8 +115,8 @@ mkdir -p "${OUT}"
 echo "==> ${engine} build examples/debian-grub" >&2
 "${engine}" build -t "${IMAGE}" -f "${REPO}/examples/debian-grub/Containerfile" "${REPO}/examples/debian-grub"
 
-echo "==> ${engine} build hack/e2e-bootloader (from ${IMAGE})" >&2
-"${engine}" build -t "${DERIVED_IMAGE}" --build-arg BASE_IMAGE="${IMAGE}" -f "${REPO}/hack/e2e-bootloader/Containerfile" "${REPO}/hack/e2e-bootloader"
+echo "==> ${engine} build hack/e2e-bootloader (from ${IMAGE}, secure boot ${SECURE_BOOT})" >&2
+"${engine}" build -t "${DERIVED_IMAGE}" --build-arg BASE_IMAGE="${IMAGE}" --build-arg SECURE_BOOT="${SECURE_BOOT}" -f "${REPO}/hack/e2e-bootloader/Containerfile" "${REPO}/hack/e2e-bootloader"
 
 # podman can write an OCI archive; docker save only writes its own format.
 case "${engine}" in
@@ -141,9 +154,21 @@ fi
 # are generated with printf: BSD sed knows neither \033 nor \r.
 plain="${OUT}/serial.plain.log"
 LC_ALL=C sed -e "$(printf 's/\033\\[[0-9;?]*[A-Za-z]//g')" -e "$(printf 's/\r//g')" "${log}" >"${plain}" 2>/dev/null || : >"${plain}"
-if grep -q '^error: ' "${plain}"; then
+# With Secure Boot on, the signed GRUB refuses every module Debian's
+# generated grub.cfg loads from /boot/grub (insmod bli and others), and
+# prints this line for each; it is harmless and booting continues, so
+# exactly this line is tolerated in that mode, and nothing otherwise.
+tolerated='error: prohibited by secure boot policy.'
+if [ "${SECURE_BOOT}" = true ]; then
+	errors="$(grep '^error: ' "${plain}" | grep -vxF "${tolerated}" || true)"
+	ignored="$(grep -cxF "${tolerated}" "${plain}" || true)"
+	echo "e2e-bootloader.sh: tolerated ${ignored} \"${tolerated}\" lines (modules refused under Secure Boot)" >&2
+else
+	errors="$(grep '^error: ' "${plain}" || true)"
+fi
+if [ -n "${errors}" ]; then
 	echo "e2e-bootloader.sh: GRUB reported an error on the console:" >&2
-	grep '^error: ' "${plain}" >&2
+	echo "${errors}" >&2
 	exit 1
 fi
 if [ "${status}" -ne 0 ]; then
@@ -166,4 +191,4 @@ for marker in "${INSTALLED_MARKER}" "${REINSTALLED_MARKER}"; do
 	fi
 done
 
-echo "==> e2e-bootloader OK: kernel installed in the guest, grub.cfg regenerated, bootloader reinstalled, new kernel running after both reboots" >&2
+echo "==> e2e-bootloader OK (secure boot ${SECURE_BOOT}): kernel installed in the guest, grub.cfg regenerated, bootloader reinstalled, new kernel running after both reboots" >&2

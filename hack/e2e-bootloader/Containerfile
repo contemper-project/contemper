@@ -7,8 +7,10 @@
 # configuration), reboots, checks on the second boot that the new
 # kernel runs and the ESP is mounted with its marker intact and
 # reinstalls the bootloader with dpkg-reconfigure of the GRUB package,
-# then checks on the third boot that the guest still comes up. The example itself stays free of
-# any test logic.
+# then checks on the third boot that the guest still comes up. On
+# every boot it also checks that Secure Boot is in the state the SECURE_BOOT
+# build argument asked for. The example itself stays free of any test
+# logic.
 ARG BASE_IMAGE=contemper-example-debian-grub:dev
 FROM ${BASE_IMAGE}
 
@@ -29,6 +31,13 @@ RUN apt-get update && \
     (cd /usr/local/share/contemper-e2e/debs && apt-get download "${real}") && \
     echo "${real#linux-image-}" >/usr/local/share/contemper-e2e/new-kernel && \
     rm -rf /var/lib/apt/lists/*
+
+# Whether the VM is expected to boot with Secure Boot: the label asks
+# for it (hack/e2e-bootloader.sh --secure-boot), and the guest checks the
+# firmware's answer against the same value.
+ARG SECURE_BOOT=false
+LABEL io.contemper.secure-boot="${SECURE_BOOT}"
+RUN echo "${SECURE_BOOT}" >/usr/local/share/contemper-e2e/secure-boot
 
 COPY files/kernel-update.sh /usr/local/lib/contemper/e2e-kernel-update
 RUN chmod +x /usr/local/lib/contemper/e2e-kernel-update
