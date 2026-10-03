@@ -100,7 +100,7 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 		return err
 	}
 
-	platform, err := source.HostPlatform(opts.arch)
+	sel, err := source.ParseArchSelection(opts.arch)
 	if err != nil {
 		return err
 	}
@@ -117,10 +117,51 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 	if err != nil {
 		return err
 	}
-	img, err := source.Load(ctx, ref, platform)
+	// Check every requested architecture against the source's index
+	// before fetching or converting anything.
+	platforms, err := sel.Resolve(ctx, ref)
 	if err != nil {
 		rep.Fail("resolve source", err.Error(), "")
 		return err
+	}
+
+	// A single architecture reports exactly as it always has; several
+	// get a section header each and their own elapsed time.
+	multi := len(platforms) > 1
+	for i, platform := range platforms {
+		var priorElapsed time.Duration
+		if multi {
+			if i > 0 {
+				rep.Blank()
+			}
+			priorElapsed = rep.Elapsed()
+			rep.Line("🔨", "architecture "+platform.Architecture, fmt.Sprintf("%d of %d", i+1, len(platforms)))
+			rep.Blank()
+		}
+		bundleDir, err := convertPlatform(ctx, rep, opts, ref, platform, canonicalTarget, asm, rootSizeBytes, priorElapsed)
+		if err != nil {
+			if multi {
+				return fmt.Errorf("converting linux/%s: %w", platform.Architecture, err)
+			}
+			return err
+		}
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), bundleDir)
+	}
+	return nil
+}
+
+// convertPlatform converts ref's image for one platform into a bundle
+// and returns the bundle's directory. It is a complete, independent
+// conversion: the same support-image and volume-helper resolution,
+// validation, bundle naming and manifest a single-architecture run
+// produces. priorElapsed is subtracted from the reporter's clock for the
+// "bundle ready" timing, so each architecture of a multi-arch run
+// reports its own.
+func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOptions, ref source.Ref, platform v1.Platform, canonicalTarget string, asm target.Assembler, rootSizeBytes int64, priorElapsed time.Duration) (string, error) {
+	img, err := source.Load(ctx, ref, platform)
+	if err != nil {
+		rep.Fail("resolve source", err.Error(), "")
+		return "", err
 	}
 	defer img.Close()
 
@@ -129,18 +170,18 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 	cfg, err := img.Image.ConfigFile()
 	if err != nil {
 		rep.Fail("readiness check", err.Error(), "")
-		return fmt.Errorf("reading image config: %w", err)
+		return "", fmt.Errorf("reading image config: %w", err)
 	}
 	if err := source.CheckReady(cfg); err != nil {
 		rep.Fail("readiness check", err.Error(), "")
-		return err
+		return "", err
 	}
 	rep.Line("✅", "contemper-ready", "")
 
 	bootMode, err := source.BootMode(cfg)
 	if err != nil {
 		rep.Fail("boot mode", err.Error(), "")
-		return err
+		return "", err
 	}
 	if bootMode == source.BootBootloader {
 		rep.Line("✅", "boot mode", "bootloader")
@@ -149,14 +190,14 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 	specs, err := volume.FromConfig(bundle.SortedKeys(cfg.Config.Volumes), cfg.Config.Labels)
 	if err != nil {
 		rep.Fail("volumes", err.Error(), "")
-		return err
+		return "", err
 	}
 	if bootMode == source.BootBootloader {
 		for _, sp := range specs {
 			if coversESPMountPoint(sp.Path) {
 				err := fmt.Errorf("volume %s covers the ESP mount point %s: a volume there would hide or double-mount the ESP", sp.Path, guestmeta.ESPMountPoint)
 				rep.Fail("volumes", err.Error(), "in bootloader mode contemper mounts the ESP at "+guestmeta.ESPMountPoint+"; declare the volume at a path that is not "+guestmeta.ESPMountPoint+" or one of its parents")
-				return err
+				return "", err
 			}
 		}
 	}
@@ -164,7 +205,7 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 		rootSizeBytes, err = volume.RootSize(cfg.Config.Labels)
 		if err != nil {
 			rep.Fail("volumes", err.Error(), "")
-			return err
+			return "", err
 		}
 	}
 
@@ -190,35 +231,35 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 	if resolvedSupportRef != "" {
 		supportRef, err := source.ParseRef(resolvedSupportRef)
 		if err != nil {
-			return err
+			return "", err
 		}
 		supportRefStr = supportRef.String()
 		supportRefForBuild = redactedRefString(supportRef)
 		supportImg, err = source.Load(ctx, supportRef, platform)
 		if err != nil {
 			rep.Fail("support image", err.Error(), "")
-			return fmt.Errorf("loading support image: %w", err)
+			return "", fmt.Errorf("loading support image: %w", err)
 		}
 		defer supportImg.Close()
 		overlays = append(overlays, supportImg.Image)
 
 		supportManifest, err := supportImg.Image.Manifest()
 		if err != nil {
-			return fmt.Errorf("reading support image manifest: %w", err)
+			return "", fmt.Errorf("reading support image manifest: %w", err)
 		}
 		indexAnnotations, err := source.IndexAnnotations(ctx, supportRef, platform)
 		if err != nil {
-			return fmt.Errorf("reading support image index: %w", err)
+			return "", fmt.Errorf("reading support image index: %w", err)
 		}
 		schema, err = support.Parse(support.MergeAnnotations(indexAnnotations, supportManifest.Annotations))
 		if err != nil {
 			rep.Fail("support image", err.Error(), "")
-			return err
+			return "", err
 		}
 
 		supportLayers, err := supportImg.Image.Layers()
 		if err != nil {
-			return fmt.Errorf("reading support image layers: %w", err)
+			return "", fmt.Errorf("reading support image layers: %w", err)
 		}
 		originLabel := "target default"
 		if supportOrigin == target.SupportFromFlag {
@@ -231,7 +272,7 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 			vr, err := resolveVariants(ctx, schema, supportRef, img, platform, rep)
 			if err != nil {
 				rep.Fail("support image", err.Error(), "")
-				return err
+				return "", err
 			}
 			defer func() { _ = os.RemoveAll(vr.cacheDir) }()
 			for _, vi := range vr.images {
@@ -259,7 +300,7 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 		hr, err := mergeVolumeHelper(ctx, helperRef, img, platform, rep)
 		if err != nil {
 			rep.Fail("volume helper", err.Error(), "")
-			return err
+			return "", err
 		}
 		helperResult = hr
 		defer helperResult.Img.Close()
@@ -283,7 +324,7 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 
 	sourceLayers, err := img.Image.Layers()
 	if err != nil {
-		return fmt.Errorf("reading source image layers: %w", err)
+		return "", fmt.Errorf("reading source image layers: %w", err)
 	}
 	mergeLabel := fmt.Sprintf("merging %d %s", len(sourceLayers), pluralize(len(sourceLayers), "layer"))
 	if len(overlays) > 0 {
@@ -299,7 +340,7 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 	rfs, err := rootfs.Build(ctx, baseImg, overlays...)
 	if err != nil {
 		mergeStage.Fail("merge", err.Error(), "")
-		return err
+		return "", err
 	}
 	defer func() { _ = rfs.Close() }()
 	mergeStage.Done("🧬", mergeLabel, "")
@@ -308,13 +349,13 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 	if schema != nil {
 		if err := schema.CheckRequires(rfs); err != nil {
 			rep.Fail("support image", err.Error(), "")
-			return err
+			return "", err
 		}
 	}
 	if helperResult != nil && helperResult.Schema != nil {
 		if err := helperResult.Schema.CheckRequires(rfs); err != nil {
 			rep.Fail("volume helper", err.Error(), "")
-			return err
+			return "", err
 		}
 	}
 
@@ -344,7 +385,7 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 		}
 	}
 	if err := rfs.WriteFile(guestmeta.BuildPath, guestmeta.RenderBuild(buildInfo)); err != nil {
-		return fmt.Errorf("writing %s: %w", guestmeta.BuildPath, err)
+		return "", fmt.Errorf("writing %s: %w", guestmeta.BuildPath, err)
 	}
 
 	fstabOptedOut := opts.noFstab || volume.FstabOptedOut(cfg.Config.Labels)
@@ -359,7 +400,7 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 		// what lets the nested one mount on top of it.
 		for _, s := range specs {
 			if err := rfs.EnsureDir(s.Path); err != nil {
-				return fmt.Errorf("creating mount point %s: %w", s.Path, err)
+				return "", fmt.Errorf("creating mount point %s: %w", s.Path, err)
 			}
 		}
 		for _, s := range specs {
@@ -375,11 +416,11 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 			fstabLines = append(fstabLines, guestmeta.FstabLine(s.Name, s.Path))
 		}
 		if err := rfs.WriteFile(guestmeta.VolumesPath, guestmeta.RenderVolumes(lines)); err != nil {
-			return fmt.Errorf("writing %s: %w", guestmeta.VolumesPath, err)
+			return "", fmt.Errorf("writing %s: %w", guestmeta.VolumesPath, err)
 		}
 		if names := noSeedVolumeNames(specs); len(names) > 0 {
 			if err := rfs.WriteFile(guestmeta.NoSeedPath, guestmeta.RenderNoSeed(names)); err != nil {
-				return fmt.Errorf("writing %s: %w", guestmeta.NoSeedPath, err)
+				return "", fmt.Errorf("writing %s: %w", guestmeta.NoSeedPath, err)
 			}
 		}
 
@@ -399,7 +440,7 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 	if !fstabOptedOut && (bootMode == source.BootBootloader || len(fstabLines) > 0) {
 		existingFstab, err = readFstab(rfs)
 		if err != nil {
-			return err
+			return "", err
 		}
 	}
 	if bootMode == source.BootBootloader {
@@ -423,7 +464,7 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 	if !fstabOptedOut && len(fstabLines) > 0 {
 		if updated, changed := guestmeta.AppendFstab(existingFstab, fstabLines); changed {
 			if err := rfs.WriteFile(guestmeta.FstabPath, updated); err != nil {
-				return fmt.Errorf("writing %s: %w", guestmeta.FstabPath, err)
+				return "", fmt.Errorf("writing %s: %w", guestmeta.FstabPath, err)
 			}
 		}
 	}
@@ -433,7 +474,7 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 		val, err = validate.CheckBootloader(rfs, platform.Architecture, disk.BootloaderESPSizeBytes)
 		if err != nil {
 			rep.Fail("validate", err.Error(), "a bootloader image must provide a bootable EFI tree at "+validate.EFIDir)
-			return err
+			return "", err
 		}
 		reportBootloader(rep, val.Bootloader)
 		reportESPFstab(rep, espFstab)
@@ -442,7 +483,7 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 		val, err = validate.Validate(rfs)
 		if err != nil {
 			rep.Fail("validate", err.Error(), "a contemper-ready image must provide a kernel, initrd, cmdline and init at the fixed paths")
-			return err
+			return "", err
 		}
 		reportFixedPaths(rep, rfs, val)
 		rep.Line("✅", "requirements satisfied", "kernel · initrd · init")
@@ -455,7 +496,7 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 	// population, qcow2 conversion) if --out already names something we
 	// can't safely replace.
 	if err := bundle.CheckDest(outBundleDir); err != nil {
-		return err
+		return "", err
 	}
 
 	// The bundle is assembled in a staging directory next to outBundleDir
@@ -465,7 +506,7 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 	// mixed-version bundle at outBundleDir.
 	stageDir, err := bundle.Stage(outBundleDir)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer func() { _ = os.RemoveAll(stageDir) }()
 
@@ -475,7 +516,7 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 		Progress:      rep,
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
 	for _, w := range warnings {
 		rep.Warn("warning", w)
@@ -523,20 +564,19 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 	}
 
 	if err := bundle.Write(stageDir, manifest); err != nil {
-		return err
+		return "", err
 	}
 
 	if err := bundle.Commit(stageDir, outBundleDir); err != nil {
-		return err
+		return "", err
 	}
 
 	rep.Blank()
 	rep.Line("📦", bundleName+"/", "disk + manifest")
-	elapsed := rep.Elapsed().Round(100 * time.Millisecond)
+	elapsed := (rep.Elapsed() - priorElapsed).Round(100 * time.Millisecond)
 	rep.Finish("bundle ready", fmt.Sprintf("%-16s%s", progress.HumanBytes(diskInfo.SizeBytes), elapsed))
 
-	_, _ = fmt.Fprintln(cmd.OutOrStdout(), outBundleDir)
-	return nil
+	return outBundleDir, nil
 }
 
 // runBuild builds opts.context with `docker buildx build --load`, then -
@@ -544,10 +584,14 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 // through the docker-daemon: source with the same runConvert code path
 // `convert` uses, so every convert flag applies to build too.
 func runBuild(ctx context.Context, cmd *cobra.Command, opts buildOptions) error {
-	platform, err := source.HostPlatform(opts.convert.arch)
+	sel, err := source.ParseArchSelection(opts.convert.arch)
 	if err != nil {
 		return err
 	}
+	if sel.All || sel.Group {
+		return fmt.Errorf("--arch %q: build produces one architecture at a time; build a multi-platform image with docker buildx, then run `contemper convert --arch all` on it", opts.convert.arch)
+	}
+	platform := v1.Platform{OS: "linux", Architecture: sel.Archs[0]}
 	if !opts.imageOnly {
 		// Catch a bad convert flag now rather than after a full build.
 		if err := checkConvertOptions(opts.convert); err != nil {

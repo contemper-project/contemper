@@ -89,6 +89,14 @@ func buildFixtureArchive(t *testing.T) string {
 	return buildArchive(t, map[string]string{"io.contemper.ready": "true"}, ukiFixtureFiles)
 }
 
+// buildFixtureArchiveFor is buildFixtureArchive for the given
+// architectures: one image per architecture in a single multi-platform
+// index (an index with a single entry when only one is given).
+func buildFixtureArchiveFor(t *testing.T, archs ...string) string {
+	t.Helper()
+	return buildIndexArchive(t, archs, map[string]string{"io.contemper.ready": "true"}, ukiFixtureFiles, nil)
+}
+
 // ukiFixtureFiles is the file set of a minimal image that boots as a UKI.
 var ukiFixtureFiles = []imgtest.File{
 	{Path: "boot/", Typeflag: tar.TypeDir},
@@ -113,20 +121,30 @@ func buildArchive(t *testing.T, labels map[string]string, files []imgtest.File) 
 // the given VOLUME paths.
 func buildArchiveWithVolumes(t *testing.T, labels map[string]string, files []imgtest.File, volumes []string) string {
 	t.Helper()
+	return buildIndexArchive(t, []string{runtime.GOARCH}, labels, files, volumes)
+}
 
-	plat := v1.Platform{OS: "linux", Architecture: runtime.GOARCH}
-	img, err := imgtest.Image(plat, labels, files)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if img, err = imgtest.WithVolumes(img, volumes...); err != nil {
-		t.Fatal(err)
-	}
+// buildIndexArchive writes one image per architecture, each with the given
+// labels, files and VOLUME paths, into one multi-platform index and returns
+// it as an OCI layout tarball.
+func buildIndexArchive(t *testing.T, archs []string, labels map[string]string, files []imgtest.File, volumes []string) string {
+	t.Helper()
 
-	idx := mutate.AppendManifests(empty.Index, mutate.IndexAddendum{
-		Add:        img,
-		Descriptor: v1.Descriptor{Platform: &plat},
-	})
+	var idx v1.ImageIndex = empty.Index
+	for _, arch := range archs {
+		plat := v1.Platform{OS: "linux", Architecture: arch}
+		img, err := imgtest.Image(plat, labels, files)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if img, err = imgtest.WithVolumes(img, volumes...); err != nil {
+			t.Fatal(err)
+		}
+		idx = mutate.AppendManifests(idx, mutate.IndexAddendum{
+			Add:        img,
+			Descriptor: v1.Descriptor{Platform: &plat},
+		})
+	}
 
 	layoutDir := t.TempDir()
 	if _, err := layout.Write(layoutDir, idx); err != nil {
@@ -297,19 +315,28 @@ func TestBuildCommandImageOnly(t *testing.T) {
 // TestBuildCommandChecksFlagsBeforeBuilding checks that a missing or bad
 // convert flag is reported before any docker command runs.
 func TestBuildCommandChecksFlagsBeforeBuilding(t *testing.T) {
-	for _, args := range [][]string{
-		{"--tag", "my-app:dev"},
-		{"--target", "no-such-target", "--tag", "my-app:dev"},
-		{"--target", "qemu", "--root-size", "lots", "--tag", "my-app:dev"},
-		{"--target", "qemu", "--tag", "Not A Tag"},
+	for _, c := range []struct {
+		args    []string
+		wantErr string
+	}{
+		{args: []string{"--tag", "my-app:dev"}},
+		{args: []string{"--target", "no-such-target", "--tag", "my-app:dev"}},
+		{args: []string{"--target", "qemu", "--root-size", "lots", "--tag", "my-app:dev"}},
+		{args: []string{"--target", "qemu", "--tag", "Not A Tag"}},
+		{args: []string{"--target", "qemu", "--arch", "all", "--tag", "my-app:dev"}, wantErr: "build produces one architecture at a time"},
+		{args: []string{"--target", "qemu", "--arch", "amd64,arm64", "--tag", "my-app:dev"}, wantErr: "build produces one architecture at a time"},
 	} {
+		args := c.args
 		logPath := installFakeBuildDocker(t, filepath.Join(t.TempDir(), "unused.tar"))
 		cmd := newBuildCmd()
 		cmd.SetOut(io.Discard)
 		cmd.SetErr(io.Discard)
 		cmd.SetArgs(append(args, t.TempDir()))
-		if err := cmd.Execute(); err == nil {
+		err := cmd.Execute()
+		if err == nil {
 			t.Errorf("build %v: expected an error", args)
+		} else if c.wantErr != "" && !strings.Contains(err.Error(), c.wantErr) {
+			t.Errorf("build %v error = %q, want one containing %q", args, err, c.wantErr)
 		}
 		if log, err := os.ReadFile(logPath); err == nil && len(log) > 0 {
 			t.Errorf("build %v ran docker before failing: %q", args, log)
