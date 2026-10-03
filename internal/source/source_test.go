@@ -70,6 +70,35 @@ func TestCheckReady(t *testing.T) {
 	}
 }
 
+func TestBootMode(t *testing.T) {
+	cases := []struct {
+		name    string
+		labels  map[string]string
+		want    string
+		wantErr bool
+	}{
+		{"absent", nil, "uki", false},
+		{"other labels only", map[string]string{"io.contemper.ready": "true"}, "uki", false},
+		{"uki", map[string]string{"io.contemper.boot": "uki"}, "uki", false},
+		{"bootloader", map[string]string{"io.contemper.boot": "bootloader"}, "bootloader", false},
+		{"unknown", map[string]string{"io.contemper.boot": "grub"}, "", true},
+		{"empty", map[string]string{"io.contemper.boot": ""}, "", true},
+		{"wrong case", map[string]string{"io.contemper.boot": "Bootloader"}, "", true},
+		{"padded", map[string]string{"io.contemper.boot": " uki"}, "", true},
+	}
+	for _, c := range cases {
+		cfg := &v1.ConfigFile{}
+		cfg.Config.Labels = c.labels
+		got, err := source.BootMode(cfg)
+		if c.wantErr != (err != nil) || got != c.want {
+			t.Errorf("%s: BootMode = %q, %v; want %q, error %v", c.name, got, err, c.want, c.wantErr)
+		}
+	}
+	if got, err := source.BootMode(nil); err != nil || got != "uki" {
+		t.Errorf("BootMode(nil) = %q, %v", got, err)
+	}
+}
+
 func TestHostPlatform(t *testing.T) {
 	if _, err := source.HostPlatform("bogus"); err == nil {
 		t.Errorf("HostPlatform(bogus): expected error")
