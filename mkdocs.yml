@@ -65,6 +65,7 @@ nav:
       - Authoring an image: guide/authoring.md
       - How conversion works: guide/how-it-works.md
       - The disk and VM lifecycle: guide/disk.md
+      - Bootloader images: guide/bootloader-images.md
       - Targets: guide/targets.md
       - Support images: guide/support-images.md
       - Volumes: guide/volumes.md

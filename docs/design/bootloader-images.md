@@ -3,10 +3,11 @@
 !!! info "Implemented"
     `convert` implements this contract: it reads the label, validates
     `/boot/efi`, builds the larger ESP and records the mode in the bundle
-    manifest, and the guest mounts the ESP at `/boot/efi`. The Debian
-    example, `examples/debian-grub`, is boot-tested on amd64 in CI,
-    including a kernel update inside the guest. The arm64 build of the
-    example is not boot-tested.
+    manifest, and the guest mounts the ESP at `/boot/efi`.
+    `examples/debian-grub` is a complete Debian image built this way.
+
+For a practical comparison of the two modes and how to build a
+bootloader image, see the [guide](../guide/bootloader-images.md).
 
 ## The problem
 
@@ -71,9 +72,14 @@ copy on the root filesystem is only what is underneath the mount.
 Kernels and GRUB's own configuration normally live on the root
 filesystem, which GRUB reads natively.
 
-**Bootloader configuration is the image's job.** It must find the root
-partition by its label, `contemper-root`: `root=LABEL=contemper-root` on
-the kernel command line, `search --label contemper-root` in GRUB.
+**Bootloader configuration is the image's job.** The configuration the
+image ships must find the root partition by its label, `contemper-root`:
+`root=LABEL=contemper-root` on the kernel command line,
+`search --label contemper-root` in GRUB. The label is the rule for the
+shipped configuration because the root filesystem, and with it its UUID,
+only exists once `convert` creates it. A configuration regenerated inside
+the guest, by `update-grub` say, may use the UUID: it stays the same for
+the life of that disk.
 `/boot/contemper/` (vmlinuz, initrd, cmdline) is neither used nor
 required in this mode. If present, `convert` reports that it is ignored;
 that is not an error.
@@ -140,7 +146,56 @@ before shipping.
   ships its bootloader already installed under `/boot/efi`.
 - It does not check that the kernels or configuration the bootloader will
   look for exist.
-- Secure Boot (shim) is out of scope here and tracked separately.
+- It does not provide Secure Boot support. See [Secure
+  Boot](#secure-boot).
+
+## In-place updates
+
+A bootloader image is meant to update itself in the guest: the package
+manager installs kernels and reinstalls the bootloader on the VM's own
+disk. Two things make that work.
+
+**Distribution tools cannot run in a container build.** Tools such as
+`update-grub` and `grub-install` probe the root device, and in a
+container build the root is an overlay with no device behind it, so they
+fail. The image therefore cannot generate its final configuration or
+install its bootloader at build time. Package scripts that would run
+them detect the container and skip them.
+
+**Bootstrap, then hand over.** The image ships a minimal bootstrap
+configuration, written by hand and finding the root by label, plus the
+bootloader binaries copied into place. It only has to boot the first
+time. Once the guest runs the distribution's own tool (a first-boot unit
+can do it, and a kernel install triggers it through the kernel hook),
+the generated configuration
+replaces the bootstrap one, with the real filesystem's UUID. From then on
+the VM updates like a regular installation. The tool's hook may be gated
+on the bootstrap file existing, so ship one even if it is only a
+placeholder.
+
+**No boot entries.** A fresh VM has no persistent NVRAM boot entries, so
+an in-guest bootloader install must keep the removable-media fallback
+path (`EFI/BOOT/`) current, or must not touch NVRAM. For GRUB's
+Debian packages that means answering the debconf questions
+`grub2/force_efi_extra_removable` with true and `grub2/update_nvram`
+with false when building the image. A tool that registers a boot entry
+instead would be writing something the VM does not keep. For the same
+reason, shim's fallback tool (`fb<arch>.efi`), which writes boot entries
+and resets the machine, is not shipped by the example.
+
+**Across deploys.** `deploy --to local-qemu` boots the disk with a
+throwaway snapshot overlay: in-guest updates survive reboots of the
+guest but not a new deploy, which starts from the bundle as converted.
+The [guide](../guide/bootloader-images.md#choosing-a-boot-mode) covers
+this.
+
+## Secure Boot
+
+An image may ship shim plus a signed bootloader at the fallback path;
+the example does. With Secure Boot disabled, shim simply loads the signed
+bootloader from its own directory. Booting with Secure Boot enabled is
+tracked separately. Shim
+is a PE32+ EFI application, so the check on the fallback file accepts it.
 
 ## Bundle manifest
 
@@ -154,8 +209,8 @@ additive field, `boot`, with the value `"uki"` or `"bootloader"`.
 - **Support images and volumes** work as in UKI mode.
 - **Volumes and in-place updates.** An image that updates itself in place
   keeps its root disk, which is at odds with replacing the disk on
-  redeploy; the trade-off is for the guide on choosing between the two
-  modes to explain. Persistent data still belongs on volumes.
+  redeploy; the [guide](../guide/bootloader-images.md#choosing-a-boot-mode)
+  explains the trade-off. Persistent data still belongs on volumes.
 
 ## Mounting the ESP in the guest
 
@@ -207,19 +262,26 @@ mounted.
 
 ## Example
 
-`examples/debian-grub` is the reference image for this contract. It builds
-the EFI binary with `grub-mkstandalone` rather than `grub-install`, which
-does not work in a container build (it cannot resolve the overlay root
-filesystem's device). The binary embeds a tiny config that finds the root
-filesystem by label and loads the real `grub.cfg` from it, so the ESP
-never changes when the kernel does. That `grub.cfg` is static: it boots
-`/vmlinuz` and `/initrd.img`, which the kernel package repoints at every
-install, and has a fallback entry for the previous kernel through
-`/vmlinuz.old`. `update-grub` and its kernel hook are left out on purpose:
-they need `grub-probe` to find the root device in the guest, write
-`root=UUID=...` instead of the label, and would overwrite the static file.
+`examples/debian-grub` is the reference image for this contract. It
+installs Debian's full GRUB packages together with `shim-signed` and the
+signed GRUB, so the guest updates in place like a regular Debian
+installation, and lays out the ESP by copying files only:
 
-## Open points for the follow-up issues
+- `EFI/BOOT/BOOT<ARCH>.EFI` is shim, `EFI/BOOT/grub<arch>.efi` the signed
+  GRUB it loads and `EFI/BOOT/mm<arch>.efi` the MOK manager;
+- the signed GRUB's built-in prefix is `/EFI/debian`, where a stub
+  `grub.cfg` finds the root filesystem by label and loads the real
+  `/boot/grub/grub.cfg` from it, so the ESP never changes when the kernel
+  does.
 
-- **Choosing between modes.** The user-facing guide comparing UKI and
-  bootloader images follows once the feature exists.
+The image preseeds the two debconf answers described under [In-place
+updates](#in-place-updates) and ships a bootstrap `/boot/grub/grub.cfg`
+that boots `/vmlinuz` and `/initrd.img`, with a fallback entry for the
+previous kernel through `/vmlinuz.old`. Its existence enables Debian's
+kernel hook. A oneshot unit runs `grub-install` and `update-grub` on the
+first boot, which replaces the bootstrap file with the generated
+configuration and leaves the GRUB modules and `core.efi` in place, so the
+VM is an ordinary Debian GRUB installation from then on: kernel installs
+run `update-grub`, and a GRUB package upgrade reinstalls the bootloader
+onto the ESP's fallback path. A snippet in `/etc/default/grub.d/` gives
+the generation the serial console and a short timeout.

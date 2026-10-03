@@ -93,7 +93,8 @@ tooling already produces. More in
 contemper is pre-1.0: the CLI and the bundle format may still change.
 
 **Works today:** `convert` for the qemu target, `build` (with Docker;
-podman support is planned), and `deploy --to local-qemu`. Support images
+podman support is planned), and `deploy --to local-qemu`. Images can also
+bring their own bootloader and update their kernel in place. Support images
 can declare variants, selected by what's actually present in your image
 (an init system, a first-boot mechanism). Volumes are supported too:
 declare one with `VOLUME` in your build file, and contemper sizes,
