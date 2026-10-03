@@ -1,0 +1,40 @@
+# Derived from examples/debian-grub (hack/e2e-bootloader.sh passes it in
+# as BASE_IMAGE; this Containerfile is never built standalone) to test a
+# kernel update inside the guest: it carries a second, different kernel
+# as plain .deb files, and a systemd unit (files/kernel-update.sh) that
+# installs it on first boot (after checking that the image's first-boot
+# unit installed GRUB, and that the kernel hook regenerated the GRUB
+# configuration), reboots, checks on the second boot that the new
+# kernel runs and the ESP is mounted with its marker intact and
+# reinstalls the bootloader with dpkg-reconfigure of the GRUB package,
+# then checks on the third boot that the guest still comes up. The example itself stays free of
+# any test logic.
+ARG BASE_IMAGE=contemper-example-debian-grub:dev
+FROM ${BASE_IMAGE}
+
+ARG TARGETARCH
+ENV DEBIAN_FRONTEND=noninteractive
+
+# The second kernel is Debian's "cloud" flavour of the same release: a
+# different uname -r (6.x.y-cloud-<arch> instead of 6.x.y-<arch>) that is
+# installable next to the first and boots under QEMU. linux-image-cloud-
+# <arch> is only a metapackage, so resolve the real package it depends
+# on and download that. Downloaded at build time so the guest needs no
+# network; its other dependencies (kmod, linux-base, initramfs-tools) are
+# already in the base image.
+RUN apt-get update && \
+    real="$(apt-cache depends "linux-image-cloud-${TARGETARCH}" | sed -n 's/^ *Depends: \(linux-image-.*\)$/\1/p' | head -n 1)" && \
+    test -n "${real}" && \
+    mkdir -p /usr/local/share/contemper-e2e/debs && \
+    (cd /usr/local/share/contemper-e2e/debs && apt-get download "${real}") && \
+    echo "${real#linux-image-}" >/usr/local/share/contemper-e2e/new-kernel && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY files/kernel-update.sh /usr/local/lib/contemper/e2e-kernel-update
+RUN chmod +x /usr/local/lib/contemper/e2e-kernel-update
+
+# Enabled with a pre-created .wants symlink, as the examples' own boot
+# marker is.
+COPY files/contemper-kernel-update.service /etc/systemd/system/contemper-kernel-update.service
+RUN mkdir -p /etc/systemd/system/multi-user.target.wants && \
+    ln -sf ../contemper-kernel-update.service /etc/systemd/system/multi-user.target.wants/contemper-kernel-update.service
