@@ -2,6 +2,7 @@ package disk
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	diskfs "github.com/diskfs/go-diskfs"
@@ -13,13 +14,18 @@ import (
 const (
 	sectorSize     uint64 = 512
 	alignmentBytes uint64 = 1 * 1024 * 1024 // 1 MiB
-	// ESPSizeBytes is the fixed size of the ESP partition BuildGPTImage
-	// creates.
+	// ESPSizeBytes is the size of the ESP partition BuildGPTImage
+	// creates for a UKI, unless BuildOptions.ESPSizeBytes says otherwise.
 	ESPSizeBytes uint64 = 128 * 1024 * 1024
+	// BootloaderESPSizeBytes is the ESP size for images that bring their
+	// own bootloader, which may keep kernels on the ESP.
+	BootloaderESPSizeBytes uint64 = 512 * 1024 * 1024
 	// tailBytes leaves room, after the root partition, for the backup
 	// GPT header and partition array (about 16.5 KiB), rounded up
 	// generously to a full alignment unit.
 	tailBytes uint64 = alignmentBytes
+	// espCopyBufferBytes is the chunk size for copying a file onto the ESP.
+	espCopyBufferBytes = 8 * 1024 * 1024
 )
 
 // archInfo carries the two pieces of the disk layout that vary by target
@@ -68,8 +74,14 @@ type BuildOptions struct {
 	// Arch is "arm64" or "amd64".
 	Arch string
 	// UKI is the built Unified Kernel Image, written to the ESP as
-	// EFI/BOOT/BOOT{AA64,X64}.EFI.
+	// EFI/BOOT/BOOT{AA64,X64}.EFI. Ignored when ESPTree is set.
 	UKI []byte
+	// ESPTree, if non-nil, is copied onto the ESP instead of the UKI.
+	// Entries must list every directory before its contents.
+	ESPTree []ESPEntry
+	// ESPSizeBytes is the ESP partition size; zero means ESPSizeBytes.
+	// It must be a multiple of the sector size.
+	ESPSizeBytes uint64
 	// RootImgPath is a pre-built, pre-populated ext4 image (see
 	// PopulateExt4) whose raw bytes become the root partition.
 	RootImgPath string
@@ -85,9 +97,22 @@ type Layout struct {
 	TotalSizeBytes                 uint64
 }
 
+// ESPEntry is one file or directory to place on the ESP.
+type ESPEntry struct {
+	// Path is relative to the ESP root, slash-separated, without a
+	// leading slash ("EFI/BOOT/BOOTX64.EFI").
+	Path string
+	// Dir marks a directory; the fields below apply to files only.
+	Dir bool
+	// Size is the file's size in bytes.
+	Size int64
+	// Open returns a reader over the file's content.
+	Open func() (io.ReadCloser, error)
+}
+
 // BuildGPTImage creates a fresh GPT disk image at rawPath: a 1 MiB
-// -aligned ESP (FAT32, 128 MiB, holding the UEFI fallback boot file) as
-// partition 1, and the ext4 root (from opts.RootImgPath) as partition 2,
+// -aligned ESP (FAT32, 128 MiB by default, holding the UEFI fallback boot
+// file or the given ESPTree) as partition 1, and the ext4 root (from opts.RootImgPath) as partition 2,
 // last on the disk.
 func BuildGPTImage(rawPath string, opts BuildOptions) (*Layout, error) {
 	info, ok := archTable[opts.Arch]
@@ -99,7 +124,14 @@ func BuildGPTImage(rawPath string, opts BuildOptions) (*Layout, error) {
 	}
 
 	espStart := alignmentBytes / sectorSize
-	espSectors := ESPSizeBytes / sectorSize
+	espSize := opts.ESPSizeBytes
+	if espSize == 0 {
+		espSize = ESPSizeBytes
+	}
+	if espSize%sectorSize != 0 {
+		return nil, fmt.Errorf("ESPSizeBytes %d is not a multiple of the %d-byte sector size", espSize, sectorSize)
+	}
+	espSectors := espSize / sectorSize
 	espEnd := espStart + espSectors - 1
 
 	rootStart := alignUp64((espEnd+1)*sectorSize, alignmentBytes) / sectorSize
@@ -137,7 +169,12 @@ func BuildGPTImage(rawPath string, opts BuildOptions) (*Layout, error) {
 		return nil, fmt.Errorf("writing GPT: %w", err)
 	}
 
-	if err := writeESP(d, info.bootFile, opts.UKI); err != nil {
+	if opts.ESPTree != nil {
+		err = writeESPTree(d, opts.ESPTree)
+	} else {
+		err = writeESP(d, info.bootFile, opts.UKI)
+	}
+	if err != nil {
 		return nil, err
 	}
 
@@ -176,6 +213,53 @@ func writeESP(d *diskpkg.Disk, bootFile string, uki []byte) error {
 	}
 	if _, err := rw.Write(uki); err != nil {
 		return fmt.Errorf("writing /EFI/BOOT/%s: %w", bootFile, err)
+	}
+	return nil
+}
+
+// writeESPTree creates the ESP's FAT32 filesystem and copies tree onto it.
+func writeESPTree(d *diskpkg.Disk, tree []ESPEntry) error {
+	fs, err := d.CreateFilesystem(diskpkg.FilesystemSpec{Partition: 1, FSType: filesystem.TypeFat32, VolumeLabel: "ESP"})
+	if err != nil {
+		return fmt.Errorf("creating ESP filesystem: %w", err)
+	}
+	for _, e := range tree {
+		p := "/" + e.Path
+		if e.Dir {
+			if err := fs.Mkdir(p); err != nil {
+				return fmt.Errorf("creating %s on ESP: %w", p, err)
+			}
+			continue
+		}
+		if err := copyToESP(fs, p, e); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func copyToESP(fs filesystem.FileSystem, p string, e ESPEntry) error {
+	src, err := e.Open()
+	if err != nil {
+		return fmt.Errorf("reading %s for the ESP: %w", p, err)
+	}
+	defer func() { _ = src.Close() }()
+	dst, err := fs.OpenFile(p, os.O_CREATE|os.O_RDWR)
+	if err != nil {
+		return fmt.Errorf("creating %s on ESP: %w", p, err)
+	}
+	// Every Write to the FAT library rewrites the FATs, so a big buffer
+	// matters: 32 KiB chunks are about ten times slower.
+	buf := make([]byte, espCopyBufferBytes)
+	n, err := io.CopyBuffer(struct{ io.Writer }{dst}, struct{ io.Reader }{src}, buf)
+	if err != nil {
+		return fmt.Errorf("writing %s to ESP: %w", p, err)
+	}
+	if cerr := dst.Close(); cerr != nil {
+		return fmt.Errorf("closing %s on ESP: %w", p, cerr)
+	}
+	if n != e.Size {
+		return fmt.Errorf("copying %s to ESP: wrote %d bytes, expected %d", p, n, e.Size)
 	}
 	return nil
 }
