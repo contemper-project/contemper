@@ -376,11 +376,19 @@ jobs:
     # Bootloader images end to end: examples/debian-grub with a second
     # kernel added (hack/e2e-bootloader/), booted, updated to that
     # kernel from inside the guest, rebooted, and checked to run it with
-    # the ESP still mounted. See hack/e2e-bootloader.sh.
+    # the ESP still mounted. See hack/e2e-bootloader.sh. Run once without
+    # and once with UEFI Secure Boot (the image then declares
+    # io.contemper.secure-boot and the VM boots the OVMF build with
+    # Microsoft's keys enrolled).
     needs: changes
     if: needs.changes.outputs.go == 'true'
+    name: e2e-bootloader (secure boot ${{ matrix.secure-boot && 'on' || 'off' }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        secure-boot: [false, true]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -393,7 +401,10 @@ jobs:
             | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      # podman and e2fsprogs are preinstalled on ubuntu-latest.
+      # podman and e2fsprogs are preinstalled on ubuntu-latest. The ovmf
+      # package provides the 4M Secure Boot code image and the variable
+      # store with Microsoft's keys enrolled
+      # (OVMF_CODE_4M.secboot.fd, OVMF_VARS_4M.ms.fd).
       - name: Install qemu and UEFI firmware
         run: |
           sudo apt-get update
@@ -401,7 +412,7 @@ jobs:
       - name: Boot test with an in-guest kernel update
         env:
           CONTEMPER_E2E_COVERDIR: _gocover
-        run: ./hack/e2e-bootloader.sh --timeout 600s
+        run: ./hack/e2e-bootloader.sh --timeout 600s ${{ matrix.secure-boot && '--secure-boot' || '' }}
       # See the `e2e` job's "Convert integration coverage" step.
       - name: Convert integration coverage
         if: ${{ !cancelled() }}
@@ -423,7 +434,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: e2e-bootloader-serial-log
+          name: e2e-bootloader-secure-boot-${{ matrix.secure-boot }}-serial-log
           path: _out/bootloader/serial.log
           if-no-files-found: ignore
 
