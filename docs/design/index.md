@@ -81,7 +81,8 @@ Two qualifications:
   post-install hook firing correctly in a build context.
 - **The kernel command line is a genuine exception.** On a conventional
   install nobody writes a cmdline; `grub-install` and its equivalents
-  generate one. contemper has no bootloader installer, and a UKI seals
+  generate one. contemper has no bootloader installer (images may
+  [bring their own bootloader](bootloader-images.md)), and a UKI seals
   the cmdline in at build time, so this really is a new authoring input.
   It is not contemper-specific (anyone using `systemd-ukify` faces the
   same thing), but it is not "the same as installing an OS" either.

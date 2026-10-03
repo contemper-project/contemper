@@ -67,6 +67,9 @@ that only actually happens if you skip the volume helper (below) on an
 image with no other way to prepare the disk. Opt out of the fstab lines
 entirely — if your init system mounts volumes its own way — with the
 image label `io.contemper.fstab="false"` or `convert --no-fstab`.
+Bootloader images get one more appended line, for the ESP, which the
+same opt-outs cover; see [Mounting the ESP in the
+guest](../design/bootloader-images.md#mounting-the-esp-in-the-guest).
 
 On systemd, `nofail` by itself would do more than that: it also drops
 the generated mount unit's implicit ordering before `local-fs.target`

@@ -32,6 +32,7 @@ tool.
 | `support.variants` | each of the support image's branches' resolved variant: `branch`, `variant`, and (unless it was a no-op) `ref`/`digest` for the image that won |
 | `volumeHelper.ref`, `volumeHelper.digest`, `volumeHelper.variants` | the automatically merged volume-formatting support image, in the same shape as `support` (without `origin`), if the source image declares volumes and `--no-volume-helper` wasn't given |
 | `target` | the canonical target name, for example `qemu-qcow2`, never the alias |
+| `boot` | how the image boots: `"uki"` (contemper assembled a UKI) or `"bootloader"` (the image's own bootloader is on the ESP, see [Bootloader images](../design/bootloader-images.md)). Manifests written before this field existed lack it; read them as `"uki"` |
 | `arch` | the image architecture (`arm64`, `amd64`) |
 | `disk.file`, `disk.format`, `disk.sizeBytes`, `disk.sha256` | the disk file and its checksum |
 | `volumes` | one object per volume declared with `VOLUME`: `name`, `path`, `size` (bytes; omitted if unsized), `fs` (always `"ext4"`) |
@@ -76,6 +77,7 @@ left out when empty; `hints` itself is always present.
     ]
   },
   "target": "qemu-qcow2",
+  "boot": "uki",
   "arch": "arm64",
   "disk": {
     "file": "disk.qcow2",
