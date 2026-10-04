@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/name"
+
 	"github.com/contemper-project/contemper/internal/source"
 	"github.com/contemper-project/contemper/internal/volume"
 )
@@ -43,6 +45,23 @@ type ImageRef struct {
 	// tag of the same image reuses that instance's volumes. Set only on
 	// Source; empty (and omitted) elsewhere.
 	Repo string `json:"repo,omitempty"`
+}
+
+// Identity names the image a bundle was converted from, independent of
+// its tag or digest: the registry-qualified repository for a registry
+// source, otherwise Repo. Two bundles with the same identity are
+// versions of the same image. deploy uses it to tell whether the volumes
+// kept for an instance were created by the same image. It comes from the
+// manifest, so it guards against two different images sharing an
+// instance name by accident, not against a manifest written to claim
+// another image's identity.
+func (r ImageRef) Identity() string {
+	if ref, err := source.ParseRef(r.Ref); err == nil && ref.Kind == source.KindRegistry {
+		if n, err := name.ParseReference(ref.Value); err == nil {
+			return n.Context().Name()
+		}
+	}
+	return r.Repo
 }
 
 // SupportRef identifies a support-image merge (the target's or the

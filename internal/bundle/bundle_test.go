@@ -298,3 +298,20 @@ func TestSecureBootField(t *testing.T) {
 		}
 	}
 }
+
+func TestImageRefIdentity(t *testing.T) {
+	cases := []struct {
+		ref  bundle.ImageRef
+		want string
+	}{
+		{bundle.ImageRef{Ref: "ghcr.io/acme/app:v1", Repo: "app"}, "ghcr.io/acme/app"},
+		{bundle.ImageRef{Ref: "ghcr.io/acme/app@sha256:" + strings.Repeat("a", 64), Repo: "app"}, "ghcr.io/acme/app"},
+		{bundle.ImageRef{Ref: "oci-archive:/tmp/app.tar", Repo: "app"}, "app"},
+		{bundle.ImageRef{}, ""},
+	}
+	for _, c := range cases {
+		if got := c.ref.Identity(); got != c.want {
+			t.Errorf("Identity(%+v) = %q, want %q", c.ref, got, c.want)
+		}
+	}
+}
