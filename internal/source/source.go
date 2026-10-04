@@ -140,16 +140,20 @@ func ParseRef(raw string) (Ref, error) {
 // registry reference, raw must be one too. A local parent (an archive or
 // layout the user supplied) may name local variants.
 //
-// A registry parent also constrains which registry a variant may come
-// from: it must be the same registry as parent (the repository may
-// differ - the published variants of a real support image live in
-// sibling repositories under the same host). Without this, a support
+// A registry parent also constrains where a variant may come from: the
+// same registry and the same repository namespace (the first path
+// component, as in "ghcr.io/acme/" for "ghcr.io/acme/support"); the
+// repository itself may differ - the published variants of a real
+// support image live in sibling repositories. A support image in a
+// repository with no namespace (one path component) only allows
+// variants in that same repository. Repository paths with ".", ".." or
+// empty segments are refused. Without this, a support
 // image's annotations - content the image itself controls - could name
-// a variant in any registry, pulled with the user's own credentials, so
-// a third-party support image could pull a private image the user has
-// access to into the disk. A local parent may still name a variant in
-// any registry, since the user already chose to trust that parent image
-// directly.
+// a variant in any registry or in someone else's namespace, pulled with
+// the user's own credentials, so a third-party support image could pull
+// a private image the user has access to into the disk. A local parent
+// may still name a variant anywhere, since the user already chose to
+// trust that parent image directly.
 func ParseVariantRef(parent Ref, raw string) (Ref, error) {
 	ref, err := ParseRef(raw)
 	if err != nil {
@@ -161,30 +165,56 @@ func ParseVariantRef(parent Ref, raw string) (Ref, error) {
 	if ref.Kind != KindRegistry {
 		return Ref{}, fmt.Errorf("variant image %q is a local %s reference, but the image declaring it came from a registry; only registry references are allowed there", raw, ref.Kind)
 	}
-	parentRegistry, err := registryHost(parent.Value)
+	parentRegistry, parentRepo, err := registryRepository(parent.Value)
 	if err != nil {
 		return Ref{}, fmt.Errorf("parsing support image ref %q: %w", parent.Value, err)
 	}
-	variantRegistry, err := registryHost(ref.Value)
+	variantRegistry, variantRepo, err := registryRepository(ref.Value)
 	if err != nil {
 		return Ref{}, fmt.Errorf("parsing variant image %q: %w", raw, err)
 	}
 	if variantRegistry != parentRegistry {
-		return Ref{}, fmt.Errorf("variant image %q is in registry %q, but the image declaring it is in registry %q; a variant must come from the same registry (a different repository there is fine)", raw, variantRegistry, parentRegistry)
+		return Ref{}, fmt.Errorf("variant image %q is in registry %q, but the image declaring it is in registry %q; a variant must come from the same registry and namespace (a different repository there is fine)", raw, variantRegistry, parentRegistry)
+	}
+	parentNS, variantNS := repoNamespace(parentRepo), repoNamespace(variantRepo)
+	if parentNS == "" {
+		// A repository with no namespace: nothing groups it with others,
+		// so only that same repository qualifies.
+		if variantRepo != parentRepo {
+			return Ref{}, fmt.Errorf("variant image %q is in the repository %q of %s, but the image declaring it is in %q, which has no namespace; a variant of such an image must be in the same repository (any tag or digest)", raw, variantRepo, variantRegistry, parentRepo)
+		}
+	} else if variantNS != parentNS {
+		return Ref{}, fmt.Errorf("variant image %q is in the namespace %q of %s, but the image declaring it is in %q; a variant must come from the same registry and namespace (a different repository there is fine)", raw, variantNS, variantRegistry, parentNS)
 	}
 	return ref, nil
 }
 
-// registryHost returns the normalized registry host of a registry
-// reference string (e.g. "docker.io" and "index.docker.io" both come
-// back as "index.docker.io"), for comparing two registry references'
-// hosts regardless of which alias each was written with.
-func registryHost(raw string) (string, error) {
+// registryRepository returns the normalized registry host of a registry
+// reference string and its repository path. It refuses a repository path
+// that is not already clean (".", ".." or empty segments): registries and
+// the HTTP layers in front of them may resolve such a path to another
+// repository than the one a namespace comparison would see.
+func registryRepository(raw string) (host, repo string, err error) {
 	nref, err := name.ParseReference(raw)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return nref.Context().RegistryStr(), nil
+	repo = nref.Context().RepositoryStr()
+	if path.Clean(repo) != repo {
+		return "", "", fmt.Errorf("repository path %q must not contain \".\", \"..\" or empty segments", repo)
+	}
+	return nref.Context().RegistryStr(), repo, nil
+}
+
+// repoNamespace returns the first component of a repository path (the
+// owner or organization on most registries; "library" for a single-name
+// Docker Hub image), or "" if the path has only one component.
+func repoNamespace(repo string) string {
+	ns, _, _ := strings.Cut(repo, "/")
+	if ns == repo {
+		return ""
+	}
+	return ns
 }
 
 // String returns the reference in the form ParseRef accepts, with local

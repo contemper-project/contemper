@@ -46,13 +46,20 @@ Where a variant's `.image` may point depends on where the support image
 itself came from:
 
 - **Support image from a registry:** each `.image` must be a registry
-  reference in the **same registry** as the support image (the repository
-  may differ; `docker.io` and `index.docker.io` count as the same
-  registry). Local `oci-archive:`, `oci:` and `docker-archive:`
-  references, and references to any other registry, fail the conversion.
-  An image's annotations can therefore never point contemper at files on
-  the build host, or make it pull from another registry with your
-  credentials.
+  reference in the **same registry and namespace** as the support image
+  (the first path component, such as `acme` in `ghcr.io/acme/support`;
+  the repository may differ; `docker.io` and `index.docker.io` count as
+  the same registry). A support image whose repository has no namespace
+  (one path component, as in `reg.example/support`) may only name
+  variants in that same repository. A repository path with `.` or `..`
+  segments is refused. Local `oci-archive:`, `oci:` and `docker-archive:`
+  references, and references to any other registry or namespace, fail
+  the conversion. An image's annotations can therefore never point
+  contemper at files on the build host, or make it pull from another
+  registry or another owner's repositories with your credentials. On
+  some registries (Amazon ECR, single-tenant registries) the first path
+  component is not an ownership boundary, so this rule gives less
+  protection there.
 - **Support image from a local archive or layout:** `.image` may be a
   registry reference in any registry, or a local reference. You supplied
   that file directly, so its annotations are trusted like your own
