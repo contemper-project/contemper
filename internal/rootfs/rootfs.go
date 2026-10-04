@@ -18,7 +18,21 @@ import (
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
+
+	"github.com/contemper-project/contemper/internal/limits"
+	"github.com/contemper-project/contemper/internal/progress"
 )
+
+// maxReadFileSize bounds Rootfs.ReadLargeFile, which holds a whole file
+// in memory. It is used for the kernel and initrd, which are read to
+// build the UKI (its PE sections use 32-bit sizes, so a few GiB is the
+// most it can carry; real kernels and initrds are under a few hundred
+// MiB).
+const maxReadFileSize = 1 << 30
+
+// maxReadTextSize bounds ReadFile for the small text files (kernel
+// command line, os-release, fstab and similar), which are never large.
+const maxReadTextSize = 1 << 20
 
 // maxSymlinkHops bounds symlink resolution inside the index.
 const maxSymlinkHops = 40
@@ -113,7 +127,7 @@ func Build(ctx context.Context, base v1.Image, overlays ...v1.Image) (*Rootfs, e
 			return nil, fmt.Errorf("appending overlay layers: %w", err)
 		}
 
-		st, err := overlayStats(overlay)
+		st, err := overlayStats(ctx, overlay)
 		if err != nil {
 			return nil, fmt.Errorf("computing overlay stats: %w", err)
 		}
@@ -205,6 +219,8 @@ func indexTar(ctx context.Context, r io.Reader, w io.Writer) (map[string]*Entry,
 	cw := &countingWriter{w: w}
 	tr := tar.NewReader(io.TeeReader(r, cw))
 
+	lim := limits.FromContext(ctx)
+	count := limits.NewCounter(lim)
 	index := make(map[string]*Entry)
 	for n := 0; ; n++ {
 		if n%256 == 0 {
@@ -219,6 +235,20 @@ func indexTar(ctx context.Context, r io.Reader, w io.Writer) (map[string]*Entry,
 		if err != nil {
 			return nil, err
 		}
+		// Before anything is read: a sparse entry claims its expanded
+		// size here while carrying almost no data in the layer.
+		if err := count.Check(hdr.Name, hdr.Size); err != nil {
+			return nil, err
+		}
+		if err := checkHeaderMetadata(hdr); err != nil {
+			return nil, err
+		}
+		// What is actually written to rootfs.tar counts too, not just
+		// the sizes the headers claim: PAX records and long names take
+		// space without being anyone's file content.
+		if limit := lim.MaxTotalSize + int64(n+1)*streamOverheadPerEntry; cw.n > limit {
+			return nil, fmt.Errorf("image content written for %q exceeds the limit of %s plus per-entry headers; a larger image needs --max-rootfs-size", hdr.Name, progress.HumanBytes(lim.MaxTotalSize))
+		}
 		p := normalizePath(hdr.Name)
 		offset := cw.n
 		// Not a decompression-bomb risk: this drains one already
@@ -232,13 +262,60 @@ func indexTar(ctx context.Context, r io.Reader, w io.Writer) (map[string]*Entry,
 		if p == "/" {
 			continue
 		}
+		slimHeader(hdr)
 		index[p] = &Entry{Path: p, Header: hdr, DataOffset: offset}
 	}
 	// Drain any trailing archive padding so the file on disk is a
 	// complete, independently readable tar (not required for our own
 	// offset-based reads, but cheap and useful for debugging).
-	io.Copy(cw, r) //nolint:errcheck,gosec // G104/errcheck: best-effort trailing padding, already drained the archive content we need above
+	io.Copy(cw, io.LimitReader(r, maxTrailerBytes)) //nolint:errcheck,gosec // G104/errcheck: best-effort trailing padding, already drained the archive content we need above
 	return index, nil
+}
+
+const (
+	// maxEntryMetadata bounds one entry's name, link target, owner names
+	// and PAX records together. Real entries use a few hundred bytes;
+	// extended attributes are the largest legitimate part.
+	maxEntryMetadata = 64 << 10
+	// streamOverheadPerEntry is the room each entry gets, on top of the
+	// total content limit, for its header block, padding and PAX records
+	// in the flattened tar.
+	streamOverheadPerEntry = 2048
+	// maxTrailerBytes bounds the archive padding copied after the last
+	// entry.
+	maxTrailerBytes = 1 << 20
+)
+
+// checkHeaderMetadata refuses an entry whose names and PAX records take
+// more than maxEntryMetadata, naming the entry.
+func checkHeaderMetadata(hdr *tar.Header) error {
+	n := len(hdr.Name) + len(hdr.Linkname) + len(hdr.Uname) + len(hdr.Gname)
+	for k, v := range hdr.PAXRecords {
+		n += len(k) + len(v)
+	}
+	if n > maxEntryMetadata {
+		return fmt.Errorf("entry %q has %d bytes of names and extended headers, over the limit of %d", hdr.Name, n, maxEntryMetadata)
+	}
+	return nil
+}
+
+// slimHeader drops what a header carries that nothing reads, before it
+// is kept in memory for the life of the conversion: every PAX record
+// except the extended attributes (SCHILY.xattr.*, which the ext4 writer
+// uses), and the deprecated Xattrs map, which the reader fills from the
+// same records.
+func slimHeader(hdr *tar.Header) {
+	var keep map[string]string
+	for k, v := range hdr.PAXRecords {
+		if strings.HasPrefix(k, "SCHILY.xattr.") {
+			if keep == nil {
+				keep = map[string]string{}
+			}
+			keep[k] = v
+		}
+	}
+	hdr.PAXRecords = keep
+	hdr.Xattrs = nil //nolint:staticcheck // the reader fills it from PAXRecords; xattrs are read from there
 }
 
 // normalizePath turns a tar entry name into an absolute, cleaned path.
@@ -362,11 +439,23 @@ func (r *Rootfs) DirHasContent(dir string) bool {
 	return false
 }
 
-// ReadFile returns the content of the regular file at p, resolving
-// symlinks first. It reads directly from the backing tar file by offset;
+// ReadFile returns the content of the small regular file at p (kernel
+// command line, os-release, fstab and similar; at most maxReadTextSize),
+// resolving symlinks first. It reads directly from the backing tar file by offset;
 // image content is never written to the host filesystem under its
 // original name.
 func (r *Rootfs) ReadFile(p string) ([]byte, error) {
+	return r.readFile(p, maxReadTextSize)
+}
+
+// ReadLargeFile is ReadFile for the kernel and initrd, which are held in
+// memory to build the boot image and may be large (at most
+// maxReadFileSize).
+func (r *Rootfs) ReadLargeFile(p string) ([]byte, error) {
+	return r.readFile(p, maxReadFileSize)
+}
+
+func (r *Rootfs) readFile(p string, maxSize int64) ([]byte, error) {
 	e, err := r.Resolve(p)
 	if err != nil {
 		return nil, err
@@ -381,6 +470,9 @@ func (r *Rootfs) ReadFile(p string) ([]byte, error) {
 	defer func() { _ = f.Close() }()
 	if _, err := f.Seek(e.DataOffset, io.SeekStart); err != nil {
 		return nil, err
+	}
+	if e.Header.Size > maxSize {
+		return nil, fmt.Errorf("%s is %d bytes, too large to read into memory (limit %d)", p, e.Header.Size, maxSize)
 	}
 	buf := make([]byte, e.Header.Size)
 	if _, err := io.ReadFull(f, buf); err != nil {
@@ -560,7 +652,7 @@ const whiteoutPrefix = ".wh."
 // Removed from a raw scan of its own layers' tar entries for whiteout
 // and opaque-directory markers. See OverlayStats's doc comment for
 // exactly what each field means.
-func overlayStats(overlay v1.Image) (OverlayStats, error) {
+func overlayStats(ctx context.Context, overlay v1.Image) (OverlayStats, error) {
 	var st OverlayStats
 
 	layers, err := overlay.Layers()
@@ -568,7 +660,7 @@ func overlayStats(overlay v1.Image) (OverlayStats, error) {
 		return st, fmt.Errorf("reading overlay image layers: %w", err)
 	}
 	for _, l := range layers {
-		n, err := countWhiteouts(l)
+		n, err := countWhiteouts(ctx, l)
 		if err != nil {
 			return st, fmt.Errorf("scanning overlay layer for whiteouts: %w", err)
 		}
@@ -578,12 +670,16 @@ func overlayStats(overlay v1.Image) (OverlayStats, error) {
 	rc := mutate.Extract(overlay)
 	defer func() { _ = rc.Close() }() // read-only stream; nothing to flush
 	tr := tar.NewReader(rc)
+	count := limits.NewCounter(limits.FromContext(ctx))
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
+			return st, err
+		}
+		if err := count.Check(hdr.Name, hdr.Size); err != nil {
 			return st, err
 		}
 		if _, err := io.Copy(io.Discard, tr); err != nil { //nolint:gosec // G110: discarded, and bounded by the overlay's real content
@@ -605,7 +701,7 @@ func overlayStats(overlay v1.Image) (OverlayStats, error) {
 // resolution or cross-layer bookkeeping (that's what mutate.Extract does
 // for the entries that survive; this just counts the markers themselves,
 // which Extract never emits).
-func countWhiteouts(l v1.Layer) (int, error) {
+func countWhiteouts(ctx context.Context, l v1.Layer) (int, error) {
 	r, err := l.Uncompressed()
 	if err != nil {
 		return 0, fmt.Errorf("reading layer contents: %w", err)
@@ -613,6 +709,7 @@ func countWhiteouts(l v1.Layer) (int, error) {
 	defer func() { _ = r.Close() }() // read-only stream; nothing to flush
 
 	tr := tar.NewReader(r)
+	count := limits.NewCounter(limits.FromContext(ctx))
 	n := 0
 	for {
 		hdr, err := tr.Next()
@@ -620,6 +717,9 @@ func countWhiteouts(l v1.Layer) (int, error) {
 			break
 		}
 		if err != nil {
+			return 0, err
+		}
+		if err := count.Check(hdr.Name, hdr.Size); err != nil {
 			return 0, err
 		}
 		if _, err := io.Copy(io.Discard, tr); err != nil { //nolint:gosec // G110: discarded, and bounded by the overlay's real content

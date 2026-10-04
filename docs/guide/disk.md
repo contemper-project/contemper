@@ -31,6 +31,13 @@ The root partition is sized `max(1 GiB, 1.5 × content + 256 MiB)` by
 default. Override it with `--root-size`, for example `--root-size 4GiB`.
 Either way the size is rounded up to a whole MiB.
 
+While merging an image's layers, contemper refuses content beyond 64 GiB
+in total, a single file beyond 32 GiB, or more than four million
+entries, so a malformed image cannot fill the disk it converts on. An
+image that really is larger needs `--max-rootfs-size`, for example
+`--max-rootfs-size 200GiB`, which sets both the total and the per-file
+limit.
+
 ## State behaves the way a container's does
 
 | Container | Your VM | Root filesystem |
