@@ -1,11 +1,26 @@
 name: Release
 
-# release-please watches every push to main for Conventional Commits and
-# maintains a standing release PR. Merging that PR is what cuts a release:
-# release-please tags the merge commit and publishes a GitHub Release with
-# its own changelog-derived notes, then (in the same run, since a tag
-# release-please creates with GITHUB_TOKEN doesn't trigger other workflows)
-# GoReleaser checks out that tag and attaches the built binaries to it.
+# A release is only tagged, and anything is only published, after every
+# test workflow has passed on the release commit. The flow, on every push
+# to main:
+#
+#   release-pr  keeps the standing release PR up to date (release-please
+#               in pull-request mode only; it never tags anything).
+#   gate        works out whether this push is the merge of the release
+#               PR. If it isn't, the rest of the run is skipped and the
+#               workflow stays green. If it is, the job waits for the
+#               other workflows on the same commit and fails unless all of
+#               them succeeded.
+#   release     release-please in release mode: tags the merge commit and
+#               publishes the GitHub Release with its changelog-derived
+#               notes.
+#   goreleaser  (in the same run, since a tag release-please creates with
+#               GITHUB_TOKEN doesn't trigger other workflows) checks out
+#               that tag and attaches the built binaries to it.
+#   distros     queues the distribution tests against the new tag.
+#
+# Without the gate, release-please would tag the commit the moment the
+# release PR merges, in parallel with CI on that same commit.
 on:
   push:
     branches: [main]
@@ -14,11 +29,185 @@ on:
 # granted by default.
 permissions: {}
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-
 jobs:
-  release-please:
+  release-pr:
+    # Only opens and updates the release PR. While a merged release PR is
+    # still waiting to be tagged (that is, while the gate below is
+    # waiting, or after it failed), release-please logs "There are
+    # untagged, merged release PRs outstanding - aborting" and exits
+    # successfully without touching anything, so this job needs no
+    # special handling for that window.
+    #
+    # Runs one at a time. GitHub keeps at most one pending job per group
+    # and cancels an older pending one when a newer arrives; that is fine
+    # here, since the update is idempotent and the newest push is the
+    # one that matters.
+    concurrency:
+      group: ${{ github.workflow }}-release-pr
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          skip-github-release: true
+
+  gate:
+    # Decides whether this push is a release and, if so, holds it back
+    # until the test workflows have passed on this exact commit.
+    #
+    # Release detection: release-please labels its PR "autorelease:
+    # pending" until it has tagged the release. The PR is rebase-merged,
+    # so the single release commit lands on main with the PR's
+    # merge_commit_sha as its id: a merged PR carrying the label whose
+    # merge_commit_sha is this commit means this push is the release.
+    #
+    # Recovery: the wait reads the latest attempt of each workflow's run.
+    # If a gated workflow fails, re-run it; once it succeeds, use "Re-run
+    # failed jobs" on this Release run and the gate passes and releases.
+    # (The label stays "autorelease: pending" until the release job has
+    # tagged, so the detection gives the same answer on a re-run.)
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    permissions:
+      actions: read
+      pull-requests: read
+    outputs:
+      release: ${{ steps.detect.outputs.release }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      SHA: ${{ github.sha }}
+      # The workflows that must have succeeded on the release commit, one
+      # workflow file per line. In:
+      #   ci.yml              build, lint, unit and boot tests.
+      #   release-checks.yml  GoReleaser snapshot build and config checks.
+      #   codeql.yml          code scanning.
+      #   docs.yml            strict docs build.
+      # Out, on purpose:
+      #   scorecard.yml       a supply-chain report, not a test.
+      #   arm64-nightly.yml   path-filtered, emulated (slow) boot tests;
+      #                       deliberately non-gating.
+      #   volumes-support.yml path-filtered image publishing.
+      #   distros.yml         runs after the release, by design (see the
+      #                       distros job below).
+      GATED_WORKFLOWS: |
+        .github/workflows/ci.yml
+        .github/workflows/release-checks.yml
+        .github/workflows/codeql.yml
+        .github/workflows/docs.yml
+    steps:
+      - name: Detect release commit
+        id: detect
+        env:
+          LABEL: 'autorelease: pending'
+        run: |
+          set -euo pipefail
+          n=$(gh api "repos/${GH_REPO}/commits/${SHA}/pulls" \
+            | jq --arg sha "${SHA}" --arg lbl "${LABEL}" \
+              '[.[] | select(.merged_at != null and .base.ref == "main"
+                and .merge_commit_sha == $sha
+                and any(.labels[]; .name == $lbl))] | length')
+          if [ "${n}" -gt 0 ]; then
+            echo "release=true" >> "${GITHUB_OUTPUT:-/dev/stdout}"
+            echo "${SHA} is the merge commit of a release PR; waiting for its checks."
+          else
+            echo "release=false" >> "${GITHUB_OUTPUT:-/dev/stdout}"
+            echo "${SHA} is not a release commit; nothing to release."
+          fi
+
+      - name: Wait for the test workflows
+        if: steps.detect.outputs.release == 'true'
+        env:
+          # A workflow whose run doesn't appear within this many minutes
+          # is treated as failed (it was probably skipped or never
+          # triggered). Set well under the job timeout.
+          GRACE_MINUTES: '10'
+          WAIT_MINUTES: '55'
+          POLL_SECONDS: '30'
+        run: |
+          set -euo pipefail
+          summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
+          start=$(date +%s)
+          while true; do
+            # One entry per run; a re-run reuses the run and bumps its
+            # attempt, so this always reflects the latest attempt. Runs
+            # are matched by workflow file, not display name.
+            runs=$(gh api --paginate \
+              "repos/${GH_REPO}/actions/runs?head_sha=${SHA}&event=push&per_page=100" \
+              --jq '.workflow_runs[]' | jq -s '.')
+            elapsed=$(( $(date +%s) - start ))
+            failed=0 pending=0
+            table=""
+            while IFS= read -r wf; do
+              [ -n "${wf}" ] || continue
+              row=$(jq -r --arg wf "${wf}" '
+                [.[] | select((.path | split("@")[0]) == $wf)]
+                | sort_by(.created_at) | last // empty
+                | [.name, .status, (.conclusion // ""), .html_url, (.run_attempt | tostring)]
+                | @tsv' <<<"${runs}")
+              if [ -z "${row}" ]; then
+                if [ "${elapsed}" -ge $(( GRACE_MINUTES * 60 )) ]; then
+                  failed=1
+                  table+="| ${wf} | no run started within ${GRACE_MINUTES} minutes |"$'\n'
+                else
+                  pending=1
+                  table+="| ${wf} | not started yet |"$'\n'
+                fi
+                continue
+              fi
+              IFS=$'\t' read -r name status conclusion url attempt <<<"${row}"
+              if [ "${status}" != "completed" ]; then
+                pending=1
+                table+="| [${name}](${url}) | ${status} (attempt ${attempt}) |"$'\n'
+              elif [ "${conclusion}" != "success" ]; then
+                failed=1
+                table+="| [${name}](${url}) | **${conclusion}** (attempt ${attempt}) |"$'\n'
+              else
+                table+="| [${name}](${url}) | success (attempt ${attempt}) |"$'\n'
+              fi
+            done <<<"${GATED_WORKFLOWS}"
+            if [ "${failed}" -eq 1 ] || [ "${pending}" -eq 0 ] \
+              || [ "${elapsed}" -ge $(( WAIT_MINUTES * 60 )) ]; then
+              break
+            fi
+            echo "Waiting (${elapsed}s elapsed)..."
+            sleep "${POLL_SECONDS}"
+          done
+          {
+            echo "### Checks on ${SHA}"
+            echo
+            echo "| Workflow | Result |"
+            echo "| --- | --- |"
+            printf '%s' "${table}"
+          } >> "${summary}"
+          printf '%s' "${table}"
+          if [ "${failed}" -eq 1 ]; then
+            echo "::error::A required workflow did not succeed on ${SHA}; not releasing. Fix or re-run it, then re-run the failed jobs of this Release run."
+            exit 1
+          fi
+          if [ "${pending}" -eq 1 ]; then
+            echo "::error::Timed out after ${WAIT_MINUTES} minutes waiting for the workflows on ${SHA}; not releasing. Re-run the failed jobs of this Release run once they have finished."
+            exit 1
+          fi
+          echo "All required workflows succeeded on ${SHA}."
+
+  release:
+    needs: gate
+    if: needs.gate.outputs.release == 'true'
+    # Serializes tagging so two release runs can't race. The gate has no
+    # group of its own (it never holds or replaces another run), so a
+    # release run is not cancelled just because a later push arrived,
+    # and only this job can queue behind another. A pending release job
+    # could in principle be replaced by a newer one in this group, but a
+    # second release run needs a second merged release PR, and
+    # release-pr does nothing while one is still untagged; the next
+    # release run would also tag any untagged merged release PR.
+    concurrency:
+      group: ${{ github.workflow }}-publish
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -32,10 +221,11 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          skip-github-pull-request: true
 
   goreleaser:
-    needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    needs: release
+    if: needs.release.outputs.release_created == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -46,7 +236,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          ref: ${{ needs.release.outputs.tag_name }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
@@ -79,12 +269,11 @@ jobs:
     # reporting on. It is a separate run of distros.yml (a workflow
     # dispatch, which GITHUB_TOKEN is allowed to trigger, unlike a tag
     # push) rather than a job of this workflow: the suite takes up to an
-    # hour on arm64, and running it in here would hold this run's
-    # concurrency group and delay the next release-please run, and a
-    # failing distribution would turn the Release workflow red. This
-    # job only queues the run and finishes at once.
-    needs: [release-please, goreleaser]
-    if: needs.release-please.outputs.release_created == 'true'
+    # hour on arm64, and running it in here would keep this run going
+    # for that long, and a failing distribution would turn the Release
+    # workflow red. This job only queues the run and finishes at once.
+    needs: [release, goreleaser]
+    if: needs.release.outputs.release_created == 'true'
     runs-on: ubuntu-latest
     permissions:
       actions: write
@@ -93,5 +282,5 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ needs.release-please.outputs.tag_name }}
+          TAG: ${{ needs.release.outputs.tag_name }}
         run: gh workflow run distros.yml --ref "${TAG}" -f report=true
