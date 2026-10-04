@@ -70,6 +70,45 @@ func StateDir(instance string) (string, error) {
 	return filepath.Join(base, "contemper", "local-qemu", instance), nil
 }
 
+// sourceFile is the file in an instance's state directory that records
+// which bundle source created its volumes.
+const sourceFile = "source"
+
+// ClaimInstance records, in stateDir, which bundle source (an image
+// identity, see bundle.ImageRef.Identity) owns the instance's volumes,
+// and refuses a source that differs from the one on record. A bundle
+// with no recorded source is not checked. A state
+// directory without a record (made by an earlier version) is accepted
+// and the record written. A bundle from someone else must not silently
+// attach the volumes of an instance a different image created, so the
+// error suggests --name for a separate instance.
+func ClaimInstance(stateDir, instance, source string) error {
+	if source == "" {
+		// A manifest with no source image cannot be compared, and
+		// nothing is recorded for it.
+		return nil
+	}
+	path := filepath.Join(stateDir, sourceFile)
+	data, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		if got := strings.TrimSpace(string(data)); got != source {
+			return fmt.Errorf("the volumes of instance %q were created from %q, but this bundle is from %q; "+
+				"pass --name to deploy it as a separate instance with its own volumes", instance, got, source)
+		}
+		return nil
+	case !os.IsNotExist(err):
+		return fmt.Errorf("reading %s: %w", path, err)
+	}
+	if err := os.MkdirAll(stateDir, 0o750); err != nil {
+		return fmt.Errorf("creating state dir %s: %w", stateDir, err)
+	}
+	if err := os.WriteFile(path, []byte(source+"\n"), 0o600); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	return nil
+}
+
 // VolumeDiskAction is what planVolumeDisk decided EnsureVolumeDisk should
 // do for one volume's disk file.
 type VolumeDiskAction struct {

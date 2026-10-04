@@ -1041,6 +1041,11 @@ func runDeploy(ctx context.Context, _ *cobra.Command, opts deployOptions) error 
 			return err
 		}
 		rep.Line("📁", "instance "+instance, stateDir)
+		if err := localqemu.ClaimInstance(stateDir, instance, manifest.Source.Identity()); err != nil {
+			rep.Fail("volumes", err.Error(), "")
+			return err
+		}
+		var reused []string
 		for _, v := range manifest.Volumes {
 			diskPath, created, err := localqemu.EnsureVolumeDisk(ctx, stateDir, v.Name, sizes[v.Path])
 			if err != nil {
@@ -1050,9 +1055,14 @@ func runDeploy(ctx context.Context, _ *cobra.Command, opts deployOptions) error 
 			status := "reusing"
 			if created {
 				status = "created"
+			} else {
+				reused = append(reused, v.Name)
 			}
 			rep.Sub("✔", v.Path+" → "+v.Name, fmt.Sprintf("%s (%s)", status, progress.HumanBytes(sizes[v.Path])))
 			attachments = append(attachments, qemu.VolumeAttachment{Name: v.Name, Path: diskPath})
+		}
+		if len(reused) > 0 {
+			rep.Line("📂", "reused volumes", strings.Join(reused, ", "))
 		}
 		rep.Blank()
 	}

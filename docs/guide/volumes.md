@@ -312,6 +312,15 @@ tag, so redeploying a new tag of the same image reuses the same volumes;
 `--name` overrides it, for running more than one instance of the same
 image side by side.
 
+The first deploy records which image the instance's volumes belong to,
+and a later deploy of a bundle from a different image under the same
+instance name is refused instead of attaching those volumes. A bundle
+you received from someone else gets its own `--name`, so it never sees
+the volumes of another instance. The record comes from the bundle's own
+manifest, so it catches two different images sharing an instance name by
+accident, but not a manifest edited to claim another image. When a deploy reuses existing volumes,
+it prints a line naming them.
+
 ```console
 $ contemper deploy --to local-qemu _out/my-appliance-v2.aarch64/
 📁  instance my-appliance                         ~/.local/state/contemper/local-qemu/my-appliance
