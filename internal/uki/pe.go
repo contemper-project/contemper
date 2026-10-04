@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"strings"
 )
 
 // Minimal PE32+ (64-bit) reader/writer sufficient for appending sections
@@ -67,6 +68,25 @@ type peImage struct {
 	sizeOfHeaders uint32
 }
 
+const (
+	// maxFileAlignment is the PE specification's largest FileAlignment
+	// (64 KiB). appendSections pads every new section's raw data to a
+	// multiple of it, so a header claiming more would be a huge
+	// allocation for a few bytes of content.
+	maxFileAlignment = 1 << 16
+	// maxSectionAlignment bounds SectionAlignment, which the
+	// specification defaults to the page size (at most 64 KiB in
+	// practice); 1 MiB is far above any real value and keeps the virtual
+	// address arithmetic away from the 32-bit limit.
+	maxSectionAlignment = 1 << 20
+)
+
+// plausibleAlignment reports whether a is zero (no alignment) or a power
+// of two no larger than limit.
+func plausibleAlignment(a, limit uint32) bool {
+	return a == 0 || (a&(a-1) == 0 && a <= limit)
+}
+
 func parsePE(data []byte) (*peImage, error) {
 	if len(data) < peSignatureOffset+4 {
 		return nil, fmt.Errorf("too small to be a PE image")
@@ -97,6 +117,12 @@ func parsePE(data []byte) (*peImage, error) {
 		return nil, fmt.Errorf("section header table overruns file")
 	}
 
+	sectionAlign := binary.LittleEndian.Uint32(data[optOff+optSectionAlignment:])
+	fileAlign := binary.LittleEndian.Uint32(data[optOff+optFileAlignment:])
+	if !plausibleAlignment(fileAlign, maxFileAlignment) || !plausibleAlignment(sectionAlign, maxSectionAlignment) {
+		return nil, fmt.Errorf("implausible alignment (section %#x, file %#x)", sectionAlign, fileAlign)
+	}
+
 	return &peImage{
 		buf:           data,
 		lfanew:        lfanew,
@@ -105,8 +131,8 @@ func parsePE(data []byte) (*peImage, error) {
 		optSize:       optSize,
 		sectionsOff:   sectionsOff,
 		numSections:   numSections,
-		sectionAlign:  binary.LittleEndian.Uint32(data[optOff+optSectionAlignment:]),
-		fileAlign:     binary.LittleEndian.Uint32(data[optOff+optFileAlignment:]),
+		sectionAlign:  sectionAlign,
+		fileAlign:     fileAlign,
 		sizeOfHeaders: binary.LittleEndian.Uint32(data[optOff+optSizeOfHeaders:]),
 	}, nil
 }
@@ -153,6 +179,11 @@ func appendSections(data []byte, sections []namedSection) ([]byte, error) {
 		return append([]byte(nil), data...), nil
 	}
 	for _, s := range sections {
+		// A name starting with '/' is a PE string table reference
+		// ("/4"), not a name.
+		if strings.HasPrefix(s.Name, "/") {
+			return nil, fmt.Errorf("section name %q starts with '/', which PE reserves for string table references", s.Name)
+		}
 		if len(s.Name) > 8 {
 			return nil, fmt.Errorf("section name %q longer than 8 bytes", s.Name)
 		}
@@ -176,6 +207,9 @@ func appendSections(data []byte, sections []namedSection) ([]byte, error) {
 	last := pe.section(pe.numSections - 1)
 	nextVA := alignUp(last.virtualAddr+last.virtualSize, pe.sectionAlign)
 	nextRaw := last.pointerToRaw + last.sizeOfRawData
+	if pe.fileAlign != 0 && nextRaw%pe.fileAlign != 0 {
+		return nil, fmt.Errorf("last section's raw data ends at %#x, which is not a multiple of the file alignment %#x", nextRaw, pe.fileAlign)
+	}
 	if int(nextRaw) != len(data) {
 		// Not fatal in principle, but every stub we handle is expected
 		// to end exactly at its last section's raw data; anything else
