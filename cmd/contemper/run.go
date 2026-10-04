@@ -1001,8 +1001,11 @@ func runDeploy(ctx context.Context, _ *cobra.Command, opts deployOptions) error 
 	for _, v := range manifest.Volumes {
 		size := v.SizeBytes
 		if override, ok := overrides[v.Path]; ok {
+			// --volume is the user's own word and is not capped.
 			size = override
 			delete(overrides, v.Path)
+		} else if err := volume.CheckDeclaredSize(size); err != nil {
+			return fmt.Errorf("volume %s in the bundle manifest %w", v.Path, err)
 		}
 		if size == 0 {
 			unsized = append(unsized, v.Path)

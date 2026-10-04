@@ -227,3 +227,23 @@ func TestResolveDeployGroupListedBundleMissing(t *testing.T) {
 		t.Fatal("want error for a listed bundle directory that is missing")
 	}
 }
+
+func TestDeployCapsManifestVolumeSize(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "disk.raw"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := &bundle.Manifest{
+		FormatVersion: 1, Arch: "amd64",
+		Disk:    bundle.DiskInfo{File: "disk.raw", Format: "raw"},
+		Volumes: []bundle.Volume{{Name: "data", Path: "/data", SizeBytes: 2 << 40, FS: "ext4"}},
+	}
+	if err := bundle.Write(dir, m); err != nil {
+		t.Fatal(err)
+	}
+	opts := deployOptions{bundleDir: dir, to: "local-qemu", quiet: true, progressMode: "plain", name: "inst"}
+	err := runDeploy(t.Context(), nil, opts)
+	if err == nil || !strings.Contains(err.Error(), "--volume") || !strings.Contains(err.Error(), "/data") {
+		t.Fatalf("err = %v, want a refusal pointing at --volume", err)
+	}
+}

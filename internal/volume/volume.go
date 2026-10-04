@@ -110,6 +110,9 @@ func FromConfig(paths []string, labels map[string]string) ([]Spec, error) {
 			if err != nil {
 				return nil, fmt.Errorf("label %s: %w", sizeLabelKey(p), err)
 			}
+			if err := CheckDeclaredSize(size); err != nil {
+				return nil, fmt.Errorf("label %s: %w", sizeLabelKey(p), err)
+			}
 		}
 
 		seed := true
@@ -160,9 +163,34 @@ func validatePath(p string) error {
 	return nil
 }
 
+// MaxRootSizeLabel is the largest root partition an image's
+// io.contemper.root.size label may ask for. The label comes from the
+// image, which may not be trusted, and the disk is written out in full,
+// so a bigger root needs the trusted `convert --root-size` flag instead.
+const MaxRootSizeLabel = 16 << 30
+
+// MaxVolumeSize is the largest volume size an image label, or a bundle's
+// manifest, may declare. Volumes are sparse qcow2 files, so a large one
+// costs little up front, and a data volume of a few TiB is plausible; but
+// the declaring file comes from the image, so it is capped well above any
+// ordinary use. A larger volume is sized with the trusted
+// `deploy --volume <path>=<size>` flag, which is not capped.
+const MaxVolumeSize = 1 << 40
+
+// CheckDeclaredSize returns an error if size, a volume size declared by
+// an image label or a bundle manifest, is over MaxVolumeSize.
+func CheckDeclaredSize(size int64) error {
+	if size > MaxVolumeSize {
+		return fmt.Errorf("declares a %d GiB volume, over the %d GiB an image or bundle may declare; leave the size out and pass --volume <path>=<size> to deploy for a larger volume",
+			size>>30, MaxVolumeSize>>30)
+	}
+	return nil
+}
+
 // RootSize returns the root partition size labels declare
-// (io.contemper.root.size), or 0 if none is set. `convert --root-size`
-// takes precedence over this when given.
+// (io.contemper.root.size), or 0 if none is set, and an error if it asks
+// for more than MaxRootSizeLabel. `convert --root-size` takes precedence
+// over this when given and is not capped.
 func RootSize(labels map[string]string) (int64, error) {
 	raw, ok := labels[RootSizeLabel]
 	if !ok {
@@ -171,6 +199,10 @@ func RootSize(labels map[string]string) (int64, error) {
 	size, err := ParseSize(raw)
 	if err != nil {
 		return 0, fmt.Errorf("label %s: %w", RootSizeLabel, err)
+	}
+	if size > MaxRootSizeLabel {
+		return 0, fmt.Errorf("label %s asks for a %d GiB root, over the %d GiB an image label may request; pass --root-size to convert a larger root",
+			RootSizeLabel, size>>30, MaxRootSizeLabel>>30)
 	}
 	return size, nil
 }

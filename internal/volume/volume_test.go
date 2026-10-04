@@ -227,3 +227,26 @@ func TestFromConfigRejectsInvalidPaths(t *testing.T) {
 		t.Errorf("FromConfig with a space in the path: %v", err)
 	}
 }
+
+func TestRootSizeLabelCap(t *testing.T) {
+	if size, err := volume.RootSize(map[string]string{"io.contemper.root.size": "16GiB"}); err != nil || size != 16<<30 {
+		t.Errorf("RootSize(16GiB) = %d, %v", size, err)
+	}
+	_, err := volume.RootSize(map[string]string{"io.contemper.root.size": "17GiB"})
+	if err == nil || !strings.Contains(err.Error(), "--root-size") {
+		t.Errorf("RootSize(17GiB) err = %v, want one pointing at --root-size", err)
+	}
+}
+
+func TestVolumeSizeLabelCap(t *testing.T) {
+	ok := map[string]string{"io.contemper.volume./data.size": "1024GiB"}
+	specs, err := volume.FromConfig([]string{"/data"}, ok)
+	if err != nil || len(specs) != 1 || specs[0].SizeBytes != volume.MaxVolumeSize {
+		t.Fatalf("1024GiB: %v, %v", specs, err)
+	}
+	bad := map[string]string{"io.contemper.volume./data.size": "1025GiB"}
+	_, err = volume.FromConfig([]string{"/data"}, bad)
+	if err == nil || !strings.Contains(err.Error(), "--volume") || !strings.Contains(err.Error(), "io.contemper.volume./data.size") {
+		t.Errorf("1025GiB: err = %v", err)
+	}
+}

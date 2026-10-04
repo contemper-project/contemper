@@ -23,6 +23,10 @@ overrides a label's size, if you want a different size for one
 deployment). contemper never guesses a size. The path must be absolute
 and may not contain control characters such as a newline or tab.
 
+A size declared by a label, and so recorded in a bundle, is capped at
+1 TiB, because both come from the image. A larger volume is sized with
+`--volume` at deploy time, which has no cap.
+
 Sizes accept the same units everywhere in contemper: `10GiB`, `512MiB`,
 or a bare byte count.
 
