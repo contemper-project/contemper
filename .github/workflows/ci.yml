@@ -438,6 +438,73 @@ jobs:
           path: _out/bootloader/serial.log
           if-no-files-found: ignore
 
+  e2e-multiarch:
+    # A real two-architecture run: examples/alpine built for amd64 and
+    # arm64 into one multi-platform OCI archive (docker buildx, with QEMU
+    # user-mode emulation for the foreign platform), converted with
+    # --arch all, then both bundles of the group booted - the host's
+    # under KVM, the other under QEMU's software emulation (TCG), which
+    # is why the timeout is longer than the other boot jobs'. See
+    # hack/e2e-multiarch.sh.
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # The runner has /dev/kvm, but not accessible to the runner user.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      # Registers binfmt_misc handlers so the build's RUN steps can
+      # execute for the foreign platform. Only arm64 is needed: the
+      # runner is amd64.
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+      # docker (with the buildx plugin) and e2fsprogs are preinstalled on
+      # ubuntu-latest. AAVMF (qemu-efi-aarch64) is the UEFI firmware for
+      # the arm64 guest.
+      - name: Install qemu and UEFI firmware
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            qemu-system-x86 qemu-system-arm qemu-utils ovmf qemu-efi-aarch64
+      - name: Boot test of both architectures
+        env:
+          CONTEMPER_E2E_COVERDIR: _gocover
+        run: ./hack/e2e-multiarch.sh --timeout 300s
+      # See the `e2e` job's "Convert integration coverage" step.
+      - name: Convert integration coverage
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -d _gocover ] && [ -n "$(ls -A _gocover)" ]; then
+            go tool covdata textfmt -i=_gocover -o e2e-coverage.out
+          else
+            echo "no integration coverage data in _gocover; skipping"
+          fi
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: e2e-coverage.out
+          flags: e2e
+          fail_ci_if_error: false
+      - name: Upload serial logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-multiarch-serial-logs
+          path: _out/multiarch/serial-*.log
+          if-no-files-found: ignore
+
   ci-result:
     # The one check to mark required in branch protection instead of any
     # job above. A matrix job skipped by its own `if:` reports a single
@@ -447,7 +514,7 @@ jobs:
     # docs-only PR, since that exact check never gets created. This job
     # always runs and always has a stable name, and succeeds whenever
     # every job it depends on is either "success" or "skipped".
-    needs: [changes, lint, test, build, e2e, e2e-variants, e2e-volumes, e2e-bootloader]
+    needs: [changes, lint, test, build, e2e, e2e-variants, e2e-volumes, e2e-bootloader, e2e-multiarch]
     if: always()
     runs-on: ubuntu-latest
     steps:
