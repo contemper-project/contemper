@@ -4,6 +4,7 @@
 | --- | --- | --- | --- |
 | **contemper** | any OCI image | no | image → bootable disk |
 | [bootc](https://github.com/bootc-dev/bootc) | `Containerfile` on a bootc base | yes (ostree) | image → disk **and in-place updates** |
+| [d2vm](https://github.com/linka-cloud/d2vm) | `Dockerfile` or a Docker image | yes (`docker build`, chroot) | image → disk, several formats |
 | [Packer](https://www.packer.io/) | provisioner scripts | yes (boots an instance) | broad; many clouds, Windows too |
 | [mkosi](https://github.com/systemd/mkosi) | declarative config and packages | yes (distro installers) | OS images, systemd-centric |
 | [distrobuilder](https://github.com/lxc/distrobuilder) | YAML definitions | yes | Incus/LXC images |
@@ -32,6 +33,35 @@ backing. It differs in three ways that matter:
   with persistent data on volumes. Bootloader images can instead run as
   long-lived VMs, as in
   [choosing a boot mode](guide/bootloader-images.md#choosing-a-boot-mode).
+
+## d2vm
+
+**d2vm** is the closest in workflow: a Dockerfile or Docker image goes
+in, a VM disk comes out, from a Go CLI. The differences:
+
+- **Conversion model.** d2vm detects the distribution from
+  `/etc/os-release` and supports Ubuntu, Debian, Alpine, CentOS, Rocky
+  Linux and AlmaLinux; distroless images are not supported. Unless
+  `--raw` is given, it installs a kernel, an init system and a
+  bootloader into the image with per-distribution templates run through
+  `docker build`. contemper is an authoring tool instead: the image
+  brings its own kernel, initrd and init system, for any distro, and
+  there is no template list.
+- **What runs at conversion.** d2vm builds the disk with loop devices,
+  partitioning tools and mounts, so it needs root, or runs itself in a
+  privileged Docker container. It installs GRUB by chrooting into the
+  image and running the image's `grub-install`. contemper runs nothing
+  from the image, and `convert` needs no root and no container runtime.
+- **Boot and configuration.** d2vm supports BIOS (syslinux, GRUB) and
+  UEFI (GRUB) and can set a root password, hostname, DNS, `/etc/hosts`
+  entries, network manager and kernel command line at build time, and
+  encrypt the root with LUKS. contemper is UEFI only, either a UKI it
+  builds or the image's own bootloader, and keeps machine configuration
+  in the image.
+- **Output.** d2vm writes qcow2, raw, qed, vdi, vhd or vmdk, and can
+  push a KubeVirt containerDisk image. contemper produces a bundle
+  (qcow2 plus `contemper.json`), adds targets through support images,
+  and has `deploy`.
 
 ## The others
 
