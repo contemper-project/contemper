@@ -58,6 +58,12 @@ default, and a guest whose initrd carries an older `e2fsck` (for example
 1.46 on Enterprise Linux 9 or Ubuntu 22.04) refuses to check such a
 filesystem at boot.
 
+The raw disk image is written sparse: the unused part of the root
+partition, which is most of it in a fresh image, is never written, so
+building a disk with a large `--root-size` costs little time or
+temporary space. A `disk.raw` kept with `--keep-raw` is sparse too, on
+file systems that support it.
+
 The boot image is a Unified Kernel Image (UKI), assembled in Go: an
 embedded systemd-stub with the OS release, command line, initrd and
 kernel appended as PE sections. A gzip-compressed kernel is decompressed
