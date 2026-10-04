@@ -174,6 +174,7 @@ func TestConvertContextCancelCleansUpTempFiles(t *testing.T) {
 		outDir:       outDir,
 		progressMode: "auto",
 		quiet:        true,
+		rootSize:     testRootSize,
 	}
 	cmd := &cobra.Command{}
 	cmd.SetOut(io.Discard)
@@ -262,7 +263,7 @@ func TestConvertSignalTerminatesAndCleansUp(t *testing.T) {
 			tmpDir := t.TempDir()
 			binDir, marker, termMarker := installFakeSlowTool(t, "qemu-img")
 
-			cmd := exec.CommandContext(t.Context(), exePath, "convert", "--target", "qemu", "--out", outDir, "--quiet", "oci-archive:"+archivePath)
+			cmd := exec.CommandContext(t.Context(), exePath, "convert", "--target", "qemu", "--root-size", testRootSize, "--out", outDir, "--quiet", "oci-archive:"+archivePath)
 			cmd.Env = append(os.Environ(),
 				"CONTEMPER_TEST_REEXEC=1",
 				"TMPDIR="+tmpDir,
