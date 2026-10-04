@@ -20,13 +20,18 @@ backing. It differs in three ways that matter:
   one built for bootc. contemper accepts any base you install a kernel
   and init system into, Alpine and OpenRC included.
 - **Scope.** Transactional in-place updates with `bootc switch` are
-  bootc's actual point. contemper stops at producing a disk and takes no
-  position on how a running VM is updated.
+  bootc's actual point. contemper has no image-based update mechanism of
+  its own: it stops at producing a disk. A
+  [bootloader image](guide/bootloader-images.md) can still be updated in
+  place by the distro's package manager, but that is the guest's
+  business, not contemper's.
 - **Semantics.** bootc's ostree-based conversion gives
   atomically-upgraded-host semantics: `/usr` read-only, `/etc` and `/var`
-  merged forward. contemper gives container-like ones: a writable root
-  that is kept across reboots and replaced on redeploy, with persistent
-  data on volumes.
+  merged forward. contemper's default (UKI) gives container-like ones: a
+  writable root that is kept across reboots and replaced on redeploy,
+  with persistent data on volumes. Bootloader images can instead run as
+  long-lived VMs, as in
+  [choosing a boot mode](guide/bootloader-images.md#choosing-a-boot-mode).
 
 ## The others
 
