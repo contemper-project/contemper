@@ -487,3 +487,64 @@ func TestPopulateExt4HardlinkIntoFullDirectory(t *testing.T) {
 		t.Errorf("target should have 2 links (itself + hardlink): %s", targetStat)
 	}
 }
+
+// TestPopulateExt4FeatureSetIsHostIndependent checks that the root
+// filesystem gets a fixed feature set even when the host's mke2fs
+// configuration (here: one named by MKE2FS_CONFIG in contemper's own
+// environment) asks for newer features that older guest e2fsck versions
+// refuse.
+func TestPopulateExt4FeatureSetIsHostIndependent(t *testing.T) {
+	debugfsPath, e2fsckPath := requireExt4Tools(t)
+
+	hostConf := t.TempDir() + "/host-mke2fs.conf"
+	conf := "[fs_types]\n\text4 = {\n\t\tfeatures = has_journal,extent,huge_file,flex_bg,metadata_csum,metadata_csum_seed,64bit,dir_nlink,extra_isize,orphan_file\n\t}\n"
+	if err := os.WriteFile(hostConf, []byte(conf), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MKE2FS_CONFIG", hostConf)
+
+	img, err := imgtest.Image(v1.Platform{OS: "linux", Architecture: "amd64"}, nil,
+		[]imgtest.File{{Path: "f", Data: []byte("x")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rfs, err := rootfs.Build(t.Context(), img)
+	if err != nil {
+		t.Fatalf("rootfs.Build: %v", err)
+	}
+	defer func() { _ = rfs.Close() }()
+
+	imgPath := t.TempDir() + "/root.img"
+	if _, err := disk.PopulateExt4(t.Context(), rfs, imgPath, disk.Ext4Options{
+		Label: "contemper-root", SizeBytes: 64 * 1024 * 1024,
+	}); err != nil {
+		t.Fatalf("PopulateExt4: %v", err)
+	}
+
+	stats := debugfsRun(t, debugfsPath, imgPath, "stats")
+	var features string
+	for line := range strings.SplitSeq(stats, "\n") {
+		if strings.HasPrefix(line, "Filesystem features:") {
+			features = line
+		}
+	}
+	if features == "" {
+		t.Fatalf("no features line in debugfs stats:\n%s", stats)
+	}
+	for _, banned := range []string{"orphan_file", "metadata_csum_seed", "uninit_bg"} {
+		if strings.Contains(features, banned) {
+			t.Errorf("%s present: %s", banned, features)
+		}
+	}
+	for _, want := range []string{"has_journal", "extent", "64bit", "flex_bg", "metadata_csum", "dir_nlink", "extra_isize", "huge_file", "large_file"} {
+		if !strings.Contains(features, want) {
+			t.Errorf("%s missing: %s", want, features)
+		}
+	}
+	if !strings.Contains(stats, "Block size:               4096") {
+		t.Errorf("block size is not 4096:\n%s", stats)
+	}
+	if out, err := exec.CommandContext(t.Context(), e2fsckPath, "-fn", imgPath).CombinedOutput(); err != nil {
+		t.Errorf("e2fsck -fn: %v\n%s", err, out)
+	}
+}

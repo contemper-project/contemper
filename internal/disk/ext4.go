@@ -47,6 +47,41 @@ var debugfsErrorMarkers = []string{
 // smallest: 1024 minus the newline and the terminating NUL.
 const maxScriptLine = 1022
 
+// mke2fsConfigEnv names the environment variable that points mke2fs at
+// its configuration file, replacing the host's /etc/mke2fs.conf.
+const mke2fsConfigEnv = "MKE2FS_CONFIG"
+
+// mke2fsConf is the configuration mkfs.ext4 runs with, so that the root
+// filesystem does not depend on the e2fsprogs version (or distribution
+// patches) of the machine doing the conversion. e2fsprogs 1.47 turned on
+// orphan_file and metadata_csum_seed by default, and an older e2fsck in a
+// guest's initrd (1.46.x on Enterprise Linux 9 and Ubuntu 22.04) refuses
+// such a filesystem at boot. The feature set below is the long-standing
+// ext4 default, readable by e2fsck 1.45.5 and by Linux 4.18 and later:
+// uninit_bg is left out because metadata_csum supersedes it. Block size,
+// inode size and inode ratio are fixed for every filesystem size (no
+// size-type overrides; small and floppy are defined only so mke2fs does
+// not warn about them), so output is identical across hosts.
+const mke2fsConf = `[defaults]
+	base_features = sparse_super,large_file,filetype,resize_inode,dir_index,ext_attr
+	default_mntopts = acl,user_xattr
+	enable_periodic_fsck = 0
+	blocksize = 4096
+	inode_size = 256
+	inode_ratio = 16384
+
+[fs_types]
+	ext4 = {
+		features = has_journal,extent,huge_file,flex_bg,metadata_csum,64bit,dir_nlink,extra_isize
+	}
+	small = {
+		blocksize = 4096
+	}
+	floppy = {
+		blocksize = 4096
+	}
+`
+
 // Ext4Options configures PopulateExt4.
 type Ext4Options struct {
 	Label     string
@@ -97,17 +132,21 @@ func PopulateExt4(ctx context.Context, rfs *rootfs.Rootfs, imgPath string, opts 
 		return nil, err
 	}
 
-	mkfsArgs := []string{"-F", "-L", opts.Label, "-E", "root_owner=0:0", imgPath}
-	opts.Progress.VerboseCmd(mkfsPath, mkfsArgs)
-	if out, err := runCmd(ctx, "", mkfsPath, mkfsArgs...); err != nil {
-		return nil, fmt.Errorf("mkfs.ext4: %w\n%s", err, out)
-	}
-
 	payloadDir, err := os.MkdirTemp("", "contemper-ext4-payload-")
 	if err != nil {
 		return nil, fmt.Errorf("creating payload dir: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(payloadDir) }()
+
+	confPath := path.Join(payloadDir, "mke2fs.conf")
+	if err := os.WriteFile(confPath, []byte(mke2fsConf), 0o600); err != nil {
+		return nil, fmt.Errorf("writing mke2fs.conf: %w", err)
+	}
+	mkfsArgs := []string{"-F", "-L", opts.Label, "-E", "root_owner=0:0", imgPath}
+	opts.Progress.VerboseCmd(mkfsPath, mkfsArgs)
+	if out, err := runCmdEnv(ctx, "", []string{mke2fsConfigEnv + "=" + confPath}, mkfsPath, mkfsArgs...); err != nil {
+		return nil, fmt.Errorf("mkfs.ext4: %w\n%s", err, out)
+	}
 
 	script, warnings, err := buildDebugfsScript(ctx, rfs, payloadDir, opts.Stage)
 	if err != nil {
@@ -146,8 +185,17 @@ func PopulateExt4(ctx context.Context, rfs *rootfs.Rootfs, imgPath string, opts 
 // returns its combined output. Canceling ctx stops it (see
 // internal/subprocess).
 func runCmd(ctx context.Context, dir, name string, args ...string) (string, error) {
+	return runCmdEnv(ctx, dir, nil, name, args...)
+}
+
+// runCmdEnv is runCmd with extra KEY=VALUE environment entries added to
+// the inherited environment.
+func runCmdEnv(ctx context.Context, dir string, env []string, name string, args ...string) (string, error) {
 	cmd := subprocess.Command(ctx, name, args...)
 	cmd.Dir = dir
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
