@@ -191,9 +191,10 @@ Example:
 - Init system: systemd, which, like udev, is not part of the container
   image. Install `systemd` and `udev`.
 - Kernel: `kernel-default`. The leaner `kernel-kvmsmall` lacks some
-  drivers. Depending on the release the image is
-  `/usr/lib/modules/<kver>/vmlinuz` or `/boot/vmlinuz-<kver>`; check
-  which exists before linking it.
+  drivers. The kernel image is `vmlinuz` on amd64 but `Image` on arm64,
+  under `/usr/lib/modules/<kver>/` or as `/boot/vmlinuz-<kver>` /
+  `/boot/Image-<kver>`; check which exists before linking it. The arm64
+  `Image` carries the EFI stub's PE header and can be used as is.
 - The kernel package's scriptlets try to build an initrd for the build
   host. Generate your own with
   `dracut --no-hostonly --no-hostonly-cmdline --force`.
