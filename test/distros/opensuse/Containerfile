@@ -8,6 +8,18 @@ LABEL io.contemper.ready="true"
 
 ARG TARGETARCH
 
+# Optional repository host, empty by default (the image's own repos are
+# used unchanged). download.opensuse.org redirects each download to a
+# nearby mirror, and some mirrors serve stale aarch64 ports packages,
+# which fails zypper's checksum check. Setting this to the origin
+# (downloadcontent.opensuse.org), which doesn't redirect, avoids that.
+# The origin is reached over https, whatever scheme the image's repo
+# files use.
+ARG ZYPPER_REPO_HOST=
+RUN if [ -n "$ZYPPER_REPO_HOST" ]; then \
+      sed -i -E "s#https?://download\.opensuse\.org/#https://${ZYPPER_REPO_HOST}/#" /etc/zypp/repos.d/*.repo; \
+    fi
+
 # kernel-default is the generic kernel flavour (the leaner kernel-kvmsmall
 # lacks some drivers). Its scriptlets try to build an initrd for the
 # build host, which a container build can't do meaningfully, so the
