@@ -862,11 +862,12 @@ func annotationOf(descs []v1.Descriptor, selected v1.Descriptor, key string) str
 // an archive or layout directory a source was loaded from, for the
 // (Docker/buildx-produced) sources that carry no naming annotation at
 // all: "a/b/example.tar" and "a/b/example.tar.gz" both give "example",
-// as does the layout directory "a/b/example".
+// as does the layout directory "a/b/example". A file named just ".tar"
+// keeps its name rather than shrinking to nothing.
 func archiveBaseName(p string) string {
 	base := filepath.Base(filepath.Clean(p))
 	for _, ext := range []string{".tar.gz", ".tar.zst", ".tgz", ".tar"} {
-		if trimmed := strings.TrimSuffix(base, ext); trimmed != base {
+		if trimmed := strings.TrimSuffix(base, ext); trimmed != base && trimmed != "" {
 			return trimmed
 		}
 	}
