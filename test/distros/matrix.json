@@ -1,0 +1,201 @@
+[
+  {
+    "id": "alpine-3.23",
+    "kind": "target",
+    "family": "alpine",
+    "containerfile": "alpine",
+    "base": "alpine:3.23",
+    "arch": [
+      "amd64"
+    ],
+    "since": "0.3.0"
+  },
+  {
+    "id": "alpine-3.24",
+    "kind": "target",
+    "family": "alpine",
+    "containerfile": "alpine",
+    "base": "alpine:3.24",
+    "arch": [
+      "amd64",
+      "arm64"
+    ],
+    "since": "0.3.0"
+  },
+  {
+    "id": "alpine-edge",
+    "kind": "target",
+    "family": "alpine",
+    "containerfile": "alpine",
+    "base": "alpine:edge",
+    "arch": [
+      "amd64"
+    ],
+    "since": "0.3.0"
+  },
+  {
+    "id": "debian-12",
+    "kind": "target",
+    "family": "debian",
+    "containerfile": "debian",
+    "base": "debian:12",
+    "arch": [
+      "amd64"
+    ],
+    "since": "0.3.0"
+  },
+  {
+    "id": "debian-13",
+    "kind": "target",
+    "family": "debian",
+    "containerfile": "debian",
+    "base": "debian:13",
+    "arch": [
+      "amd64",
+      "arm64"
+    ],
+    "since": "0.3.0"
+  },
+  {
+    "id": "debian-testing",
+    "kind": "target",
+    "family": "debian",
+    "containerfile": "debian",
+    "base": "debian:testing",
+    "arch": [
+      "amd64"
+    ],
+    "since": "0.3.0"
+  },
+  {
+    "id": "ubuntu-24.04",
+    "kind": "target",
+    "family": "ubuntu",
+    "containerfile": "debian",
+    "base": "ubuntu:24.04",
+    "buildArgs": {
+      "KERNEL_PACKAGE": "linux-image-virtual"
+    },
+    "arch": [
+      "amd64"
+    ],
+    "since": "0.3.0"
+  },
+  {
+    "id": "ubuntu-26.04",
+    "kind": "target",
+    "family": "ubuntu",
+    "containerfile": "debian",
+    "base": "ubuntu:26.04",
+    "buildArgs": {
+      "KERNEL_PACKAGE": "linux-image-virtual"
+    },
+    "arch": [
+      "amd64",
+      "arm64"
+    ],
+    "since": "0.3.0"
+  },
+  {
+    "id": "fedora-43",
+    "kind": "target",
+    "family": "fedora",
+    "containerfile": "fedora",
+    "base": "fedora:43",
+    "arch": [
+      "amd64"
+    ],
+    "since": "0.3.0"
+  },
+  {
+    "id": "fedora-44",
+    "kind": "target",
+    "family": "fedora",
+    "containerfile": "fedora",
+    "base": "fedora:44",
+    "arch": [
+      "amd64",
+      "arm64"
+    ],
+    "since": "0.3.0"
+  },
+  {
+    "id": "fedora-rawhide",
+    "kind": "target",
+    "family": "fedora",
+    "containerfile": "fedora",
+    "base": "fedora:rawhide",
+    "arch": [
+      "amd64"
+    ],
+    "since": "0.3.0"
+  },
+  {
+    "id": "almalinux-10",
+    "kind": "target",
+    "family": "el",
+    "containerfile": "el",
+    "base": "almalinux:10",
+    "arch": [
+      "amd64",
+      "arm64"
+    ],
+    "since": "0.3.0"
+  },
+  {
+    "id": "rockylinux-10",
+    "kind": "target",
+    "family": "el",
+    "containerfile": "el",
+    "base": "rockylinux/rockylinux:10",
+    "arch": [
+      "amd64"
+    ],
+    "since": "0.3.0"
+  },
+  {
+    "id": "centos-stream-10",
+    "kind": "target",
+    "family": "el",
+    "containerfile": "el",
+    "base": "quay.io/centos/centos:stream10",
+    "arch": [
+      "amd64"
+    ],
+    "since": "0.3.0"
+  },
+  {
+    "id": "opensuse-tumbleweed",
+    "kind": "target",
+    "family": "opensuse",
+    "containerfile": "opensuse",
+    "base": "registry.opensuse.org/opensuse/tumbleweed:latest",
+    "arch": [
+      "amd64",
+      "arm64"
+    ],
+    "since": "0.3.0"
+  },
+  {
+    "id": "opensuse-leap-16",
+    "kind": "target",
+    "family": "opensuse",
+    "containerfile": "opensuse",
+    "base": "registry.opensuse.org/opensuse/leap:16.0",
+    "arch": [
+      "amd64"
+    ],
+    "since": "0.3.0"
+  },
+  {
+    "id": "arch-latest",
+    "kind": "target",
+    "family": "arch",
+    "containerfile": "arch",
+    "base": "archlinux:latest",
+    "arch": [
+      "amd64"
+    ],
+    "since": "0.3.0"
+  }
+]
