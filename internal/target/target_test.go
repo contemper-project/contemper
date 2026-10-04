@@ -98,6 +98,11 @@ func TestKernelCmdline(t *testing.T) {
 	}
 }
 
+// testRootSize is a root partition far smaller than the default 1 GiB
+// floor: the assembler writes the whole partition out, which dominates the
+// run time otherwise.
+const testRootSize = 64 << 20
+
 func syntheticRootfs(t *testing.T) (*rootfs.Rootfs, *validate.Result) {
 	t.Helper()
 	for _, name := range []string{"mkfs.ext4", "debugfs", "e2fsck"} {
@@ -136,6 +141,8 @@ func syntheticRootfs(t *testing.T) (*rootfs.Rootfs, *validate.Result) {
 	return rfs, val
 }
 
+// TestUEFIQcow2Assemble keeps the default root sizing (no RootSizeBytes) so
+// that path still runs; TestUEFIQcow2AssembleBootloader uses testRootSize.
 func TestUEFIQcow2Assemble(t *testing.T) {
 	rfs, val := syntheticRootfs(t)
 	outDir := t.TempDir()
@@ -285,7 +292,7 @@ func TestUEFIQcow2AssembleBootloader(t *testing.T) {
 			outDir := t.TempDir()
 			var report bytes.Buffer
 
-			if _, _, err := (target.UEFIQcow2{}).Assemble(t.Context(), rfs, val, arch, outDir, target.Options{Progress: progress.New(&report, progress.ModePlain, false, false)}); err != nil {
+			if _, _, err := (target.UEFIQcow2{}).Assemble(t.Context(), rfs, val, arch, outDir, target.Options{RootSizeBytes: testRootSize, Progress: progress.New(&report, progress.ModePlain, false, false)}); err != nil {
 				t.Fatalf("Assemble: %v", err)
 			}
 
