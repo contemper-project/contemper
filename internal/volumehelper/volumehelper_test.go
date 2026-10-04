@@ -118,9 +118,9 @@ func TestMergeResolvesWinningVariant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	openrcRef := pushImage(t, host, "volumes-support-init-system-openrc:v1", openrcVariant)
+	openrcRef := pushImage(t, host, "contemper-project/volumes-support-init-system-openrc:v1", openrcVariant)
 
-	systemdRef := host + "/volumes-support-init-system-systemd:not-pushed"
+	systemdRef := host + "/contemper-project/volumes-support-init-system-systemd:not-pushed"
 
 	helperImg, err := imgtest.Image(linuxAMD64, nil, []imgtest.File{{Path: "etc/contemper-marker", Data: []byte("x")}})
 	if err != nil {
@@ -132,7 +132,7 @@ func TestMergeResolvesWinningVariant(t *testing.T) {
 		"io.contemper.branch.init-system.systemd.requires.files": "/usr/lib/systemd/systemd",
 		"io.contemper.branch.init-system.systemd.image":          systemdRef,
 	})
-	helperRef := pushImage(t, host, "volumes-support:v1", helperImg)
+	helperRef := pushImage(t, host, "contemper-project/volumes-support:v1", helperImg)
 
 	result, err := volumehelper.Merge(t.Context(), helperRef, src, linuxAMD64)
 	if err != nil {
@@ -183,7 +183,7 @@ func TestMergeResolvesOnMergedUsr(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	openrcRef := pushImage(t, host, "volumes-support-init-system-openrc:v1", openrcVariant)
+	openrcRef := pushImage(t, host, "contemper-project/volumes-support-init-system-openrc:v1", openrcVariant)
 
 	helperImg, err := imgtest.Image(linuxAMD64, nil, nil)
 	if err != nil {
@@ -194,7 +194,7 @@ func TestMergeResolvesOnMergedUsr(t *testing.T) {
 		"io.contemper.branch.init-system.openrc.image":           openrcRef,
 		"io.contemper.branch.init-system.systemd.requires.files": "/usr/lib/systemd/systemd",
 	})
-	helperRef := pushImage(t, host, "volumes-support:v1", helperImg)
+	helperRef := pushImage(t, host, "contemper-project/volumes-support:v1", helperImg)
 
 	result, err := volumehelper.Merge(t.Context(), helperRef, src, linuxAMD64)
 	if err != nil {
@@ -225,7 +225,7 @@ func TestMergeNoMatchNoDefaultMentionsNoVolumeHelper(t *testing.T) {
 		"io.contemper.branch.init-system.openrc.requires.files":  "/sbin/openrc",
 		"io.contemper.branch.init-system.systemd.requires.files": "/usr/lib/systemd/systemd",
 	})
-	helperRef := pushImage(t, host, "volumes-support:v1", helperImg)
+	helperRef := pushImage(t, host, "contemper-project/volumes-support:v1", helperImg)
 
 	_, err = volumehelper.Merge(t.Context(), helperRef, src, linuxAMD64)
 	if err == nil {
