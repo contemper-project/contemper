@@ -1,0 +1,55 @@
+# Distribution test image: Arch Linux (systemd, mkinitcpio). Same shape as
+# examples/archlinux, parameterized by base image and extended with the
+# in-guest boot check from ../common. Build with the context set to
+# test/distros (hack/e2e.sh --distro does this).
+ARG BASE=archlinux:latest
+FROM ${BASE}
+
+LABEL io.contemper.ready="true"
+
+ARG TARGETARCH
+
+# Arch doesn't support a partially-synced package database, so this is a
+# full sync-and-upgrade (-Syu). The kernel package ships no copy under
+# /boot; kernel and modules live under /usr/lib/modules/<kver>/.
+RUN pacman -Syu --noconfirm --needed linux mkinitcpio e2fsprogs
+
+# mkinitcpio's default HOOKS include 'autodetect', which trims the initrd
+# to the build host's modules (host-only). Dropping it is mkinitcpio's
+# equivalent of dracut's --no-hostonly.
+RUN sed -i 's/^HOOKS=.*/HOOKS=(base udev modconf block filesystems fsck)/' /etc/mkinitcpio.conf
+
+# Fail loudly unless exactly one kernel is installed, so the kver guess
+# can't pick the wrong one.
+RUN kdirs="$(find /usr/lib/modules -mindepth 1 -maxdepth 1 -type d)" && \
+    kcount="$(printf '%s\n' "$kdirs" | grep -c .)" && \
+    if [ "$kcount" -ne 1 ]; then \
+      echo "test/distros/arch: expected exactly one directory under /usr/lib/modules, found $kcount: $kdirs" >&2; \
+      exit 1; \
+    fi && \
+    kver="$(basename "$kdirs")" && \
+    mkdir -p /boot/contemper && \
+    mkinitcpio -k "$kver" -g /boot/contemper/initrd && \
+    ln -sf "/usr/lib/modules/$kver/vmlinuz" /boot/contemper/vmlinuz
+
+# The official archlinux image is amd64 only.
+RUN case "$TARGETARCH" in \
+      amd64) console=ttyS0 ;; \
+      *) echo "test/distros/arch: unsupported TARGETARCH '$TARGETARCH' (amd64 only)" >&2; exit 1 ;; \
+    esac && \
+    echo "rootfstype=ext4 rw console=${console}" >/boot/contemper/cmdline
+
+RUN echo 'LABEL=contemper-root / ext4 rw,relatime 0 1' >>/etc/fstab
+
+RUN passwd -d root
+
+# A first boot without locale/timezone/hostname makes systemd-firstboot
+# prompt on the console; masking it keeps the boot unattended.
+RUN ln -sf /dev/null /etc/systemd/system/systemd-firstboot.service
+
+# Boot check and marker, run once systemd reaches multi-user.target.
+COPY common/contemper-check.sh /usr/local/bin/contemper-check
+COPY common/contemper-check.service /etc/systemd/system/contemper-check.service
+RUN chmod 0755 /usr/local/bin/contemper-check && \
+    mkdir -p /etc/systemd/system/multi-user.target.wants && \
+    ln -sf ../contemper-check.service /etc/systemd/system/multi-user.target.wants/contemper-check.service
