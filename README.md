@@ -44,20 +44,30 @@ custom container image.
 
 ## How it works
 
-- **You author, contemper packages.** Your image installs a kernel, a
-  generic initrd and an init system at
-  [fixed paths](docs/guide/authoring.md#the-fixed-path-contract) (a
-  kernel command line there too, optionally, for parameters beyond what
-  contemper sets itself), and is marked with
+- **You author, contemper packages.** Your image provides a kernel, an
+  initrd and an init system, and is marked with
   `LABEL io.contemper.ready="true"`. contemper checks the label before
   pulling any layers.
+- **Two boot modes.** By default (UKI) the image installs the kernel, a
+  generic initrd and optionally a kernel command line at
+  [fixed paths](docs/guide/authoring.md#the-fixed-path-contract), and
+  contemper seals them into a Unified Kernel Image it builds. The image
+  is the unit of change: you upgrade by redeploying a new image, with
+  state on volumes. Alternatively, an image can ship its own EFI
+  bootloader under `/boot/efi` (GRUB, systemd-boot, shim for Secure
+  Boot), declared with `LABEL io.contemper.boot="bootloader"`. The guest
+  then updates its own kernel with its package manager, so it can run as
+  a long-lived VM. contemper does not generate or install the
+  bootloader. See
+  [choosing a boot mode](docs/guide/bootloader-images.md#choosing-a-boot-mode).
 - **Nothing from your image runs at conversion time.** contemper merges
   layers and reads files; it never executes image content. No container
   runtime, no privileged builder, no emulation: an arm64 disk builds on
   an x86-64 host as easily as a native one.
-- **The output is a bundle**: a UEFI-bootable qcow2 disk (a Unified
-  Kernel Image on the EFI partition, a writable ext4 root) plus a
-  `contemper.json` recording where it came from.
+- **The output is a bundle**: a UEFI-bootable qcow2 disk (the
+  EFI partition holds either contemper's Unified Kernel Image or the
+  image's `/boot/efi` tree; the root is a writable ext4 filesystem) plus
+  a `contemper.json` recording where it came from and the boot mode.
 - **Targets add what a platform needs** through support images: plain
   OCI images layered on top, never executed.
 
@@ -74,12 +84,15 @@ custom container image.
 The closest is **bootc**, which shares the idea that container authoring
 suits OS images. The differences: bootc starts from its own prescriptive
 base images, while contemper accepts any base you install a kernel and
-init system into (Alpine and OpenRC included). bootc's point is
-transactional in-place updates, while contemper stops at producing a
-disk. And bootc gives host-style semantics (`/usr` read-only, `/etc` and
-`/var` merged forward), where contemper's VMs behave like containers: a
-writable root kept across reboots and replaced on redeploy, with
-persistent data on volumes.
+init system into (Alpine and OpenRC included). bootc gives
+host-style semantics (`/usr` read-only, `/etc` and `/var` merged
+forward) and transactional in-place updates of the image. contemper's
+default (UKI) behaves like a container: a writable root kept across
+reboots and replaced on redeploy, with persistent data on volumes.
+Bootloader images can instead run as long-lived VMs that the distro's
+package manager updates in place. What contemper lacks is an
+image-based update mechanism of its own, nothing like `bootc switch`:
+it stops at producing a disk.
 
 Packer and virt-builder, in their common cloud-image workflow, customize
 an existing image by running code (Packer can also install a full OS
@@ -92,15 +105,18 @@ tooling already produces. More in
 
 contemper is pre-1.0: the CLI and the bundle format may still change.
 
-**Works today:** `convert` for the qemu target, `build` (with Docker;
-podman support is planned), and `deploy --to local-qemu`. Images can also
-bring their own bootloader and update their kernel in place, with Secure
-Boot support. `convert` and `deploy` handle several architectures at
-once. Support images can declare variants, selected by what's actually
-present in your image (an init system, a first-boot mechanism). Volumes are supported too:
-declare one with `VOLUME` in your build file, and contemper sizes,
-formats and mounts it in the guest through a first-boot helper,
-persisted across redeploys for `local-qemu` instances.
+**Works today:**
+
+- `convert` for the qemu target, `build` (with Docker; podman support is
+  planned), and `deploy --to local-qemu`.
+- Two boot modes: a UKI built by contemper, or the image's own
+  bootloader with in-place kernel updates and Secure Boot support.
+- `convert` and `deploy` handle several architectures at once.
+- Support images can declare variants, selected by what's actually
+  present in your image (an init system, a first-boot mechanism).
+- Volumes: declare one with `VOLUME` in your build file, and contemper
+  sizes, formats and mounts it in the guest through a first-boot helper,
+  persisted across redeploys for `local-qemu` instances.
 
 **Planned:** building with podman, and an Incus target with `publish` and
 `deploy`. See the
