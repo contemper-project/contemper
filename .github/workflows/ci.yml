@@ -252,6 +252,61 @@ jobs:
           path: _out/serial.log
           if-no-files-found: ignore
 
+  e2e-arm64:
+    # One native arm64 boot per PR: the debian-grub example (UEFI via
+    # AAVMF, ttyAMA0 console, GRUB) on the hosted arm64 runner. That
+    # runner has no /dev/kvm (and won't get it, see
+    # https://github.com/actions/runner-images/issues/14062), so QEMU
+    # runs under TCG and the timeouts are generous. The slower
+    # three-boot bootloader test runs nightly instead; see
+    # arm64-nightly.yml.
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-24.04-arm
+    name: e2e (debian-grub, arm64)
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # podman and e2fsprogs are preinstalled on the runner. ipxe-qemu
+      # provides the virtio network ROMs QEMU needs for virtio-net-pci,
+      # which --no-install-recommends would otherwise skip.
+      - name: Install qemu and UEFI firmware
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-arm qemu-utils qemu-efi-aarch64 ipxe-qemu
+          ls -l /usr/share/AAVMF
+      - name: Boot test
+        env:
+          CONTEMPER_E2E_COVERDIR: _gocover
+        run: ./hack/e2e.sh --example debian-grub --timeout 1200s
+      # See the `e2e` job's "Convert integration coverage" step.
+      - name: Convert integration coverage
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -d _gocover ] && [ -n "$(ls -A _gocover)" ]; then
+            go tool covdata textfmt -i=_gocover -o e2e-coverage.out
+          else
+            echo "no integration coverage data in _gocover; skipping"
+          fi
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: e2e-coverage.out
+          flags: e2e
+          fail_ci_if_error: false
+      - name: Upload serial log
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-serial-log-debian-grub-arm64
+          path: _out/serial.log
+          if-no-files-found: ignore
+
   e2e-variants:
     # Support-image variant resolution end to end: a dummy support image
     # with two branches pushed to a local registry (localhost:5555),
@@ -514,7 +569,7 @@ jobs:
     # docs-only PR, since that exact check never gets created. This job
     # always runs and always has a stable name, and succeeds whenever
     # every job it depends on is either "success" or "skipped".
-    needs: [changes, lint, test, build, e2e, e2e-variants, e2e-volumes, e2e-bootloader, e2e-multiarch]
+    needs: [changes, lint, test, build, e2e, e2e-arm64, e2e-variants, e2e-volumes, e2e-bootloader, e2e-multiarch]
     if: always()
     runs-on: ubuntu-latest
     steps:
