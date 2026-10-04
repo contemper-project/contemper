@@ -1,0 +1,60 @@
+name: fuzz
+
+# Runs every native Go fuzz target (FuzzXxx in a _test.go file) for a
+# fixed time each. The seed inputs of every target already run in each
+# `go test`, so ci.yml covers regressions; this is the open-ended search
+# for new crashers, which is too slow and too random to gate a PR. It
+# runs on a schedule instead and is deliberately not part of ci.yml's
+# `ci-result`; a failure shows up as a red run here, with the failing
+# inputs attached as an artifact. Commit them under testdata/fuzz/ with
+# the fix. Targets are discovered by hack/fuzz.sh, so a new one needs no
+# change here.
+
+on:
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: Fuzzing time per target, as a Go duration (30s, 2m, 10m)
+        default: 2m
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Fuzz every target
+        env:
+          FUZZTIME: ${{ inputs.fuzztime || '2m' }}
+        run: ./hack/fuzz.sh "$FUZZTIME"
+      # A failing input is written next to the committed ones, so the
+      # new ones are the untracked files under a testdata/fuzz directory.
+      - name: Collect new failing inputs
+        if: failure()
+        run: |
+          mkdir -p _out/fuzz-crashers
+          git ls-files -z --others --exclude-standard -- ':(glob)**/testdata/fuzz/**' \
+            | xargs -0 --no-run-if-empty cp --parents --target-directory=_out/fuzz-crashers
+          find _out/fuzz-crashers -type f
+      - name: Upload new failing inputs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-crashers
+          path: _out/fuzz-crashers
+          if-no-files-found: ignore
