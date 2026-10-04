@@ -191,13 +191,14 @@ func ESPFstabLine(label string) string {
 
 // HasMountPoint reports whether fstab has an entry whose mount point
 // (second field) is mountPoint. Blank lines and comments are skipped,
-// fields are split on whitespace, and octal escapes (\040 and friends)
-// are decoded before comparing. Both sides are cleaned, so an entry
+// fields are split on spaces and tabs only (as fstab(5) defines them, so
+// a no-break space inside a mount point does not split it), and octal
+// escapes (\040 and friends) are decoded before comparing. Both sides are cleaned, so an entry
 // written with a trailing slash ("/boot/efi/") matches too.
 func HasMountPoint(fstab []byte, mountPoint string) bool {
 	want := path.Clean(mountPoint)
 	for _, line := range strings.Split(string(fstab), "\n") {
-		fields := strings.Fields(line)
+		fields := strings.FieldsFunc(strings.TrimSuffix(line, "\r"), func(r rune) bool { return r == ' ' || r == '\t' })
 		if len(fields) < 2 || strings.HasPrefix(fields[0], "#") {
 			continue
 		}
