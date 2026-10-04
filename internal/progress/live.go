@@ -25,6 +25,7 @@ type Stage struct {
 	start         time.Time
 	frame         int
 	stopCh        chan struct{}
+	animDone      chan struct{} // closed when animate has returned; nil without a spinner
 	stopped       bool
 	headerPrinted bool
 }
@@ -38,6 +39,7 @@ func (r *Reporter) BeginStage(icon, label string) *Stage {
 	switch {
 	case r.tty:
 		s.stopCh = make(chan struct{})
+		s.animDone = make(chan struct{})
 		r.mu.Lock()
 		r.live = s
 		r.mu.Unlock()
@@ -84,8 +86,18 @@ func (s *Stage) SetProgressCount(done, total int64, unit string) {
 	}
 }
 
+// tickInterval is how often the spinner redraws; a variable so tests can
+// speed it up.
+var tickInterval = 120 * time.Millisecond
+
+// drawGate, when set, is called by draw between reading the stage state
+// and writing the line. It exists only so tests can hold a draw at that
+// point and prove stop waits for it.
+var drawGate func()
+
 func (s *Stage) animate() {
-	ticker := time.NewTicker(120 * time.Millisecond)
+	defer close(s.animDone)
+	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -108,6 +120,10 @@ func (s *Stage) draw() {
 	line := fmt.Sprintf("%c  %s %c %s", []rune(s.icon)[0], s.label, frame, elapsed)
 	if progress != "" {
 		line += "  " + progress
+	}
+
+	if drawGate != nil {
+		drawGate()
 	}
 
 	s.r.mu.Lock()
@@ -141,6 +157,11 @@ func (s *Stage) stop() {
 	}
 	if s.stopCh != nil {
 		close(s.stopCh)
+		// Wait for animate to return, so that once stop returns no draw
+		// can still write a spinner line over the caller's final output.
+		// No lock may be held here: an in-flight draw needs s.mu and
+		// r.mu to finish.
+		<-s.animDone
 	}
 	if s.r != nil {
 		s.r.mu.Lock()
