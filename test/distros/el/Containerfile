@@ -1,0 +1,60 @@
+# Distribution test image: the RHEL family (AlmaLinux, Rocky Linux, CentOS
+# Stream; systemd, dracut). Packaging and boot tooling are the same across
+# them, so one Containerfile covers all, parameterized by base image.
+# Extended with the in-guest boot check from ../common. Build with the
+# context set to test/distros (hack/e2e.sh --distro does this).
+ARG BASE=almalinux:10
+FROM ${BASE}
+
+LABEL io.contemper.ready="true"
+
+ARG TARGETARCH
+
+# kernel-core carries the kernel and the modules needed to boot (ext4,
+# virtio); the kernel image is /usr/lib/modules/<kver>/vmlinuz, not under
+# /boot. Its scriptlets run kernel-install, which inside a container build
+# has no machine-id or boot loader to work with, so its result is ignored
+# and the initrd is generated explicitly below. The container images are
+# minimal; systemd-udev provides the by-label links root=LABEL= needs,
+# and e2fsprogs the boot-time fsck.ext4.
+RUN dnf install -y --setopt=install_weak_deps=False \
+      kernel-core dracut systemd systemd-udev e2fsprogs kmod util-linux && \
+    dnf clean all
+
+# dracut defaults to a host-only initrd, built for the machine running the
+# build. --no-hostonly includes the generic storage drivers (virtio
+# included) instead. A leftover initrd from kernel-install is replaced.
+RUN kdirs="$(find /usr/lib/modules -mindepth 1 -maxdepth 1 -type d)" && \
+    kcount="$(printf '%s\n' "$kdirs" | grep -c .)" && \
+    if [ "$kcount" -ne 1 ]; then \
+      echo "test/distros/el: expected exactly one directory under /usr/lib/modules, found $kcount: $kdirs" >&2; \
+      exit 1; \
+    fi && \
+    kver="$(basename "$kdirs")" && \
+    mkdir -p /boot/contemper && \
+    dracut --no-hostonly --no-hostonly-cmdline --force --kver "$kver" /boot/contemper/initrd && \
+    ln -sf "/usr/lib/modules/$kver/vmlinuz" /boot/contemper/vmlinuz
+
+RUN case "$TARGETARCH" in \
+      arm64) console=ttyAMA0 ;; \
+      amd64) console=ttyS0 ;; \
+      *) echo "test/distros/el: unsupported TARGETARCH '$TARGETARCH'" >&2; exit 1 ;; \
+    esac && \
+    echo "rootfstype=ext4 rw console=${console}" >/boot/contemper/cmdline
+
+RUN echo 'LABEL=contemper-root / ext4 rw,relatime 0 1' >>/etc/fstab
+
+# Passwordless root. The shadow entry is edited directly, as the
+# container image has no passwd(1).
+RUN sed -i 's/^root:[^:]*:/root::/' /etc/shadow
+
+# A first boot without locale/timezone/hostname makes systemd-firstboot
+# prompt on the console; masking it keeps the boot unattended.
+RUN ln -sf /dev/null /etc/systemd/system/systemd-firstboot.service
+
+# Boot check and marker, run once systemd reaches multi-user.target.
+COPY common/contemper-check.sh /usr/local/bin/contemper-check
+COPY common/contemper-check.service /etc/systemd/system/contemper-check.service
+RUN chmod 0755 /usr/local/bin/contemper-check && \
+    mkdir -p /etc/systemd/system/multi-user.target.wants && \
+    ln -sf ../contemper-check.service /etc/systemd/system/multi-user.target.wants/contemper-check.service
