@@ -110,6 +110,26 @@ gh workflow run distros.yml --ref my-branch -f ids=fedora-44,debian-13 -f arch=a
 `arch` is `amd64`, `arm64` or `all`. A manual run does not touch issues
 unless `-f report=true` is given.
 
+#### Adding a distribution to the test matrix
+
+1. For a new family, add `test/distros/<family>/Containerfile`. Take the
+   base image as `ARG BASE`, install the kernel and an init system,
+   generate a generic initrd, and copy in the check from
+   `test/distros/common`. The existing ones are good starting points.
+   For a new version of an existing family, only a new entry in
+   `test/distros/matrix.json` is needed.
+2. Run it locally with `hack/e2e.sh --distro <id>`, adding
+   `--registry-mirror mirror.gcr.io` if Docker Hub rate-limits you.
+3. Write down any quirk you found in the family's section of
+   [`docs/guide/distributions.md`](docs/guide/distributions.md).
+4. Add the entry to the table on that page. `since` is the release the
+   entry first ships in. A test compares the table with `matrix.json`
+   and fails if they differ.
+
+An entry that doesn't work yet doesn't go into the matrix. Open an issue
+for it with the label `area: target-distros` instead. The page explains
+[how distributions are chosen](docs/guide/distributions.md#how-distributions-are-chosen).
+
 ### Docs
 
 The docs site is built with [uv](https://docs.astral.sh/uv/):
