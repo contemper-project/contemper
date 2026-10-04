@@ -118,3 +118,35 @@ func TestDoneTwicePrintsOnce(t *testing.T) {
 		t.Errorf("plain output = %q, want %q", got, want)
 	}
 }
+
+const clr = "\r\x1b[K"
+
+// quietTicker stops the spinner from drawing on its own for the rest of
+// the test, so output only holds what the test itself triggers.
+func quietTicker(t *testing.T) {
+	t.Helper()
+	old := tickInterval
+	tickInterval = time.Hour
+	t.Cleanup(func() { tickInterval = old })
+}
+
+func liveOf(r *Reporter) *Stage {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.live
+}
+
+func TestStageFailTTY(t *testing.T) {
+	quietTicker(t)
+	r, w := newTTY(false)
+	s := r.BeginStage("📦", "pulling")
+	s.draw()
+	s.Fail("pull", "boom", "try again")
+	want := clr + "📦  pulling ⠋ 0s" + clr + "✖  pull: boom\n   try again\n"
+	if got := w.String(); got != want {
+		t.Errorf("output = %q, want %q", got, want)
+	}
+	if liveOf(r) != nil {
+		t.Error("live stage not cleared by Fail")
+	}
+}

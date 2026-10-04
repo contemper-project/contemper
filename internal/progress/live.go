@@ -207,6 +207,10 @@ func (s *Stage) Fail(stage, reason, hint string) {
 	if !s.stop() {
 		return
 	}
+	// stop detached the stage, so Reporter.Fail has no live stage left to
+	// clear: erase the spinner line here, or the failure line would be
+	// appended to it.
+	s.clearLine()
 	s.r.Fail(stage, reason, hint)
 }
 
