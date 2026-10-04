@@ -68,6 +68,20 @@
     "since": "0.3.0"
   },
   {
+    "id": "ubuntu-22.04",
+    "kind": "target",
+    "family": "ubuntu",
+    "containerfile": "debian",
+    "base": "ubuntu:22.04",
+    "buildArgs": {
+      "KERNEL_PACKAGE": "linux-image-virtual"
+    },
+    "arch": [
+      "amd64"
+    ],
+    "since": "0.3.0"
+  },
+  {
     "id": "ubuntu-24.04",
     "kind": "target",
     "family": "ubuntu",
@@ -131,6 +145,17 @@
     "since": "0.3.0"
   },
   {
+    "id": "almalinux-9",
+    "kind": "target",
+    "family": "el",
+    "containerfile": "el",
+    "base": "almalinux:9",
+    "arch": [
+      "amd64"
+    ],
+    "since": "0.3.0"
+  },
+  {
     "id": "almalinux-10",
     "kind": "target",
     "family": "el",
@@ -139,6 +164,17 @@
     "arch": [
       "amd64",
       "arm64"
+    ],
+    "since": "0.3.0"
+  },
+  {
+    "id": "rockylinux-9",
+    "kind": "target",
+    "family": "el",
+    "containerfile": "el",
+    "base": "rockylinux/rockylinux:9",
+    "arch": [
+      "amd64"
     ],
     "since": "0.3.0"
   },
