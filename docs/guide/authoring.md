@@ -76,6 +76,12 @@ mkinitcpio, Alpine's mkinitfs) supports it. Refer to the same label in
 LABEL=contemper-root / ext4 rw,relatime 0 1
 ```
 
+With `initramfs-tools`, also set `FSTYPE=ext4` in
+`/etc/initramfs-tools/initramfs.conf` before building the initrd: its
+fsck hook can't resolve `LABEL=` at image build time and would otherwise
+leave `fsck.ext4` out, so the root filesystem would not be checked at
+boot.
+
 Prefer to bring your own bootloader and update the kernel in place
 instead? That is a different mode with its own contract; see
 [Bootloader images](bootloader-images.md).
