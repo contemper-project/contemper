@@ -110,3 +110,14 @@ func TestBuildDebugfsScriptSkipsUnknownXattrNamespaces(t *testing.T) {
 		}
 	}
 }
+
+func TestQuoteArgRejectsUnrepresentableCharacters(t *testing.T) {
+	for _, s := range []string{`a"b`, "a\nb", "a\rb", "a\x00b"} {
+		if q, err := quoteArg(s); err == nil {
+			t.Errorf("quoteArg(%q) = %q, want an error", s, q)
+		}
+	}
+	if q, err := quoteArg("/a b"); err != nil || q != `"/a b"` {
+		t.Errorf("quoteArg(%q) = %q, %v", "/a b", q, err)
+	}
+}
