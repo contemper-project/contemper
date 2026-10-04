@@ -19,6 +19,16 @@ LABEL io.contemper.ready="true" \
 ARG TARGETARCH
 ENV DEBIAN_FRONTEND=noninteractive
 
+# The kernel package builds its initrd during the install below, before
+# /etc/fstab gets its root entry below. initramfs-tools' fsck hook only
+# includes fsck.<type> for the type it finds for / in /etc/fstab, and in
+# a container build it has no entry to find (and could not resolve
+# LABEL= to a type anyway), so the initrd would silently skip the root
+# fsck at boot ("fsck not present"). FSTYPE=ext4 names the type
+# explicitly, and stays in place for the initrds the guest rebuilds.
+RUN mkdir -p /etc/initramfs-tools/conf.d && \
+    echo 'FSTYPE=ext4' >/etc/initramfs-tools/conf.d/contemper-fstype
+
 # Same package set as ../debian, minus the contemper-specific initrd step:
 # Debian's own kernel package builds the initrd (initramfs-tools, default
 # MODULES=most, generic rather than host-only) and keeps the /vmlinuz and
