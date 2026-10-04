@@ -55,7 +55,7 @@ in the VM, once the disk boots.
   needs, and which ones are covered.
 - [How conversion works](guide/how-it-works.md): the pipeline, step by
   step.
-- [Comparison](comparison.md): how contemper relates to bootc, Packer,
-  mkosi and others.
+- [Comparison](comparison.md): how contemper relates to bootc, d2vm,
+  Packer, mkosi and others.
 - [Design](design/index.md): the reasoning behind the choices, including
   the approaches that were rejected.
