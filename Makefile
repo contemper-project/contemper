@@ -19,7 +19,7 @@ GOLANGCI_LINT_VERSION := $(shell cat .golangci-lint-version)
 GOLANGCI_LINT_DIR     := bin/golangci-lint-$(GOLANGCI_LINT_VERSION)
 GOLANGCI_LINT         := $(GOLANGCI_LINT_DIR)/golangci-lint
 
-.PHONY: build test vet lint actionlint stubs example e2e e2e-variants e2e-volumes e2e-bootloader e2e-multiarch clean
+.PHONY: build test fuzz vet lint actionlint stubs example e2e e2e-variants e2e-volumes e2e-bootloader e2e-multiarch clean
 
 build:
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/contemper
@@ -27,6 +27,12 @@ build:
 test:
 	$(GO) vet ./...
 	$(GO) test ./...
+
+# Runs every native fuzz target for FUZZTIME each (see hack/fuzz.sh).
+FUZZTIME ?= 30s
+
+fuzz:
+	./hack/fuzz.sh "$(FUZZTIME)"
 
 vet:
 	$(GO) vet ./...
