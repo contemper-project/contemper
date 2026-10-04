@@ -1,0 +1,56 @@
+# Distribution test image: Debian and Ubuntu (systemd, initramfs-tools).
+# Same shape as examples/debian, parameterized by base image and kernel
+# package, and extended with the in-guest boot check from ../common. Build
+# with the context set to test/distros (hack/e2e.sh --distro does this).
+ARG BASE=debian:13
+FROM ${BASE}
+
+LABEL io.contemper.ready="true"
+
+ARG TARGETARCH
+# Debian's kernel metapackage is linux-image-<arch>; Ubuntu's is
+# linux-image-virtual (the matrix passes it for the ubuntu entries).
+ARG KERNEL_PACKAGE=""
+ENV DEBIAN_FRONTEND=noninteractive
+
+# udev is listed explicitly because --no-install-recommends would not
+# pull it in, and the initrd's root=LABEL= resolution needs the by-label
+# symlinks only udev creates. e2fsprogs gives the boot-time fsck its
+# fsck.ext4. Ubuntu's container image ships neither systemd nor a kernel.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      "${KERNEL_PACKAGE:-linux-image-${TARGETARCH}}" systemd-sysv udev initramfs-tools e2fsprogs && \
+    rm -rf /var/lib/apt/lists/*
+
+# initramfs-tools' default MODULES=most is generic, not host-only, so no
+# extra flag is needed (unlike dracut or mkinitcpio). Its fsck hook only
+# copies fsck and fsck.<type> into the initrd for the filesystem types it
+# finds for / in /etc/fstab, and in a container build it can neither
+# find the entry (fstab is written below) nor resolve LABEL= to a type,
+# so the initrd would silently skip the root fsck at boot ("fsck not
+# present"). FSTYPE=ext4 names the type explicitly. mkinitramfs, unlike
+# update-initramfs, can write straight to the fixed path. The kernel's
+# /boot/vmlinuz-<kver> is symlinked, since it is not relocated.
+RUN echo 'FSTYPE=ext4' >>/etc/initramfs-tools/initramfs.conf
+RUN kver="$(basename "$(find /lib/modules -mindepth 1 -maxdepth 1 -type d)")" && \
+    mkdir -p /boot/contemper && \
+    mkinitramfs -o /boot/contemper/initrd "${kver}" && \
+    ln -sf "../vmlinuz-${kver}" /boot/contemper/vmlinuz
+
+RUN case "$TARGETARCH" in \
+      arm64) console=ttyAMA0 ;; \
+      amd64) console=ttyS0 ;; \
+      *) echo "test/distros/debian: unsupported TARGETARCH '$TARGETARCH'" >&2; exit 1 ;; \
+    esac && \
+    echo "rootfstype=ext4 rw console=${console}" >/boot/contemper/cmdline
+
+RUN echo 'LABEL=contemper-root / ext4 rw,relatime 0 1' >>/etc/fstab
+
+RUN passwd -d root
+
+# Boot check and marker, run once systemd reaches multi-user.target.
+COPY common/contemper-check.sh /usr/local/bin/contemper-check
+COPY common/contemper-check.service /etc/systemd/system/contemper-check.service
+RUN chmod 0755 /usr/local/bin/contemper-check && \
+    mkdir -p /etc/systemd/system/multi-user.target.wants && \
+    ln -sf ../contemper-check.service /etc/systemd/system/multi-user.target.wants/contemper-check.service
