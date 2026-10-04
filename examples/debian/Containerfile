@@ -33,6 +33,13 @@ RUN apt-get update && \
 # mkinitramfs (not update-initramfs, which has no output option) writes
 # straight to the fixed path, so the initrd needs no symlink the way the
 # kernel still does.
+#
+# The initrd's fsck hook only copies fsck and fsck.<type> in for the
+# filesystem type it finds for / in /etc/fstab, and in a container build
+# it can neither find the entry (fstab is written below) nor resolve
+# LABEL= to a type, so the initrd would silently skip the root fsck at
+# boot ("fsck not present"). FSTYPE=ext4 names the type explicitly.
+RUN echo 'FSTYPE=ext4' >>/etc/initramfs-tools/initramfs.conf
 RUN kver="$(basename "$(find /lib/modules -mindepth 1 -maxdepth 1 -type d)")" && \
     mkdir -p /boot/contemper && \
     mkinitramfs -o /boot/contemper/initrd "${kver}" && \
