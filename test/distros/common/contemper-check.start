@@ -1,0 +1,3 @@
+#!/bin/sh
+# OpenRC local.d hook: run the boot check once the "local" runlevel starts.
+exec /usr/local/bin/contemper-check

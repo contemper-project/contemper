@@ -1,0 +1,11 @@
+[Unit]
+Description=contemper: boot check and completion marker
+After=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/contemper-check
+
+[Install]
+WantedBy=multi-user.target
