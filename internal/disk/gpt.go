@@ -117,6 +117,12 @@ type ESPEntry struct {
 // -aligned ESP (FAT32, 128 MiB by default, holding the UEFI fallback boot
 // file or the given ESPTree) as partition 1, and the ext4 root (from opts.RootImgPath) as partition 2,
 // last on the disk.
+//
+// The disk image is created sparse (any file already at rawPath is
+// removed first), and the root image is copied into it with CopySparse,
+// so the unused part of the root stays unallocated. That relies on the
+// file starting out all zeros, which is why BuildGPTImage never reuses an
+// existing file.
 func BuildGPTImage(rawPath string, opts BuildOptions) (*Layout, error) {
 	info, ok := archTable[opts.Arch]
 	if !ok {
@@ -181,16 +187,17 @@ func BuildGPTImage(rawPath string, opts BuildOptions) (*Layout, error) {
 		return nil, err
 	}
 
-	if err := writeRootPartition(d, opts.RootImgPath); err != nil {
-		return nil, err
-	}
-
 	// Checked, not deferred-and-ignored: a flush failure surfaced only
 	// at Close must not leave callers thinking a corrupt disk image is
-	// good.
+	// good. The root is written after the close, through a handle of
+	// its own, because go-diskfs would write every zero of it.
 	closed = true
 	if err := d.Close(); err != nil {
 		return nil, fmt.Errorf("finalizing disk image %s: %w", rawPath, err)
+	}
+
+	if err := writeRootPartition(rawPath, rootStart*sectorSize, opts.RootImgPath, opts.RootSizeBytes); err != nil {
+		return nil, err
 	}
 
 	return &Layout{
@@ -267,13 +274,37 @@ func copyToESP(fs filesystem.FileSystem, p string, e ESPEntry) error {
 	return nil
 }
 
-func writeRootPartition(d *diskpkg.Disk, rootImgPath string) error {
-	f, err := os.Open(rootImgPath)
+// writeRootPartition copies the root image into the disk image at the
+// partition's byte offset. The disk image is new (see BuildGPTImage), so
+// the zeros the sparse copy skips are already there.
+func writeRootPartition(rawPath string, offset uint64, rootImgPath string, size int64) error {
+	src, err := os.Open(rootImgPath)
 	if err != nil {
 		return fmt.Errorf("opening %s: %w", rootImgPath, err)
 	}
-	defer func() { _ = f.Close() }()
-	if _, err := d.WritePartitionContents(2, f); err != nil {
+	defer func() { _ = src.Close() }()
+	// The root image must be exactly the partition: a larger file would be
+	// silently cut short, and the partition is whole sectors.
+	fi, err := src.Stat()
+	if err != nil {
+		return fmt.Errorf("opening %s: %w", rootImgPath, err)
+	}
+	if fi.Size() != size {
+		return fmt.Errorf("%s is %d bytes, want exactly %d", rootImgPath, fi.Size(), size)
+	}
+	if size%int64(sectorSize) != 0 {
+		return fmt.Errorf("root image size %d is not a multiple of %d", size, sectorSize)
+	}
+	dst, err := os.OpenFile(rawPath, os.O_WRONLY, 0)
+	if err != nil {
+		return fmt.Errorf("opening %s: %w", rawPath, err)
+	}
+	if err := CopySparse(dst, int64(offset), src, size); err != nil { //nolint:gosec // G115: real disk offsets never approach the uint64/int64 boundary
+		_ = dst.Close()
+		return fmt.Errorf("writing root partition contents: %w", err)
+	}
+	// Checked: a write error surfaced only at Close must not be lost.
+	if err := dst.Close(); err != nil {
 		return fmt.Errorf("writing root partition contents: %w", err)
 	}
 	return nil
