@@ -232,7 +232,7 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 	defer img.Close()
 
 	rep.Line("📦", opts.sourceRef, platform.String())
-	if err := onNamed(fmt.Sprintf("%s-%s", img.RepoBase, img.Tag)); err != nil {
+	if err := onNamed(bundle.SafeName(fmt.Sprintf("%s-%s", img.RepoBase, img.Tag))); err != nil {
 		return convertedBundle{}, err
 	}
 
@@ -574,7 +574,7 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 	}
 	rep.Blank()
 
-	bundleName := fmt.Sprintf("%s-%s.%s", img.RepoBase, img.Tag, machineArch(platform.Architecture))
+	bundleName := bundle.SafeName(fmt.Sprintf("%s-%s", img.RepoBase, img.Tag)) + "." + machineArch(platform.Architecture)
 	outBundleDir := filepath.Join(opts.outDir, bundleName)
 	// Fail before doing any of the expensive work below (ext4
 	// population, qcow2 conversion) if --out already names something we
@@ -663,7 +663,7 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 
 	return convertedBundle{
 		dir:    outBundleDir,
-		name:   fmt.Sprintf("%s-%s", img.RepoBase, img.Tag),
+		name:   bundle.SafeName(fmt.Sprintf("%s-%s", img.RepoBase, img.Tag)),
 		arch:   platform.Architecture,
 		source: manifest.Source,
 	}, nil

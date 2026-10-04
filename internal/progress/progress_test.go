@@ -172,3 +172,77 @@ func TestParseMode(t *testing.T) {
 		t.Errorf("ParseMode(bogus): expected an error")
 	}
 }
+
+func TestSanitize(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"ghcr.io/example/app:v3", "ghcr.io/example/app:v3"},
+		{"héllo wörld 📦 ⚠️ ✔", "héllo wörld 📦 ⚠️ ✔"},
+		{"two\nlines\tand tab", "two\nlines\tand tab"},
+		{"\x1b[2J\x1b]0;title\x07", `\x1b[2J\x1b]0;title\a`},
+		{"back\rspace\x08", `back\rspace\b`},
+		{"c1\u009bcontrol", `c1\u009bcontrol`},
+		{"bidi\u202eflip", `bidi\u202eflip`},
+		{"bad\xffbyte", `bad\xffbyte`},
+	}
+	for _, c := range cases {
+		if got := progress.Sanitize(c.in); got != c.want {
+			t.Errorf("Sanitize(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestReporterEscapesImageStrings(t *testing.T) {
+	r, buf := newPlain(true)
+	r.Line("📦", "evil\x1b[2Jname", "d\rx")
+	r.Sub("✔", "/etc/\x1b]0;x\x07", "")
+	r.Warn("link \x1b[31m", "")
+	r.Fail("stage", "bad \x1b[0m path", "hint\x07")
+	r.VerboseCmd("tool", []string{"/a\x1b[2Jb"})
+	st := r.BeginStage("🧬", "label\x1b[H")
+	st.Done("🧬", "label\x1b[H", "")
+	// Only the verbose command line's own dim wrapper may remain.
+	out := strings.NewReplacer("\x1b[2m", "", "\x1b[0m", "").Replace(buf.String())
+	for _, c := range []string{"\x1b", "\r", "\x07"} {
+		if strings.Contains(out, c) {
+			t.Errorf("output contains raw %q:\n%q", c, out)
+		}
+	}
+	if !strings.Contains(out, `evil\x1b[2Jname`) {
+		t.Errorf("escaped name missing from %q", out)
+	}
+}
+
+func TestReporterEscapesNewlinesInFields(t *testing.T) {
+	r, buf := newPlain(true)
+	r.Line("📦", "/etc/a\n✔ forged line", "detail\r\nx")
+	r.Sub("✔", "name\n✖  forged failure", "d\n")
+	r.Warn("w\nforged", "")
+	r.SubChild("link %s", "a\n      └ forged child")
+	r.Fail("st\nage", "first line\nsecond line", "hint\nmore")
+	r.ToolFailureOutput("tool says\nsecond\r\x1b[2J")
+	r.Finish("done\nforged", "")
+	r.VerboseCmd("tool", []string{"a\nb"})
+	st := r.BeginStage("🧬", "stage\nforged")
+	st.Done("🧬", "stage\nforged", "d\nx")
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	for _, l := range lines {
+		for _, forged := range []string{"✔ forged", "✖  forged", "forged child"} {
+			if strings.HasPrefix(strings.TrimSpace(l), forged) {
+				t.Errorf("a field started its own line: %q", l)
+			}
+		}
+	}
+	// A multi-line failure reason, as a tool's output makes one, stays multi-line.
+	if !strings.Contains(buf.String(), "✖  st\\nage: first line\nsecond line\n") {
+		t.Errorf("multi-line reason not kept: %q", buf.String())
+	}
+}
+
+func TestSanitizeLineEscapesNewline(t *testing.T) {
+	if got := progress.SanitizeLine("a\nb\tc\r"); got != `a\nb`+"\t"+`c\r` {
+		t.Errorf("SanitizeLine = %q", got)
+	}
+	if got := progress.Sanitize("a\nb"); got != "a\nb" {
+		t.Errorf("Sanitize = %q", got)
+	}
+}
