@@ -257,6 +257,19 @@ echo "==> contemper deploy --to local-qemu" >&2
 	--timeout "${TIMEOUT}" \
 	--serial-log "${OUT}/serial.log" &
 deploy_pid=$!
+# Stop the deploy (and with it qemu) if this script is interrupted or
+# exits early; a background job of a non-interactive shell would
+# otherwise keep running.
+stop_deploy() {
+	if [ -n "${deploy_pid}" ]; then
+		kill -TERM "${deploy_pid}" 2>/dev/null || true
+		wait "${deploy_pid}" 2>/dev/null || true
+		deploy_pid=""
+	fi
+}
+trap stop_deploy EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 check_failed=0
 while kill -0 "${deploy_pid}" 2>/dev/null; do
 	if grep -q "${FAIL_MARKER}" "${OUT}/serial.log" 2>/dev/null; then
@@ -268,6 +281,7 @@ while kill -0 "${deploy_pid}" 2>/dev/null; do
 done
 deploy_rc=0
 wait "${deploy_pid}" || deploy_rc=$?
+deploy_pid=""
 if [ "${check_failed}" -eq 1 ]; then
 	echo "e2e.sh: in-guest check failed: $(grep -h "${FAIL_MARKER}" "${OUT}/serial.log" | head -n 1)" >&2
 	exit 1
