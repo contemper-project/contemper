@@ -22,6 +22,10 @@ import (
 	"github.com/contemper-project/contemper/internal/validate"
 )
 
+// testRootSize keeps converted test bundles small: the default root
+// partition is 1 GiB and is written out in full.
+const testRootSize = "64MiB"
+
 // efiApp returns the headers of a minimal EFI application PE32+ image for
 // the host architecture, and the fallback file name for it.
 func efiApp() (data []byte, fallback string) {
@@ -84,6 +88,7 @@ func convertFixtureVolumes(t *testing.T, labels map[string]string, files []imgte
 		target:       "qemu",
 		outDir:       outDir,
 		progressMode: "plain",
+		rootSize:     testRootSize,
 	}
 	adjust(&opts)
 	err = runConvert(t.Context(), cmd, opts)
