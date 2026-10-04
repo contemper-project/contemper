@@ -88,6 +88,28 @@ entries can exceed. `--registry-mirror HOST` (or
 pulls Docker Hub base images through that mirror instead; other
 registries are not affected.
 
+The `Distributions` workflow (`.github/workflows/distros.yml`) runs every
+entry nightly, and again for each release. It is not part of the CI
+checks that gate pull requests. When an entry fails, the workflow opens
+one issue for it and architecture, labelled `distro-test-failure` and
+`area: target-distros`, with the run, the stage that failed (build,
+convert or boot) and the base image digest. Later failing runs add a
+comment; once the entry passes again the issue is closed with a comment.
+Issues are matched by a hidden marker in their body, so leave it in
+place when editing one. The `distro-test-failure` label has to exist in
+the repository.
+
+To run entries on demand, use "Run workflow" on the Distributions
+workflow, or:
+
+```sh
+gh workflow run distros.yml --ref my-branch -f ids=fedora-44,debian-13 -f arch=amd64
+```
+
+`ids` is a comma-separated list of entry ids (empty runs all of them) and
+`arch` is `amd64`, `arm64` or `all`. A manual run does not touch issues
+unless `-f report=true` is given.
+
 ### Docs
 
 The docs site is built with [uv](https://docs.astral.sh/uv/):
