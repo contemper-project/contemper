@@ -66,6 +66,28 @@ the top of `hack/e2e.sh` and `hack/e2e-variants.sh`. Set
 `CONTEMPER_E2E_COVERDIR=<dir>` to also collect integration coverage from
 the `contemper` binary these scripts build and run.
 
+#### Distribution entries
+
+`test/distros/matrix.json` lists the distribution images that are
+converted and booted, each built from the family's Containerfile under
+`test/distros/` with the entry's base image and build args. To run one
+entry locally:
+
+```sh
+hack/e2e.sh --distro fedora-44
+```
+
+The image prints `contemper-boot-ok` only if the in-guest check
+(`test/distros/common/contemper-check.sh`) passes, and a
+`contemper-check-failed:` line with the reason otherwise; the script
+stops waiting as soon as it sees one.
+
+Docker Hub limits anonymous pulls per address, which a run over many
+entries can exceed. `--registry-mirror HOST` (or
+`CONTEMPER_E2E_REGISTRY_MIRROR=HOST`), for example `mirror.gcr.io`,
+pulls Docker Hub base images through that mirror instead; other
+registries are not affected.
+
 ### Docs
 
 The docs site is built with [uv](https://docs.astral.sh/uv/):

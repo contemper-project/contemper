@@ -5,8 +5,24 @@
 # boot the bundle with `contemper deploy --to local-qemu`, passing once
 # the image's boot marker appears on the serial console.
 #
+# With --distro ID instead, it runs one entry of the distribution matrix
+# (test/distros/matrix.json): the family's test image is built from
+# test/distros/<family>/Containerfile with the entry's base image and
+# build args, converted, booted, and must print the in-guest check's
+# boot marker. A failed in-guest check prints a "contemper-check-failed:"
+# line on the serial console, which stops the wait right away.
+#
 # Usage: hack/e2e.sh [--example alpine|debian|debian-grub|archlinux]
 #                     [--timeout DURATION] [--build-command]
+#        hack/e2e.sh --distro ID [--registry-mirror HOST] [--timeout DURATION]
+#
+# --registry-mirror HOST (or CONTEMPER_E2E_REGISTRY_MIRROR=HOST) pulls
+# Docker Hub base images through a mirror such as mirror.gcr.io, which
+# avoids Docker Hub's anonymous pull rate limit when many entries run
+# from one address. Only Docker Hub references are rewritten (alpine:3.24
+# becomes HOST/library/alpine:3.24, rockylinux/rockylinux:9 becomes
+# HOST/rockylinux/rockylinux:9); quay.io, registry.opensuse.org and other
+# registries are left alone.
 #
 # Requires: go, podman or docker (CONTAINER_ENGINE selects one explicitly),
 # e2fsprogs (mkfs.ext4, debugfs, e2fsck), qemu-img, qemu-system-<arch> and
@@ -31,6 +47,9 @@ TIMEOUT="180s"
 MARKER="contemper-boot-ok"
 EXAMPLE="alpine"
 BUILD_COMMAND=0
+DISTRO=""
+MIRROR="${CONTEMPER_E2E_REGISTRY_MIRROR:-}"
+FAIL_MARKER="contemper-check-failed:"
 
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -46,6 +65,14 @@ while [ $# -gt 0 ]; do
 		BUILD_COMMAND=1
 		shift
 		;;
+	--distro)
+		DISTRO="$2"
+		shift 2
+		;;
+	--registry-mirror)
+		MIRROR="$2"
+		shift 2
+		;;
 	*)
 		echo "e2e.sh: unknown argument: $1" >&2
 		exit 2
@@ -53,22 +80,65 @@ while [ $# -gt 0 ]; do
 	esac
 done
 
-case "${EXAMPLE}" in
-alpine | debian | debian-grub | archlinux) ;;
-*)
-	echo "e2e.sh: unknown --example '${EXAMPLE}' (want alpine, debian, debian-grub or archlinux)" >&2
+if [ -n "${MIRROR}" ] && [ -z "${DISTRO}" ]; then
+	echo "e2e.sh: --registry-mirror requires --distro" >&2
 	exit 2
-	;;
-esac
+fi
+if [ -n "${DISTRO}" ] && [ "${BUILD_COMMAND}" -eq 1 ]; then
+	echo "e2e.sh: --distro and --build-command can't be combined" >&2
+	exit 2
+fi
+
+DISTRO_BUILD_ARGS=()
+if [ -n "${DISTRO}" ]; then
+	# The matrix entry is read by a small Go helper (Go is needed for the
+	# build below anyway, so there is no jq dependency on macOS hosts).
+	command -v go >/dev/null || { echo "e2e.sh: go not found" >&2; exit 1; }
+	entry="$(cd "${REPO}" && go run ./hack/distro-entry "${DISTRO}" ${MIRROR:+"${MIRROR}"})" || exit 2
+	distro_base=""
+	distro_dir=""
+	distro_arches=""
+	while IFS= read -r line; do
+		case "${line}" in
+		base=*) distro_base="${line#base=}" ;;
+		containerfile=*) distro_dir="${line#containerfile=}" ;;
+		arch=*) distro_arches="${line#arch=}" ;;
+		buildarg=*) DISTRO_BUILD_ARGS+=(--build-arg "${line#buildarg=}") ;;
+		esac
+	done <<<"${entry}"
+	case "$(uname -m)" in
+	x86_64 | amd64) host_arch=amd64 ;;
+	arm64 | aarch64) host_arch=arm64 ;;
+	*) host_arch="$(uname -m)" ;;
+	esac
+	case " ${distro_arches} " in
+	*" ${host_arch} "*) ;;
+	*)
+		echo "e2e.sh: --distro ${DISTRO} is only listed for: ${distro_arches} (this host is ${host_arch})" >&2
+		exit 2
+		;;
+	esac
+	IMAGE="contemper-distro-${DISTRO}:dev"
+	LABEL="${DISTRO}"
+else
+	case "${EXAMPLE}" in
+	alpine | debian | debian-grub | archlinux) ;;
+	*)
+		echo "e2e.sh: unknown --example '${EXAMPLE}' (want alpine, debian, debian-grub or archlinux)" >&2
+		exit 2
+		;;
+	esac
+	LABEL="examples/${EXAMPLE}"
+fi
 
 # The archlinux example's base image is only published for amd64; catch
 # that here, before spending time on a container build that would only
 # fail inside the Containerfile itself.
-if [ "${EXAMPLE}" = "archlinux" ] && [ "$(uname -m)" != "x86_64" ]; then
+if [ -z "${DISTRO}" ] && [ "${EXAMPLE}" = "archlinux" ] && [ "$(uname -m)" != "x86_64" ]; then
 	echo "e2e.sh: --example archlinux requires an amd64 host (got $(uname -m)); the archlinux base image isn't published for other architectures" >&2
 	exit 2
 fi
-IMAGE="contemper-example-${EXAMPLE}:dev"
+[ -n "${DISTRO}" ] || IMAGE="contemper-example-${EXAMPLE}:dev"
 
 if [ "${BUILD_COMMAND}" -eq 1 ]; then
 	# `contemper build` itself shells out to docker buildx; check here too,
@@ -120,8 +190,15 @@ if [ "${BUILD_COMMAND}" -eq 1 ]; then
 	echo "==> contemper build examples/${EXAMPLE}" >&2
 	bundle="$("${contemper}" build --target qemu -o "${OUT}" -t "${IMAGE}" "${REPO}/examples/${EXAMPLE}")"
 else
-	echo "==> ${engine} build examples/${EXAMPLE}" >&2
-	"${engine}" build -t "${IMAGE}" -f "${REPO}/examples/${EXAMPLE}/Containerfile" "${REPO}/examples/${EXAMPLE}"
+	echo "==> ${engine} build ${LABEL}" >&2
+	if [ -n "${DISTRO}" ]; then
+		# The context is test/distros, so the Containerfiles can COPY from common/.
+		"${engine}" build -t "${IMAGE}" \
+			--build-arg "BASE=${distro_base}" ${DISTRO_BUILD_ARGS[@]+"${DISTRO_BUILD_ARGS[@]}"} \
+			-f "${REPO}/test/distros/${distro_dir}/Containerfile" "${REPO}/test/distros"
+	else
+		"${engine}" build -t "${IMAGE}" -f "${REPO}/examples/${EXAMPLE}/Containerfile" "${REPO}/examples/${EXAMPLE}"
+	fi
 
 	# podman can write an OCI archive; docker save only writes its own format.
 	case "${engine}" in
@@ -140,9 +217,28 @@ else
 fi
 
 echo "==> contemper deploy --to local-qemu" >&2
+# Run the deploy in the background and watch the serial log, so a failed
+# in-guest check ends the run at once instead of at the timeout.
 "${contemper}" deploy --to local-qemu "${bundle}" \
 	--expect "${MARKER}" \
 	--timeout "${TIMEOUT}" \
-	--serial-log "${OUT}/serial.log"
+	--serial-log "${OUT}/serial.log" &
+deploy_pid=$!
+check_failed=0
+while kill -0 "${deploy_pid}" 2>/dev/null; do
+	if grep -q "${FAIL_MARKER}" "${OUT}/serial.log" 2>/dev/null; then
+		check_failed=1
+		kill -TERM "${deploy_pid}" 2>/dev/null || true
+		break
+	fi
+	sleep 1
+done
+deploy_rc=0
+wait "${deploy_pid}" || deploy_rc=$?
+if [ "${check_failed}" -eq 1 ]; then
+	echo "e2e.sh: in-guest check failed: $(grep -h "${FAIL_MARKER}" "${OUT}/serial.log" | head -n 1)" >&2
+	exit 1
+fi
+[ "${deploy_rc}" -eq 0 ] || exit "${deploy_rc}"
 
 echo "==> e2e OK: ${MARKER} seen on the serial console" >&2
