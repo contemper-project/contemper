@@ -146,10 +146,14 @@ jobs:
       # gotestsum (a tool in go.mod) runs go test and also writes a JUnit
       # report, which Codecov's test analytics reads (failures, flaky and
       # slow tests).
+      # -race runs every test under the race detector, which catches
+      # unsynchronized goroutines (such as the progress spinner's) that
+      # plain runs only hit by chance. It needs cgo, which the hosted
+      # runners have, and works with -covermode=atomic.
       - name: go test
         run: >-
           go tool gotestsum --format pkgname --junitfile junit.xml --
-          -coverpkg=./... -coverprofile=coverage.out -covermode=atomic ./...
+          -race -coverpkg=./... -coverprofile=coverage.out -covermode=atomic ./...
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
