@@ -52,6 +52,26 @@ change: unit tests in the relevant package, or a boot test under
 behavior (see Boot tests below). Reviewers expect new functionality to
 arrive with coverage, not as a follow-up.
 
+### Fuzz tests
+
+Code that parses content from an image (layer tars, labels and
+annotations, the headers of kernels and EFI binaries, names that end up
+in a script or an fstab) has native Go fuzz tests: `FuzzXxx` functions in
+the packages' `_test.go` files. `go test` runs their seed inputs like any
+other test. To search for new failures, run one target at a time:
+
+```sh
+go test -run='^$' -fuzz='^FuzzParseRef$' -fuzztime=60s ./internal/source
+```
+
+`make fuzz FUZZTIME=2m` runs every target for that long each, and the
+nightly `fuzz` workflow does the same. A failing input is saved under
+`testdata/fuzz/<target>/` in the package: commit it with the fix, and
+`go test` keeps running it as a regression test. A new parser should come
+with a target that checks a real property of its result (it round-trips,
+stays inside the root, is accepted by an independent reference), not only
+that it does not panic.
+
 ### Boot tests
 
 `make e2e` and `make e2e-variants` build the Alpine example image,
