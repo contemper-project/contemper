@@ -25,7 +25,7 @@ func runConvertCmd(t *testing.T, args ...string) (string, error) {
 	cmd.SetOut(&stdout)
 	cmd.SetErr(io.Discard)
 	cmd.SilenceUsage = true
-	cmd.SetArgs(append([]string{"--target", "qemu", "--quiet"}, args...))
+	cmd.SetArgs(append([]string{"--target", "qemu", "--root-size", testRootSize, "--quiet"}, args...))
 	err := cmd.Execute()
 	return stdout.String(), err
 }
@@ -53,7 +53,7 @@ func runConvertCmdReport(t *testing.T, args ...string) (stdout, stderr string, e
 	cmd.SetOut(&out)
 	cmd.SetErr(io.Discard)
 	cmd.SilenceUsage = true
-	cmd.SetArgs(append([]string{"--target", "qemu", "--progress", "plain"}, args...))
+	cmd.SetArgs(append([]string{"--target", "qemu", "--root-size", testRootSize, "--progress", "plain"}, args...))
 	err = cmd.Execute()
 	_ = w.Close()
 	os.Stderr = orig
