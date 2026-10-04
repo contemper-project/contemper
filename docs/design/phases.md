@@ -11,10 +11,8 @@ of them is contemper's own work.
 | 4a | **Publish** | bundle and provider | an image in the provider's catalog |
 | 4b | **Deploy** | bundle, provider, instance config | a running VM |
 
-!!! warning "Partly planned"
-    Build (with Docker), convert and `deploy --to local-qemu` are
-    implemented. The `publish` adapter and Incus publish and deploy are
-    designed but not built.
+!!! warning "Planned"
+    Publish, and deploy to Incus, are designed but not built yet.
 
 **Publish and deploy are alternatives, not a sequence.** Both consume a
 bundle and differ in what they produce, and so in who uses them. Publish
