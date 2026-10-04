@@ -2,6 +2,7 @@ package disk_test
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"io"
 	"os"
 	"testing"
@@ -234,5 +235,122 @@ func TestBuildGPTImageESPSizeMustBeSectorMultiple(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected an error for a non-sector-multiple ESP size")
+	}
+}
+
+func writeTestRootImg(t *testing.T, path string, rootSize int64) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(rootSize); err != nil {
+		t.Fatal(err)
+	}
+	// Data in a few places, an all-zero data block among it, and the last
+	// bytes of the image.
+	for _, w := range []struct {
+		off int64
+		b   byte
+		n   int
+	}{{1024, 0x11, 1024}, {3 << 20, 0x22, 5000}, {9<<20 + 17, 0x33, 4096 * 3}, {rootSize - 100, 0x44, 100}} {
+		if _, err := f.WriteAt(bytes.Repeat([]byte{w.b}, w.n), w.off); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := f.WriteAt(make([]byte, 8192), 6<<20); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestBuildGPTImageMatchesFullCopy checks the disk image is byte for byte
+// what go-diskfs's own full copy of the root partition produces, with the
+// single-file UEFI fallback ESP and with an ESP tree.
+func TestBuildGPTImageMatchesFullCopy(t *testing.T) {
+	const rootSize = 16 << 20
+	for _, tc := range []struct {
+		name string
+		opts disk.BuildOptions
+	}{
+		{"UKI", disk.BuildOptions{Arch: "amd64", UKI: []byte("uki")}},
+		{"ESPTree", disk.BuildOptions{Arch: "arm64", ESPTree: []disk.ESPEntry{
+			{Path: "EFI", Dir: true},
+			{Path: "EFI/BOOT", Dir: true},
+			memEntry("EFI/BOOT/BOOTAA64.EFI", []byte("fallback")),
+			memEntry("grub.cfg", []byte("search --label contemper-root\n")),
+		}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			rootImgPath := dir + "/root.img"
+			writeTestRootImg(t, rootImgPath, rootSize)
+
+			rawPath := dir + "/disk.raw"
+			opts := tc.opts
+			opts.RootImgPath, opts.RootSizeBytes = rootImgPath, rootSize
+			if _, err := disk.BuildGPTImage(rawPath, opts); err != nil {
+				t.Fatal(err)
+			}
+
+			// The reference: the same image with the root written by go-diskfs.
+			refPath := dir + "/ref.raw"
+			raw, err := os.ReadFile(rawPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(refPath, raw, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			d, err := diskfs.Open(refPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			src, err := os.Open(rootImgPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := d.WritePartitionContents(2, src); err != nil {
+				t.Fatal(err)
+			}
+			_ = src.Close()
+			if err := d.Close(); err != nil {
+				t.Fatal(err)
+			}
+			ref, err := os.ReadFile(refPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sha256.Sum256(raw) != sha256.Sum256(ref) {
+				t.Errorf("disk image differs from the full-copy result")
+			}
+		})
+	}
+}
+
+func TestBuildGPTImageRootImgSize(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		imgSize, want int64
+	}{
+		{"larger than the partition", 2 << 20, 1 << 20},
+		{"smaller than the partition", 1 << 20, 2 << 20},
+		{"not a sector multiple", 1<<20 + 100, 1<<20 + 100},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			rootImgPath := dir + "/root.img"
+			if err := os.WriteFile(rootImgPath, make([]byte, tc.imgSize), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := disk.BuildGPTImage(dir+"/disk.raw", disk.BuildOptions{
+				Arch: "amd64", UKI: []byte("uki"), RootImgPath: rootImgPath, RootSizeBytes: tc.want,
+			})
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+		})
 	}
 }
