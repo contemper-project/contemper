@@ -16,6 +16,17 @@ by theme rather than by version - see
 in CONTRIBUTING.md for how issues, priority, and milestone order work,
 and what's next.
 
-Images that ship their own EFI bootloader, so the guest can update its
-kernel in place, are one such theme; the contract is in
-[bootloader images](bootloader-images.md).
+Images that ship their own EFI bootloader (including Secure Boot) and
+multi-arch conversion have shipped; see [bootloader
+images](../guide/bootloader-images.md) and [multi-arch
+builds](../guide/multi-arch.md).
+
+The themes currently open as milestones:
+
+- **Podman builds:** building with podman, and a `containers-storage:`
+  source.
+- **Incus:** an Incus target and its support image, publish and deploy
+  against a remote Incus, Incus volumes, and deployment metadata in the
+  bundle manifest.
+- **Root filesystem:** faster population with `mkfs.ext4 -d`, keeping
+  hardlinks, long paths, and a configurable `root=`.
