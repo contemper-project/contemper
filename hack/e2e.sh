@@ -15,6 +15,7 @@
 # Usage: hack/e2e.sh [--example alpine|debian|debian-grub|archlinux]
 #                     [--timeout DURATION] [--build-command]
 #        hack/e2e.sh --distro ID [--registry-mirror HOST] [--timeout DURATION]
+#                    [--status-dir DIR]
 #
 # --registry-mirror HOST (or CONTEMPER_E2E_REGISTRY_MIRROR=HOST) pulls
 # Docker Hub base images through a mirror such as mirror.gcr.io, which
@@ -23,6 +24,12 @@
 # becomes HOST/library/alpine:3.24, rockylinux/rockylinux:9 becomes
 # HOST/rockylinux/rockylinux:9); quay.io, registry.opensuse.org and other
 # registries are left alone.
+#
+# --status-dir DIR (with --distro) records how far the run got, for
+# reporting: DIR/stage holds the stage being run (build, convert or boot,
+# then done once the marker was seen), so after a failure it names the
+# stage that failed, and DIR/base-digest the resolved digest of the base
+# image when the engine can tell. DIR is created and not cleaned.
 #
 # Requires: go, podman or docker (CONTAINER_ENGINE selects one explicitly),
 # e2fsprogs (mkfs.ext4, debugfs, e2fsck), qemu-img, qemu-system-<arch> and
@@ -49,6 +56,7 @@ EXAMPLE="alpine"
 BUILD_COMMAND=0
 DISTRO=""
 MIRROR="${CONTEMPER_E2E_REGISTRY_MIRROR:-}"
+STATUS_DIR=""
 FAIL_MARKER="contemper-check-failed:"
 
 while [ $# -gt 0 ]; do
@@ -73,6 +81,10 @@ while [ $# -gt 0 ]; do
 		MIRROR="$2"
 		shift 2
 		;;
+	--status-dir)
+		STATUS_DIR="$2"
+		shift 2
+		;;
 	*)
 		echo "e2e.sh: unknown argument: $1" >&2
 		exit 2
@@ -84,12 +96,25 @@ if [ -n "${MIRROR}" ] && [ -z "${DISTRO}" ]; then
 	echo "e2e.sh: --registry-mirror requires --distro" >&2
 	exit 2
 fi
+if [ -n "${STATUS_DIR}" ] && [ -z "${DISTRO}" ]; then
+	echo "e2e.sh: --status-dir requires --distro" >&2
+	exit 2
+fi
 if [ -n "${DISTRO}" ] && [ "${BUILD_COMMAND}" -eq 1 ]; then
 	echo "e2e.sh: --distro and --build-command can't be combined" >&2
 	exit 2
 fi
 
 DISTRO_BUILD_ARGS=()
+if [ -n "${STATUS_DIR}" ]; then
+	mkdir -p "${STATUS_DIR}"
+	rm -f "${STATUS_DIR}/stage" "${STATUS_DIR}/base-digest"
+fi
+# set_stage NAME records the stage being run (see --status-dir).
+set_stage() {
+	[ -z "${STATUS_DIR}" ] || echo "$1" >"${STATUS_DIR}/stage"
+}
+set_stage build
 if [ -n "${DISTRO}" ]; then
 	# The matrix entry is read by a small Go helper (Go is needed for the
 	# build below anyway, so there is no jq dependency on macOS hosts).
@@ -200,6 +225,12 @@ else
 		"${engine}" build -t "${IMAGE}" -f "${REPO}/examples/${EXAMPLE}/Containerfile" "${REPO}/examples/${EXAMPLE}"
 	fi
 
+	if [ -n "${STATUS_DIR}" ] && [ -n "${DISTRO}" ]; then
+		# The build pulled the base image, so the engine knows its digest.
+		"${engine}" image inspect --format '{{index .RepoDigests 0}}' "${distro_base}" \
+			>"${STATUS_DIR}/base-digest" 2>/dev/null || rm -f "${STATUS_DIR}/base-digest"
+	fi
+
 	# podman can write an OCI archive; docker save only writes its own format.
 	case "${engine}" in
 	podman)
@@ -212,10 +243,12 @@ else
 		;;
 	esac
 
+	set_stage convert
 	echo "==> contemper convert" >&2
 	bundle="$("${contemper}" convert --target qemu "${source_ref}" -o "${OUT}")"
 fi
 
+set_stage boot
 echo "==> contemper deploy --to local-qemu" >&2
 # Run the deploy in the background and watch the serial log, so a failed
 # in-guest check ends the run at once instead of at the timeout.
@@ -241,4 +274,5 @@ if [ "${check_failed}" -eq 1 ]; then
 fi
 [ "${deploy_rc}" -eq 0 ] || exit "${deploy_rc}"
 
+set_stage "done"
 echo "==> e2e OK: ${MARKER} seen on the serial console" >&2
