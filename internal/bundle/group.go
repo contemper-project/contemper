@@ -133,7 +133,7 @@ func WriteGroup(dir, name string, g *Group) (string, error) {
 
 // ReadGroup parses and validates the group file at path.
 func ReadGroup(path string) (*Group, error) {
-	data, err := os.ReadFile(path)
+	data, err := readSmallFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}

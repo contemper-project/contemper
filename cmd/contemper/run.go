@@ -976,6 +976,11 @@ func runDeploy(ctx context.Context, _ *cobra.Command, opts deployOptions) error 
 		rep.Line("🧭", "bundle "+filepath.Base(bundleDir), chosen)
 	}
 
+	diskPath, err := bundle.VerifyDisk(bundleDir, manifest)
+	if err != nil {
+		return err
+	}
+
 	overrides, err := parseVolumeOverrides(opts.volumes)
 	if err != nil {
 		return err
@@ -1041,7 +1046,7 @@ func runDeploy(ctx context.Context, _ *cobra.Command, opts deployOptions) error 
 
 	return qemu.Deploy(ctx, qemu.Options{
 		Arch:          manifest.Arch,
-		DiskPath:      filepath.Join(bundleDir, manifest.Disk.File),
+		DiskPath:      diskPath,
 		DiskFormat:    manifest.Disk.Format,
 		Volumes:       attachments,
 		SecureBoot:    manifest.SecureBoot,

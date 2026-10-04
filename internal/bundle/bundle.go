@@ -143,7 +143,7 @@ const ManifestFile = "contemper.json"
 // Read parses <dir>/contemper.json.
 func Read(dir string) (*Manifest, error) {
 	path := filepath.Join(dir, ManifestFile)
-	data, err := os.ReadFile(path)
+	data, err := readSmallFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
@@ -169,6 +169,11 @@ func (m *Manifest) check() error {
 	f := m.Disk.File
 	if f == "" || f == "." || f == ".." || strings.ContainsAny(f, "/\\") {
 		return fmt.Errorf("disk.file %q must be a plain file name", f)
+	}
+	switch m.Disk.Format {
+	case "", FormatQcow2, FormatRaw:
+	default:
+		return fmt.Errorf("disk.format %q is not supported (want %s or %s)", m.Disk.Format, FormatQcow2, FormatRaw)
 	}
 	// m.Boot is deliberately not checked against the known modes: a
 	// bundle written by a newer contemper may use a mode this version
