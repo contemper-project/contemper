@@ -361,3 +361,25 @@ func TestUEFIQcow2AssembleBootloader(t *testing.T) {
 		})
 	}
 }
+
+// TestAssembleKeepRaw checks the kept disk.raw equals the raw image that
+// goes to qemu-img.
+func TestAssembleKeepRaw(t *testing.T) {
+	rfs, val := syntheticRootfs(t)
+	capture := captureQemuImg(t)
+	outDir := t.TempDir()
+	if _, _, err := (target.UEFIQcow2{}).Assemble(t.Context(), rfs, val, "arm64", outDir, target.Options{RootSizeBytes: testRootSize, KeepRaw: true}); err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	kept, err := os.ReadFile(filepath.Join(outDir, "disk.raw"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	built, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(kept, built) {
+		t.Errorf("kept disk.raw differs from the image given to qemu-img")
+	}
+}

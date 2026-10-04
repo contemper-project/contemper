@@ -323,17 +323,29 @@ func diskInfoFor(path, format string) (*DiskInfo, error) {
 	}, nil
 }
 
+// copyFile copies src to dst, sparsely: holes and all-zero blocks in src
+// stay unallocated in dst.
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = in.Close() }()
+	fi, err := in.Stat()
+	if err != nil {
+		return err
+	}
 	out, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, in); err != nil {
+	// The skipped zeros are not written, so give dst its full length
+	// first; os.Create left it empty, so everything in it reads as zero.
+	if err := out.Truncate(fi.Size()); err != nil {
+		_ = out.Close()
+		return err
+	}
+	if err := disk.CopySparse(out, 0, in, fi.Size()); err != nil {
 		_ = out.Close()
 		return err
 	}
