@@ -1,0 +1,56 @@
+# Distribution test image: Alpine (OpenRC, mkinitfs). Same shape as
+# examples/alpine, parameterized by base image and extended with the
+# in-guest boot check from ../common. Build with the context set to
+# test/distros (hack/e2e.sh --distro does this).
+ARG BASE=alpine:3.24
+FROM ${BASE}
+
+LABEL io.contemper.ready="true"
+
+ARG TARGETARCH
+
+# busybox-mdev-openrc provides the mdev service (openrc alone does not);
+# e2fsprogs gives the boot-time fsck its fsck.ext4.
+RUN apk add --no-cache linux-virt openrc busybox-mdev-openrc mkinitfs e2fsprogs
+
+# Generic (not host-only) initrd covering the virtio block/net/scsi
+# drivers a qemu-booted VM needs; mkinitfs only includes what the -F
+# feature list names, so it never probes the build host.
+RUN kver="$(basename "$(find /lib/modules -mindepth 1 -maxdepth 1 -type d)")" && \
+    mkdir -p /boot/contemper && \
+    mkinitfs -F "base ext4 virtio scsi" -o /boot/contemper/initrd "$kver"
+
+# The kernel is /boot/vmlinuz-virt.
+RUN ln -sf ../vmlinuz-virt /boot/contemper/vmlinuz
+
+# Serial console per architecture; getty on it for interactive testing.
+RUN case "$TARGETARCH" in \
+      arm64) console=ttyAMA0 ;; \
+      amd64) console=ttyS0 ;; \
+      *) echo "test/distros/alpine: unsupported TARGETARCH '$TARGETARCH'" >&2; exit 1 ;; \
+    esac && \
+    echo "rootfstype=ext4 modules=ext4 rw console=${console}" > /boot/contemper/cmdline && \
+    echo "${console}::respawn:/sbin/getty -L ${console} 115200 vt100" >> /etc/inittab
+
+RUN echo 'LABEL=contemper-root / ext4 rw,relatime 0 1' >> /etc/fstab
+
+# Standard OpenRC runlevels for a minimal, non-networked appliance. The
+# fsck service is not enabled by default; the boot check looks at it, so
+# it has to run.
+RUN rc-update add devfs sysinit && \
+    rc-update add dmesg sysinit && \
+    rc-update add mdev sysinit && \
+    rc-update add hwdrivers sysinit && \
+    rc-update add modules boot && \
+    rc-update add sysctl boot && \
+    rc-update add hostname boot && \
+    rc-update add fsck boot && \
+    rc-update add bootmisc boot && \
+    rc-update add local default
+
+RUN passwd -d root
+
+# Boot check and marker, run by OpenRC's "local" runlevel.
+COPY common/contemper-check.sh /usr/local/bin/contemper-check
+COPY common/contemper-check.start /etc/local.d/contemper.start
+RUN chmod 0755 /usr/local/bin/contemper-check /etc/local.d/contemper.start
