@@ -211,6 +211,7 @@ func TestHasMountPoint(t *testing.T) {
 		"space in mount":  {"UUID=1 /boot/efi\\040x vfat defaults 0 2\n", false},
 		"later line":      {"/dev/vda2 / ext4 defaults 0 1\n\n# c\nUUID=1 /boot/efi vfat defaults 0 2\n", true},
 		"truncated octal": {"UUID=1 /boot/efi\\04 vfat defaults 0 2\n", false},
+		"crlf":            {"UUID=1 /boot/efi\r\n", true},
 	} {
 		if got := guestmeta.HasMountPoint([]byte(tc.fstab), "/boot/efi"); got != tc.want {
 			t.Errorf("%s: HasMountPoint = %v, want %v", name, got, tc.want)
@@ -218,5 +219,16 @@ func TestHasMountPoint(t *testing.T) {
 	}
 	if !guestmeta.HasMountPoint([]byte("UUID=1 /data\\040dir ext4 defaults 0 2\n"), "/data dir") {
 		t.Error("escaped space did not match")
+	}
+}
+
+// fstab(5) separates fields by spaces and tabs only, so other Unicode
+// white space inside a mount point belongs to it.
+func TestHasMountPointKeepsOtherWhiteSpaceInTheField(t *testing.T) {
+	for _, mp := range []string{"/data\u00a0dir", "/data\u0085dir", "/data\u2003dir"} {
+		line := guestmeta.FstabLine("data", mp) + "\n"
+		if !guestmeta.HasMountPoint([]byte(line), mp) {
+			t.Errorf("HasMountPoint does not find %q in %q", mp, line)
+		}
 	}
 }
