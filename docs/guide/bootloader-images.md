@@ -64,7 +64,7 @@ don't fit:
   leaves little room to grow, and every kernel with its initrd, plus
   package caches, uses it up. Size it up front with `--root-size` or
   the `io.contemper.root.size` label (the flag wins when both are
-  given). Or grow it later with `growpart` and `resize2fs`, since the
+  given; the label is capped at 16 GiB, the flag is not). Or grow it later with `growpart` and `resize2fs`, since the
   root partition is last; see [the disk](disk.md#layout).
 - **Volumes.** They are optional here, but still useful to keep data
   apart from the OS, or to move it to a rebuilt VM. Seeding happens only
