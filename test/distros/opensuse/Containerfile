@@ -41,10 +41,15 @@ RUN kdirs="$(find /usr/lib/modules -mindepth 1 -maxdepth 1 -type d)" && \
     kver="$(basename "$kdirs")" && \
     mkdir -p /boot/contemper && \
     dracut --no-hostonly --no-hostonly-cmdline --force --kver "$kver" /boot/contemper/initrd && \
-    if [ -e "/usr/lib/modules/$kver/vmlinuz" ]; then \
-      ln -sf "/usr/lib/modules/$kver/vmlinuz" /boot/contemper/vmlinuz; \
-    else \
-      ln -sf "../vmlinuz-$kver" /boot/contemper/vmlinuz; \
+    # The kernel image is named vmlinuz on x86 but Image on arm64 (an
+    # EFI-stub PE image, used as is).
+    for k in "/usr/lib/modules/$kver/vmlinuz" "/usr/lib/modules/$kver/Image" \
+             "/boot/vmlinuz-$kver" "/boot/Image-$kver"; do \
+      if [ -e "$k" ]; then ln -sf "$k" /boot/contemper/vmlinuz; found=1; break; fi; \
+    done && \
+    if [ -z "${found:-}" ]; then \
+      echo "test/distros/opensuse: no kernel image found for $kver (tried vmlinuz and Image under /usr/lib/modules/$kver and /boot)" >&2; \
+      exit 1; \
     fi
 
 RUN case "$TARGETARCH" in \
