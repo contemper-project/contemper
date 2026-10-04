@@ -19,7 +19,7 @@ GOLANGCI_LINT_VERSION := $(shell cat .golangci-lint-version)
 GOLANGCI_LINT_DIR     := bin/golangci-lint-$(GOLANGCI_LINT_VERSION)
 GOLANGCI_LINT         := $(GOLANGCI_LINT_DIR)/golangci-lint
 
-.PHONY: build test vet lint actionlint stubs example e2e e2e-variants e2e-volumes e2e-bootloader clean
+.PHONY: build test vet lint actionlint stubs example e2e e2e-variants e2e-volumes e2e-bootloader e2e-multiarch clean
 
 build:
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/contemper
@@ -58,6 +58,9 @@ e2e-volumes:
 
 e2e-bootloader:
 	./hack/e2e-bootloader.sh
+
+e2e-multiarch:
+	./hack/e2e-multiarch.sh
 
 clean:
 	rm -rf bin _out
