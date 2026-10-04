@@ -582,13 +582,18 @@ func checkScriptLines(script string) error {
 
 // quoteArg quotes s for a debugfs script. debugfs supports double-quoted
 // filespecs but no escape sequence within them, so a name containing a
-// double quote or a newline cannot be represented at all.
+// double quote, a newline or a NUL cannot be represented at all. A NUL
+// would end the argument early: debugfs reads each script line into a C
+// string, so everything after it, including the closing quote, is lost.
 func quoteArg(s string) (string, error) {
 	if strings.ContainsRune(s, '"') {
 		return "", fmt.Errorf("path contains a double quote, which a debugfs script cannot represent: %q", s)
 	}
 	if strings.ContainsAny(s, "\n\r") {
 		return "", fmt.Errorf("path contains a newline, which a debugfs script cannot represent: %q", s)
+	}
+	if strings.ContainsRune(s, 0) {
+		return "", fmt.Errorf("path contains a NUL byte, which a debugfs script cannot represent: %q", s)
 	}
 	return `"` + s + `"`, nil
 }
