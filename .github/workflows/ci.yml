@@ -26,8 +26,10 @@ jobs:
     #       booting the CLI - Go sources and modules, the Makefile, the
     #       goreleaser config, the pinned golangci-lint version, the
     #       hack/ scripts and helper images the e2e jobs build and run,
-    #       the example images they boot, the support images the volumes
-    #       e2e job installs, the embedded systemd-stub checksums, and
+    #       the example images they boot, the distribution matrix and
+    #       test images (whose Go package and tests run with the rest),
+    #       the support images the volumes e2e job installs, the
+    #       embedded systemd-stub checksums, and
     #       this workflow file itself.
     #   workflows: any workflow file or actionlint's config. Only the
     #       lint job (which actionlints every workflow) needs to run for
@@ -58,6 +60,7 @@ jobs:
               - '.golangci-lint-version'
               - 'hack/**'
               - 'examples/**'
+              - 'test/distros/**'
               - 'support/**'
               - 'internal/uki/stubs/**'
               - '.github/workflows/ci.yml'
@@ -102,6 +105,9 @@ jobs:
             hack/e2e-volumes/files/check-volume.sh \
             hack/e2e-volumes/files/zzz-contemper-volume-test.start
           shellcheck -s sh hack/e2e-bootloader/files/kernel-update.sh
+          shellcheck -s sh \
+            test/distros/common/contemper-check.sh \
+            test/distros/common/contemper-check.start
 
   test:
     needs: changes
