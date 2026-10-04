@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/term"
 )
@@ -117,6 +119,7 @@ func (r *Reporter) Writer() io.Writer {
 const labelWidth = 46
 
 func twoCol(label, detail string) string {
+	label, detail = SanitizeLine(label), SanitizeLine(detail)
 	if detail == "" {
 		return label
 	}
@@ -144,7 +147,7 @@ func (r *Reporter) Sub(mark, label, detail string) {
 // introduced with "└", e.g.
 // "      └ ghcr.io/contemper-project/incus-openrc:v5 linux/arm64".
 func (r *Reporter) SubChild(format string, args ...any) {
-	r.println("      └ " + fmt.Sprintf(format, args...))
+	r.println("      └ " + SanitizeLine(fmt.Sprintf(format, args...)))
 }
 
 // Warn prints a "⚠️" line.
@@ -164,7 +167,7 @@ func (r *Reporter) VerboseCmd(name string, args []string) {
 	if r == nil || !r.verbose {
 		return
 	}
-	r.println(dim("  $ " + strings.Join(append([]string{name}, args...), " ")))
+	r.printlnRaw(dim(SanitizeLine("  $ " + strings.Join(append([]string{name}, args...), " "))))
 }
 
 // Fail prints the "✖" failure line: a stage name, a plain-language
@@ -181,9 +184,9 @@ func (r *Reporter) Fail(stage, reason, hint string) {
 	if r.ctx != nil && r.ctx.Err() != nil {
 		return
 	}
-	r.println("✖  " + stage + ": " + reason)
+	r.println("✖  " + SanitizeLine(stage) + ": " + reason)
 	if hint != "" {
-		r.println("   " + hint)
+		r.println("   " + SanitizeLine(hint))
 	}
 }
 
@@ -195,7 +198,7 @@ func (r *Reporter) ToolFailureOutput(output string) {
 		return
 	}
 	for _, line := range strings.Split(output, "\n") {
-		r.println("   | " + line)
+		r.println("   | " + SanitizeLine(line))
 	}
 }
 
@@ -216,7 +219,15 @@ func (r *Reporter) Elapsed() time.Duration {
 	return time.Since(r.start)
 }
 
+// println prints s as one line (or several, if it holds newlines),
+// with control characters escaped: see Sanitize.
 func (r *Reporter) println(s string) {
+	r.printlnRaw(Sanitize(s))
+}
+
+// printlnRaw prints s as it is. Only text that carries contemper's own
+// terminal escapes (dim) goes through it, after its parts were sanitized.
+func (r *Reporter) printlnRaw(s string) {
 	r.stopLiveForLine()
 	if r == nil {
 		return
@@ -224,6 +235,54 @@ func (r *Reporter) println(s string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	_, _ = fmt.Fprintln(r.w, s)
+}
+
+// Sanitize makes s safe to print to a terminal. Paths, link targets,
+// references and names in the output come from the image, and a raw
+// escape sequence, carriage return or other control character in one
+// could rewrite what the terminal shows. Every non-printable character
+// except newline and tab is replaced by a Go-style escape such as
+// "\x1b" or "\u202e"; ordinary text, including non-ASCII letters and
+// emoji, is unchanged. Newlines are kept, for text that is multi-line on
+// purpose (an error with a tool's output); see SanitizeLine for a
+// single-line field.
+func Sanitize(s string) string { return sanitize(s, true) }
+
+// SanitizeLine is Sanitize for a field that belongs on one output line (a
+// path, name, reference or detail): newlines are escaped too, so a value
+// from an image cannot start a line of its own.
+func SanitizeLine(s string) string { return sanitize(s, false) }
+
+func sanitize(s string, keepNewline bool) string {
+	ok := func(r rune) bool { return unicode.IsPrint(r) || r == '\t' || (keepNewline && r == '\n') }
+	clean := true
+	for _, r := range s {
+		if !ok(r) {
+			clean = false
+			break
+		}
+	}
+	if clean && utf8.ValidString(s) {
+		return s
+	}
+	var b strings.Builder
+	for i, r := range s {
+		switch {
+		case r == utf8.RuneError:
+			// Either a real U+FFFD or an invalid byte; escape the byte.
+			if _, size := utf8.DecodeRuneInString(s[i:]); size == 1 {
+				fmt.Fprintf(&b, "\\x%02x", s[i])
+			} else {
+				b.WriteRune(r)
+			}
+		case ok(r):
+			b.WriteRune(r)
+		default:
+			q := strconv.QuoteRune(r)
+			b.WriteString(q[1 : len(q)-1])
+		}
+	}
+	return b.String()
 }
 
 // stopLiveForLine clears any in-progress live stage line before printing

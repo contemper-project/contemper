@@ -34,7 +34,7 @@ func (r *Reporter) BeginStage(icon, label string) *Stage {
 	if r == nil {
 		return nil
 	}
-	s := &Stage{r: r, icon: icon, label: label, start: time.Now()}
+	s := &Stage{r: r, icon: icon, label: SanitizeLine(label), start: time.Now()}
 	switch {
 	case r.tty:
 		s.stopCh = make(chan struct{})
@@ -48,7 +48,7 @@ func (r *Reporter) BeginStage(icon, label string) *Stage {
 		// mode, print the header up front too, so the tool-invocation
 		// lines that follow have a heading to sit under; Done then skips
 		// re-printing an identical, detail-less line (see Done).
-		r.println(icon + "  " + label)
+		r.println(icon + "  " + s.label)
 		s.headerPrinted = true
 	}
 	return s
@@ -167,7 +167,7 @@ func (s *Stage) Done(icon, label, detail string) {
 	// If the header was already printed up front (verbose, plain mode)
 	// and Done has nothing new to add, don't print an identical second
 	// copy of the same line.
-	if s.headerPrinted && detail == "" && icon+"  "+label == s.icon+"  "+s.label {
+	if s.headerPrinted && detail == "" && icon+"  "+SanitizeLine(label) == s.icon+"  "+s.label {
 		return
 	}
 	s.r.println(icon + "  " + twoCol(label, detail))

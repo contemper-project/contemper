@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/contemper-project/contemper/internal/buildinfo"
+	"github.com/contemper-project/contemper/internal/progress"
 )
 
 func main() {
@@ -53,7 +54,7 @@ func exitStatus(err error, sig os.Signal) (code int, msg string) {
 	case sig != nil:
 		return signalExitCode(sig), "contemper: interrupted"
 	default:
-		return 1, "contemper: " + err.Error()
+		return 1, "contemper: " + progress.Sanitize(err.Error())
 	}
 }
 
