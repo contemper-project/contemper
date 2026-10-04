@@ -11,6 +11,10 @@ The tools are deliberately not bundled or downloaded: the copies your
 distribution or Homebrew installs get their security fixes from there,
 on your schedule, and contemper itself stays one static binary.
 
+The root filesystem's ext4 features don't depend on the version you have:
+contemper hands `mkfs.ext4` its own configuration (see
+[How it works](../guide/how-it-works.md#building-the-disk-without-root)).
+
 ## Needed to convert
 
 `convert` always needs these, regardless of target:

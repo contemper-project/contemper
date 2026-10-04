@@ -48,6 +48,16 @@ and hardlinks come through intact, with no root privileges and no
 assumption that the host filesystem is case-sensitive (the default macOS
 filesystem isn't).
 
+The ext4 feature set is fixed rather than inherited from the host's
+`/etc/mke2fs.conf`: `has_journal`, `extent`, `huge_file`, `flex_bg`,
+`metadata_csum`, `64bit`, `dir_nlink` and `extra_isize`, with a 4 KiB
+block size. contemper passes its own configuration to `mkfs.ext4`, so the
+same image gives the same filesystem whichever e2fsprogs version converts
+it. Newer e2fsprogs releases enable features such as `orphan_file` by
+default, and a guest whose initrd carries an older `e2fsck` (for example
+1.46 on Enterprise Linux 9 or Ubuntu 22.04) refuses to check such a
+filesystem at boot.
+
 The boot image is a Unified Kernel Image (UKI), assembled in Go: an
 embedded systemd-stub with the OS release, command line, initrd and
 kernel appended as PE sections. A gzip-compressed kernel is decompressed
