@@ -206,6 +206,9 @@
     "family": "opensuse",
     "containerfile": "opensuse",
     "base": "registry.opensuse.org/opensuse/tumbleweed:latest",
+    "buildArgs": {
+      "ZYPPER_REPO_HOST": "downloadcontent.opensuse.org"
+    },
     "arch": [
       "amd64",
       "arm64"
