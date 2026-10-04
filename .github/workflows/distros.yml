@@ -1,0 +1,217 @@
+name: Distributions
+
+# Boots every entry of test/distros/matrix.json: the family's test image
+# is built from the entry's base image, converted, and booted, and must
+# print the in-guest check's boot marker (hack/e2e.sh --distro). amd64
+# runs under KVM; arm64 runs under TCG on the hosted arm64 runner, which
+# has no /dev/kvm (see arm64-nightly.yml), so those legs are slow.
+#
+# This is deliberately not part of ci.yml and its `ci-result`: it pulls
+# upstream images that change under us, so a red run says "a distribution
+# moved", not "this change broke something". Failures are reported as one
+# GitHub issue per entry and architecture instead (hack/distro-report);
+# see CONTRIBUTING.md.
+#
+# Runs on a schedule, and by hand (Actions tab, or `gh workflow run
+# distros.yml -f ids=fedora-44`). A release starts it through
+# release.yml with `report` set, so the release run itself stays short
+# and the suite shows up as a run of its own. A manual run only files
+# issues when `report` is set.
+
+on:
+  schedule:
+    - cron: "13 4 * * *"
+  workflow_dispatch:
+    inputs:
+      ids:
+        description: "Comma-separated entry ids, e.g. fedora-44,debian-13 (empty: all)"
+        type: string
+        default: ""
+      arch:
+        description: "Architecture to run"
+        type: choice
+        options: [all, amd64, arm64]
+        default: all
+      report:
+        description: "Open, update and close issues from the results"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  matrix:
+    # Turns matrix.json into the legs below, honouring the manual
+    # filters. An unknown entry id fails here, before any runner starts.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      legs: ${{ steps.legs.outputs.legs }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - id: legs
+        env:
+          IDS: ${{ inputs.ids }}
+          ARCH: ${{ inputs.arch }}
+        run: |
+          legs="$(go run ./hack/distro-entry matrix --ids "${IDS}" --arch "${ARCH:-all}")"
+          echo "legs=${legs}" >>"${GITHUB_OUTPUT}"
+          echo "${legs}"
+
+  boot:
+    needs: matrix
+    if: needs.matrix.outputs.legs != '{"include":[]}'
+    name: ${{ matrix.id }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    # Two attempts at a boot each: 5 minutes of boot timeout under KVM,
+    # 20 under TCG, plus building and converting the image.
+    timeout-minutes: ${{ matrix.arch == 'arm64' && 120 || 40 }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.matrix.outputs.legs) }}
+    env:
+      ID: ${{ matrix.id }}
+      ARCH: ${{ matrix.arch }}
+      BOOT_TIMEOUT: ${{ matrix.arch == 'arm64' && '1200s' || '300s' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # The runner has /dev/kvm, but not accessible to the runner user.
+      - name: Enable KVM
+        if: matrix.arch == 'amd64'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      # podman and e2fsprogs are preinstalled on both runners.
+      - name: Install qemu and UEFI firmware (amd64)
+        if: matrix.arch == 'amd64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils ovmf
+      # ipxe-qemu provides the virtio network ROMs QEMU needs for
+      # virtio-net-pci, which --no-install-recommends would otherwise
+      # skip.
+      - name: Install qemu and UEFI firmware (arm64)
+        if: matrix.arch == 'arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-arm qemu-utils qemu-efi-aarch64 ipxe-qemu
+      # Docker Hub's anonymous pull limit is per address, and the shared
+      # runners' addresses burn through it with ~20 pulls per run, so
+      # Docker Hub base images are pulled through Google's mirror.
+      # --status-dir records the stage reached and the base image digest
+      # for the result below. One retry, with a rebuild, covers a flaky
+      # pull or a slow boot without hiding a real failure.
+      - name: Boot test
+        id: boot
+        continue-on-error: true
+        run: |
+          for attempt in 1 2; do
+            echo "::group::attempt ${attempt}"
+            if ./hack/e2e.sh --distro "${ID}" --registry-mirror mirror.gcr.io \
+              --timeout "${BOOT_TIMEOUT}" --status-dir "${RUNNER_TEMP}/distro-status"; then
+              echo "::endgroup::"
+              exit 0
+            fi
+            echo "::endgroup::"
+          done
+          exit 1
+      # Skipped when the job was cancelled or never got as far as the boot
+      # test (a failed package install says nothing about the entry), so
+      # that the report leaves the entry's issue alone.
+      - name: Write result
+        if: ${{ !cancelled() && (steps.boot.outcome == 'success' || steps.boot.outcome == 'failure') }}
+        env:
+          OUTCOME: ${{ steps.boot.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          status="${RUNNER_TEMP}/distro-status"
+          outcome=pass
+          stage=
+          if [ "${OUTCOME}" != success ]; then
+            outcome=fail
+            stage="$(cat "${status}/stage" 2>/dev/null || true)"
+          fi
+          digest="$(cat "${status}/base-digest" 2>/dev/null || true)"
+          mkdir -p _result
+          go run ./hack/distro-entry result --id "${ID}" --arch "${ARCH}" \
+            --outcome "${outcome}" --stage "${stage}" --digest "${digest}" \
+            --run-url "${RUN_URL}" | tee _result/result.json
+      - name: Upload result
+        if: ${{ !cancelled() && (steps.boot.outcome == 'success' || steps.boot.outcome == 'failure') }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: distro-result-${{ matrix.id }}-${{ matrix.arch }}
+          path: _result/result.json
+          if-no-files-found: error
+          overwrite: true
+      - name: Upload serial log
+        if: steps.boot.outcome == 'failure'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: distro-serial-log-${{ matrix.id }}-${{ matrix.arch }}
+          path: _out/serial.log
+          if-no-files-found: ignore
+          overwrite: true
+      # The boot step is continue-on-error so the result is written
+      # either way; this makes the leg itself red.
+      - name: Fail the leg
+        if: steps.boot.outcome == 'failure'
+        run: exit 1
+
+  report:
+    # Opens, updates and closes the per-entry issues from the result
+    # artifacts. Only for scheduled runs and runs asked to report (which
+    # is how a release starts this workflow); a plain manual run,
+    # typically with a filter, leaves the issues alone. Runs even when
+    # legs failed or were cancelled; an entry without a result is left
+    # alone.
+    needs: [matrix, boot]
+    if: ${{ always() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.report)) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # One report at a time across runs: a release dispatch (a tag ref)
+    # and the nightly run have different workflow concurrency groups, and
+    # both could otherwise create the same issue.
+    concurrency:
+      group: distro-report
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # Each artifact lands in a directory of its own under _results. There
+      # is nothing to download when no leg got as far as writing a result.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true
+        with:
+          pattern: distro-result-*
+          path: _results
+      - name: Report
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: go run ./hack/distro-report --results _results --run-url "${RUN_URL}" --event "${EVENT_NAME}"
