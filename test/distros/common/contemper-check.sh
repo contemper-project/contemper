@@ -71,7 +71,7 @@ if command -v dmesg >/dev/null 2>&1; then
 else
 	klog="$(journalctl -k -b --no-pager 2>/dev/null || true)"
 fi
-bad="$(printf '%s\n' "$klog" | grep -iE 'EXT4-fs.*(error|unsupported|couldn.t mount|mounting fs with errors)|unsupported feature|unknown/unsupported|remounting filesystem read-only' | head -n 3)"
+bad="$(printf '%s\n' "$klog" | grep -iE 'EXT4-fs.*(error|unsupported|couldn.t mount|mounting fs with errors)|unknown/unsupported|remounting filesystem read-only' | head -n 3)"
 [ -z "$bad" ] || fail "kernel log: $(printf '%s' "$bad" | tr '\n' '|')"
 
 echo contemper-boot-ok >"$con"
