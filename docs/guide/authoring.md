@@ -35,7 +35,8 @@ Three clarifications:
   that will boot the image. Pass `--no-hostonly` or the equivalent; for
   mkinitcpio, that means dropping its `autodetect` hook from `HOOKS` in
   `/etc/mkinitcpio.conf`, since that hook is what makes its initrd
-  host-only in the first place.
+  host-only in the first place. [Distributions](distributions.md) lists
+  the setting for each family.
 
 ## The fixed-path contract
 
@@ -145,4 +146,6 @@ same with systemd as init and `initramfs-tools` generating the initrd, for
 a merged-`/usr`, systemd-based starting point instead.
 `examples/archlinux/Containerfile` is the same again with `mkinitcpio`
 generating the initrd (amd64 only, since that's all the official
-`archlinux` base image is published for).
+`archlinux` base image is published for). For other distributions, see
+[Distributions](distributions.md), which has notes per family and a
+Containerfile for each.
