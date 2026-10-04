@@ -252,7 +252,7 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 	secureBoot, err := source.SecureBoot(cfg, bootMode)
 	if err != nil {
 		rep.Fail("secure boot", err.Error(), "")
-		return err
+		return convertedBundle{}, err
 	}
 	if secureBoot {
 		rep.Line("✅", "secure boot", "requested")
@@ -550,7 +550,7 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 		if secureBoot {
 			if err := validate.CheckSecureBoot(rfs, val.Bootloader); err != nil {
 				rep.Fail("secure boot", err.Error(), "with "+source.SecureBootLabel+"=\"true\" the bootloader must be signed (this only checks that a signature is present, not that firmware trusts it)")
-				return err
+				return convertedBundle{}, err
 			}
 		}
 		reportBootloader(rep, val.Bootloader)
