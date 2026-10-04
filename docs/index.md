@@ -51,6 +51,8 @@ in the VM, once the disk boots.
   convert it, and boot it.
 - [Authoring an image](guide/authoring.md): what your image has to
   provide, and what contemper reads from it.
+- [Distributions](guide/distributions.md): what each distribution family
+  needs, and which ones are covered.
 - [How conversion works](guide/how-it-works.md): the pipeline, step by
   step.
 - [Comparison](comparison.md): how contemper relates to bootc, Packer,

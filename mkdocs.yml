@@ -63,6 +63,7 @@ nav:
   - Getting started: getting-started.md
   - Guide:
       - Authoring an image: guide/authoring.md
+      - Distributions: guide/distributions.md
       - How conversion works: guide/how-it-works.md
       - The disk and VM lifecycle: guide/disk.md
       - Bootloader images: guide/bootloader-images.md
