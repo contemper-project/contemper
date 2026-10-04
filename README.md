@@ -94,15 +94,16 @@ contemper is pre-1.0: the CLI and the bundle format may still change.
 
 **Works today:** `convert` for the qemu target, `build` (with Docker;
 podman support is planned), and `deploy --to local-qemu`. Images can also
-bring their own bootloader and update their kernel in place. Support images
-can declare variants, selected by what's actually present in your image
-(an init system, a first-boot mechanism). Volumes are supported too:
+bring their own bootloader and update their kernel in place, with Secure
+Boot support. `convert` and `deploy` handle several architectures at
+once. Support images can declare variants, selected by what's actually
+present in your image (an init system, a first-boot mechanism). Volumes are supported too:
 declare one with `VOLUME` in your build file, and contemper sizes,
 formats and mounts it in the guest through a first-boot helper,
 persisted across redeploys for `local-qemu` instances.
 
-**Planned:** a `publish` adapter through your usual container tooling,
-then an Incus target and provider. See the
+**Planned:** building with podman, and an Incus target with `publish` and
+`deploy`. See the
 [roadmap](docs/design/roadmap.md) for the rest.
 
 ## Documentation
