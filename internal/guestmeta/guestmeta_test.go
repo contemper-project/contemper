@@ -162,6 +162,13 @@ func TestAppendFstabNoDuplicate(t *testing.T) {
 	}
 }
 
+func TestAppendFstabAddsRepeatedLineOnce(t *testing.T) {
+	updated, changed := guestmeta.AppendFstab([]byte("a\n"), []string{"b", "b", "a"})
+	if !changed || string(updated) != "a\nb\n" {
+		t.Errorf("AppendFstab = %q, %v; want %q, true", updated, changed, "a\nb\n")
+	}
+}
+
 func TestAppendFstabAddsMissingTrailingNewline(t *testing.T) {
 	existing := []byte("LABEL=contemper-root / ext4 rw,relatime 0 1") // no trailing \n
 	line := guestmeta.FstabLine("data", "/data")

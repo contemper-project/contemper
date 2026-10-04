@@ -236,8 +236,9 @@ var fstabEscaper = strings.NewReplacer(`\`, `\134`, " ", `\040`, "\t", `\011`, "
 // that isn't already present appended, preserving existing content
 // (and its own line ordering) untouched. changed is false when every
 // line was already present, so the caller can skip rewriting the file
-// entirely. A missing trailing newline on existing content is added
-// before appending.
+// entirely. A line that appears more than once in lines is added once.
+// A missing trailing newline on existing content is added before
+// appending.
 func AppendFstab(existing []byte, lines []string) (updated []byte, changed bool) {
 	have := map[string]bool{}
 	for _, l := range strings.Split(string(existing), "\n") {
@@ -255,6 +256,7 @@ func AppendFstab(existing []byte, lines []string) (updated []byte, changed bool)
 		}
 		b.WriteString(l)
 		b.WriteByte('\n')
+		have[l] = true // a line repeated in lines is added once
 		changed = true
 	}
 	return b.Bytes(), changed
