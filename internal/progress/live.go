@@ -117,7 +117,10 @@ func (s *Stage) draw() {
 	progress := s.progress
 	s.mu.Unlock()
 
-	line := fmt.Sprintf("%c  %s %c %s", []rune(s.icon)[0], s.label, frame, elapsed)
+	// Same shape as Done's final line: an empty icon leaves the two-space
+	// gap rather than panicking, and the whole icon is shown, sanitized
+	// like the rest of the line since this write bypasses println.
+	line := fmt.Sprintf("%s  %s %c %s", SanitizeLine(s.icon), s.label, frame, elapsed)
 	if progress != "" {
 		line += "  " + progress
 	}

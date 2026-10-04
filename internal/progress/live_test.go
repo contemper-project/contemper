@@ -75,3 +75,21 @@ func TestStopWaitsForInFlightDraw(t *testing.T) {
 		t.Errorf("output does not end with the final line: %q", got)
 	}
 }
+
+// TestDrawIconShapes covers an empty icon (which used to panic), a
+// multi-rune icon, and one with a control character.
+func TestDrawIconShapes(t *testing.T) {
+	for _, tc := range []struct{ icon, want string }{
+		{"", "\r\x1b[K  lbl ⠋ 0s"},
+		{"⚠️", "\r\x1b[K⚠️  lbl ⠋ 0s"},
+		{"\x1b", "\r\x1b[K\\x1b  lbl ⠋ 0s"},
+	} {
+		w := &syncBuf{}
+		r := New(w, ModeTTY, false, false)
+		s := &Stage{r: r, icon: tc.icon, label: "lbl", start: time.Now()}
+		s.draw()
+		if got := w.String(); got != tc.want {
+			t.Errorf("icon %q: draw wrote %q, want %q", tc.icon, got, tc.want)
+		}
+	}
+}
