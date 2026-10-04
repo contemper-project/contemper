@@ -93,3 +93,28 @@ func TestDrawIconShapes(t *testing.T) {
 		}
 	}
 }
+
+// TestDoneTwicePrintsOnce: a second Done (or a Done after Fail) on a
+// stopped stage must not print the final line again.
+func TestDoneTwicePrintsOnce(t *testing.T) {
+	r, w := newTTY(false)
+	s := r.BeginStage("📦", "pulling")
+	s.Done("✔", "pulled", "")
+	s.Done("✔", "pulled", "")
+	s.Fail("pull", "late", "")
+	if got, want := strings.Count(w.String(), "pulled\n"), 1; got != want {
+		t.Errorf("final line printed %d times, want %d; output %q", got, want, w.String())
+	}
+	if strings.Contains(w.String(), "late") {
+		t.Errorf("Fail after Done printed: %q", w.String())
+	}
+
+	var plain syncBuf
+	pr := New(&plain, ModePlain, false, false)
+	ps := pr.BeginStage("📦", "pulling")
+	ps.Done("✔", "pulled", "")
+	ps.Done("✔", "pulled", "")
+	if got, want := plain.String(), "✔  pulled\n"; got != want {
+		t.Errorf("plain output = %q, want %q", got, want)
+	}
+}

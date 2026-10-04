@@ -147,16 +147,19 @@ func (s *Stage) clearLine() {
 	s.r.mu.Unlock()
 }
 
-func (s *Stage) stop() {
+// stop halts the spinner and detaches the stage from the reporter. It
+// reports whether this call was the one that stopped it, false if the
+// stage was already stopped (or s is nil).
+func (s *Stage) stop() bool {
 	if s == nil {
-		return
+		return false
 	}
 	s.mu.Lock()
 	already := s.stopped
 	s.stopped = true
 	s.mu.Unlock()
 	if already {
-		return
+		return false
 	}
 	if s.stopCh != nil {
 		close(s.stopCh)
@@ -173,16 +176,17 @@ func (s *Stage) stop() {
 		}
 		s.r.mu.Unlock()
 	}
+	return true
 }
 
 // Done stops the stage and prints its single final line: the doc-style
 // "icon  label  detail" - in TTY mode replacing the live spinner line in
-// place, in plain mode as the stage's only output line.
+// place, in plain mode as the stage's only output line. Only the first
+// Done or Fail on a stage prints; later calls are no-ops.
 func (s *Stage) Done(icon, label, detail string) {
-	if s == nil {
+	if !s.stop() {
 		return
 	}
-	s.stop()
 	if s.r.tty {
 		s.r.mu.Lock()
 		_, _ = fmt.Fprint(s.r.w, "\r\x1b[K")
@@ -197,12 +201,12 @@ func (s *Stage) Done(icon, label, detail string) {
 	s.r.println(icon + "  " + twoCol(label, detail))
 }
 
-// Fail stops the stage and delegates to Reporter.Fail.
+// Fail stops the stage and delegates to Reporter.Fail. Like Done, it
+// does nothing on a stage that was already stopped.
 func (s *Stage) Fail(stage, reason, hint string) {
-	if s == nil {
+	if !s.stop() {
 		return
 	}
-	s.stop()
 	s.r.Fail(stage, reason, hint)
 }
 
