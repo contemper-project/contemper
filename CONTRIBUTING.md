@@ -161,7 +161,10 @@ title.
 Releases are cut by merging the release PR that
 [release-please](https://github.com/googleapis/release-please)
 maintains from these commit types and scopes; you don't need to bump
-versions or write changelog entries by hand.
+versions or write changelog entries by hand. The release is only tagged
+and published once CI, the release checks, CodeQL and the docs build have
+passed on the merged commit; if one of them fails, fix or re-run it, then
+re-run the failed jobs of the Release workflow run.
 
 ## Planning and priorities
 
