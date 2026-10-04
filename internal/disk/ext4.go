@@ -315,7 +315,7 @@ func buildDebugfsScript(ctx context.Context, rfs *rootfs.Rootfs, payloadDir stri
 		case tar.TypeDir:
 			fmt.Fprintf(&b, "mkdir %s\n", qp)
 			writeAttrs(&b, qp, hdr)
-			if err := writeXattrs(&b, payloadDir, &xattrN, qp, hdr); err != nil {
+			if err := writeXattrs(&b, payloadDir, &xattrN, qp, hdr, p, &warnings); err != nil {
 				return "", nil, fmt.Errorf("%s: %w", p, err)
 			}
 
@@ -331,7 +331,7 @@ func buildDebugfsScript(ctx context.Context, rfs *rootfs.Rootfs, payloadDir stri
 			}
 			fmt.Fprintf(&b, "write %s %s\n", qh, qp)
 			writeAttrs(&b, qp, hdr)
-			if err := writeXattrs(&b, payloadDir, &xattrN, qp, hdr); err != nil {
+			if err := writeXattrs(&b, payloadDir, &xattrN, qp, hdr, p, &warnings); err != nil {
 				return "", nil, fmt.Errorf("%s: %w", p, err)
 			}
 
@@ -342,7 +342,7 @@ func buildDebugfsScript(ctx context.Context, rfs *rootfs.Rootfs, payloadDir stri
 			}
 			fmt.Fprintf(&b, "symlink %s %s\n", qp, qt)
 			writeAttrs(&b, qp, hdr)
-			if err := writeXattrs(&b, payloadDir, &xattrN, qp, hdr); err != nil {
+			if err := writeXattrs(&b, payloadDir, &xattrN, qp, hdr, p, &warnings); err != nil {
 				return "", nil, fmt.Errorf("%s: %w", p, err)
 			}
 
@@ -395,7 +395,7 @@ func buildDebugfsScript(ctx context.Context, rfs *rootfs.Rootfs, payloadDir stri
 			}
 			b.WriteString("cd \"/\"\n")
 			writeAttrs(&b, qp, hdr)
-			if err := writeXattrs(&b, payloadDir, &xattrN, qp, hdr); err != nil {
+			if err := writeXattrs(&b, payloadDir, &xattrN, qp, hdr, p, &warnings); err != nil {
 				return "", nil, fmt.Errorf("%s: %w", p, err)
 			}
 
@@ -435,6 +435,22 @@ func writeAttrs(b *strings.Builder, quotedPath string, hdr *tar.Header) {
 	fmt.Fprintf(b, "sif %s mtime @%d\n", quotedPath, hdr.ModTime.Unix())
 }
 
+// xattrNamespaces are the Linux extended attribute namespaces ext4
+// stores; every attribute name starts with one of them.
+var xattrNamespaces = []string{"user.", "trusted.", "security.", "system."}
+
+// validXattrName reports whether name may be passed to debugfs: it has a
+// known namespace prefix, which also means it cannot start with '-' and
+// be read as an option.
+func validXattrName(name string) bool {
+	for _, ns := range xattrNamespaces {
+		if len(name) > len(ns) && strings.HasPrefix(name, ns) {
+			return true
+		}
+	}
+	return false
+}
+
 // writeXattrs appends one "ea_set -f <value-file> <path> <name>" debugfs
 // command per extended attribute on hdr, so file capabilities
 // (security.capability) and SELinux labels (security.selinux) survive
@@ -443,8 +459,10 @@ func writeAttrs(b *strings.Builder, quotedPath string, hdr *tar.Header) {
 // escape sequence for that, so each value is written to its own file
 // under payloadDir and passed via "-f" rather than inlined. *xattrN
 // numbers those files, distinct from writePayload's regular-file
-// content numbering.
-func writeXattrs(b *strings.Builder, payloadDir string, xattrN *int, quotedPath string, hdr *tar.Header) error {
+// content numbering. An attribute whose name has no known namespace
+// prefix is skipped with a warning (appended to *warnings, naming
+// entryPath), not passed to debugfs.
+func writeXattrs(b *strings.Builder, payloadDir string, xattrN *int, quotedPath string, hdr *tar.Header, entryPath string, warnings *[]string) error {
 	attrs := xattrs(hdr)
 	if len(attrs) == 0 {
 		return nil
@@ -456,6 +474,10 @@ func writeXattrs(b *strings.Builder, payloadDir string, xattrN *int, quotedPath 
 	sort.Strings(names)
 
 	for _, name := range names {
+		if !validXattrName(name) {
+			*warnings = append(*warnings, fmt.Sprintf("%s: extended attribute %q has no known namespace prefix, skipped", entryPath, name))
+			continue
+		}
 		hostName := fmt.Sprintf("x%06d", *xattrN)
 		*xattrN++
 		if err := os.WriteFile(path.Join(payloadDir, hostName), []byte(attrs[name]), 0o600); err != nil {
