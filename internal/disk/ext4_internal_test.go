@@ -3,6 +3,11 @@ package disk
 import (
 	"strings"
 	"testing"
+
+	v1 "github.com/google/go-containerregistry/pkg/v1"
+
+	"github.com/contemper-project/contemper/internal/imgtest"
+	"github.com/contemper-project/contemper/internal/rootfs"
 )
 
 func TestFindErrorMarkerIgnoresEchoedLines(t *testing.T) {
@@ -62,5 +67,46 @@ func TestRunCmdEnvPassesEnvironment(t *testing.T) {
 	}
 	if out != "/some/mke2fs.conf inherited" {
 		t.Errorf("env = %q, want the extra entry plus the inherited environment", out)
+	}
+}
+
+func TestBuildDebugfsScriptSkipsUnknownXattrNamespaces(t *testing.T) {
+	img, err := imgtest.Image(v1.Platform{OS: "linux", Architecture: "amd64"}, nil, []imgtest.File{
+		{Path: "f", Data: []byte("x"), Xattrs: map[string]string{
+			"user.ok":          "1",
+			"security.ok":      "2",
+			"-f/etc/passwd":    "3",
+			"bogus.name":       "4",
+			"user.":            "5",
+			"-user.looks.fine": "6",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rfs, err := rootfs.Build(t.Context(), img)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rfs.Close() }()
+
+	script, warnings, err := buildDebugfsScript(t.Context(), rfs, t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(script, "ea_set "); n != 2 {
+		t.Errorf("script has %d ea_set lines, want 2:\n%s", n, script)
+	}
+	for _, bad := range []string{"-f/etc/passwd", "bogus.name", "-user.looks.fine"} {
+		if strings.Contains(script, bad) {
+			t.Errorf("script mentions %q", bad)
+		}
+		found := false
+		for _, w := range warnings {
+			found = found || (strings.Contains(w, "/f:") && strings.Contains(w, bad))
+		}
+		if !found {
+			t.Errorf("no warning for %q in %q", bad, warnings)
+		}
 	}
 }
