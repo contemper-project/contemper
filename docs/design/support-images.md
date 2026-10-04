@@ -3,12 +3,6 @@
 Target customization lives in small overlay container images rather than
 in contemper's own code.
 
-!!! note "Implemented"
-    Plain root-filesystem support images, `requires.files`, and the
-    branch/variant mechanism described below are all implemented. See
-    [Support image annotations](../reference/support-image-annotations.md)
-    for the schema reference.
-
 **The base case is a plain root filesystem.** A support image can be
 nothing but a filesystem: its layers merge into the authored image and
 that's the entire mechanism. Everything below is additive. An image that

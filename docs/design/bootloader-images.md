@@ -1,11 +1,5 @@
 # Bootloader images
 
-!!! info "Implemented"
-    `convert` implements this contract: it reads the label, validates
-    `/boot/efi`, builds the larger ESP and records the mode in the bundle
-    manifest, and the guest mounts the ESP at `/boot/efi`.
-    `examples/debian-grub` is a complete Debian image built this way.
-
 For a practical comparison of the two modes and how to build a
 bootloader image, see the [guide](../guide/bootloader-images.md).
 
