@@ -23,6 +23,7 @@ import (
 	"github.com/contemper-project/contemper/internal/bundle"
 	"github.com/contemper-project/contemper/internal/disk"
 	"github.com/contemper-project/contemper/internal/guestmeta"
+	"github.com/contemper-project/contemper/internal/limits"
 	"github.com/contemper-project/contemper/internal/localqemu"
 	"github.com/contemper-project/contemper/internal/progress"
 	"github.com/contemper-project/contemper/internal/qemu"
@@ -42,6 +43,7 @@ type convertOptions struct {
 	outDir       string
 	arch         string
 	rootSize     string
+	maxRootfs    string
 	noFstab      bool
 	volumeHelper string
 	noVolHelper  bool
@@ -114,6 +116,11 @@ func runConvert(ctx context.Context, cmd *cobra.Command, opts convertOptions) er
 		if err != nil {
 			return fmt.Errorf("--root-size: %w", err)
 		}
+	}
+
+	ctx, err = withContentLimits(ctx, opts.maxRootfs)
+	if err != nil {
+		return err
 	}
 
 	ref, err := source.ParseRef(opts.sourceRef)
@@ -741,6 +748,9 @@ func checkConvertOptions(opts convertOptions) error {
 			return fmt.Errorf("--root-size: %w", err)
 		}
 	}
+	if _, err := withContentLimits(context.Background(), opts.maxRootfs); err != nil {
+		return err
+	}
 	if opts.supportRef != "" {
 		if _, err := source.ParseRef(opts.supportRef); err != nil {
 			return err
@@ -1296,4 +1306,17 @@ func machineArch(ociArch string) string {
 		return "x86_64"
 	}
 	return ociArch
+}
+
+// withContentLimits returns ctx carrying the image content limits,
+// raised to the size --max-rootfs-size gives (empty keeps the defaults).
+func withContentLimits(ctx context.Context, maxRootfs string) (context.Context, error) {
+	if maxRootfs == "" {
+		return ctx, nil
+	}
+	n, err := volume.ParseSize(maxRootfs)
+	if err != nil {
+		return ctx, fmt.Errorf("--max-rootfs-size: %w", err)
+	}
+	return limits.NewContext(ctx, limits.Default().WithMaxSize(n)), nil
 }

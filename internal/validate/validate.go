@@ -34,11 +34,11 @@ type Result struct {
 // Validate checks rfs against the fixed-path contract and returns the
 // file contents needed to build the UKI.
 func Validate(rfs *rootfs.Rootfs) (*Result, error) {
-	kernel, err := rfs.ReadFile(KernelPath)
+	kernel, err := rfs.ReadLargeFile(KernelPath)
 	if err != nil {
 		return nil, fmt.Errorf("kernel: %w", err)
 	}
-	initrd, err := rfs.ReadFile(InitrdPath)
+	initrd, err := rfs.ReadLargeFile(InitrdPath)
 	if err != nil {
 		return nil, fmt.Errorf("initrd: %w", err)
 	}

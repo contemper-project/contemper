@@ -5,7 +5,10 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/contemper-project/contemper/internal/limits"
 )
 
 func TestExtractTarLimitedSkipsLargeEntries(t *testing.T) {
@@ -43,5 +46,29 @@ func TestExtractTarLimitedSkipsLargeEntries(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(all, "blobs/sha256/layer")); err != nil {
 		t.Errorf("extractTar skipped an entry: %v", err)
+	}
+}
+
+func TestExtractTarEnforcesContentLimits(t *testing.T) {
+	// A header that claims 100 GiB and carries no data: refused from the
+	// header alone, with nothing written.
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := tw.WriteHeader(&tar.Header{Name: "blobs/sha256/huge", Mode: 0o644, Size: 100 << 30, Typeflag: tar.TypeReg}); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	err := extractTar(t.Context(), bytes.NewReader(buf.Bytes()), dir)
+	if err == nil || !strings.Contains(err.Error(), "blobs/sha256/huge") || !strings.Contains(err.Error(), "--max-rootfs-size") {
+		t.Fatalf("err = %v", err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Errorf("wrote %d entries before refusing", len(entries))
+	}
+
+	// The override raises the limit.
+	ctx := limits.NewContext(t.Context(), limits.Default().WithMaxSize(200<<30))
+	if err := extractTar(ctx, bytes.NewReader(buf.Bytes()), t.TempDir()); err != nil && strings.Contains(err.Error(), "limit") {
+		t.Errorf("override ignored: %v", err)
 	}
 }

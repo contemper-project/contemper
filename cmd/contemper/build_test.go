@@ -333,6 +333,7 @@ func TestBuildCommandChecksFlagsBeforeBuilding(t *testing.T) {
 		{args: []string{"--tag", "my-app:dev"}},
 		{args: []string{"--target", "no-such-target", "--tag", "my-app:dev"}},
 		{args: []string{"--target", "qemu", "--root-size", "lots", "--tag", "my-app:dev"}},
+		{args: []string{"--target", "qemu", "--max-rootfs-size", "lots", "--tag", "my-app:dev"}},
 		{args: []string{"--target", "qemu", "--tag", "Not A Tag"}},
 		{args: []string{"--target", "qemu", "--arch", "all", "--tag", "my-app:dev"}, wantErr: "build produces one architecture at a time"},
 		{args: []string{"--target", "qemu", "--arch", "amd64,arm64", "--tag", "my-app:dev"}, wantErr: "build produces one architecture at a time"},

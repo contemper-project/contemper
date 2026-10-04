@@ -24,6 +24,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
 
+	"github.com/contemper-project/contemper/internal/limits"
 	"github.com/contemper-project/contemper/internal/subprocess"
 )
 
@@ -869,8 +870,13 @@ const maxMetadataBlob = 4 << 20
 
 // extractTarLimited is extractTar that, when maxSize is positive, skips
 // regular files larger than maxSize (reading past them without writing).
+//
+// Whatever maxSize is, the extraction as a whole is bounded by the limits
+// in ctx (see package limits): each header is checked before any of its
+// content is written, so an entry that claims a huge size fails at once.
 func extractTarLimited(ctx context.Context, r io.Reader, dir string, maxSize int64) error {
 	tr := tar.NewReader(r)
+	count := limits.NewCounter(limits.FromContext(ctx))
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -880,6 +886,9 @@ func extractTarLimited(ctx context.Context, r io.Reader, dir string, maxSize int
 			return nil
 		}
 		if err != nil {
+			return err
+		}
+		if err := count.Check(hdr.Name, hdr.Size); err != nil {
 			return err
 		}
 		target := filepath.Join(dir, filepath.Clean(string(filepath.Separator)+hdr.Name))

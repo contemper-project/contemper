@@ -38,6 +38,7 @@ func registerConvertFlags(cmd *cobra.Command, opts *convertOptions) {
 	cmd.Flags().StringVarP(&opts.outDir, "out", "o", ".", "directory to write the bundle into, as a subdirectory named after the image (a previous bundle of that name is replaced)")
 	cmd.Flags().StringVar(&opts.arch, "arch", "", "target architecture: amd64, arm64, a comma-separated list of them, or all (every architecture the source provides; convert only); defaults to host")
 	cmd.Flags().StringVar(&opts.rootSize, "root-size", "", "override the root partition size (e.g. 2GiB)")
+	cmd.Flags().StringVar(&opts.maxRootfs, "max-rootfs-size", "", "raise the limit on the content read from an image (default: 64GiB in total, 32GiB for one file; e.g. 200GiB)")
 	cmd.Flags().BoolVar(&opts.noFstab, "no-fstab", false, "don't append fstab lines for declared volumes or the ESP")
 	cmd.Flags().StringVar(&opts.volumeHelper, "volume-helper", "", "override the volume-formatting support image (default: "+volume.DefaultHelperRef+")")
 	cmd.Flags().BoolVar(&opts.noVolHelper, "no-volume-helper", false, "don't merge the volume-formatting helper even if volumes are declared")
