@@ -62,6 +62,17 @@ func TestParsePERejectsImplausibleAlignment(t *testing.T) {
 	}
 }
 
+func TestParsePERejectsMissingMZ(t *testing.T) {
+	b := minimalPE()
+	b[0], b[1] = 0, 0
+	if _, err := parsePE(b); err == nil {
+		t.Error("parsePE accepted an image without the MZ signature")
+	}
+	if _, err := appendSections(b, []namedSection{{".x", []byte("x")}}); err == nil {
+		t.Error("appendSections accepted an image without the MZ signature")
+	}
+}
+
 // New sections start where the last one's raw data ends, so a stub whose
 // raw data does not end on a file alignment boundary cannot be extended
 // without breaking the alignment of what follows.

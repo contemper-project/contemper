@@ -91,6 +91,12 @@ func parsePE(data []byte) (*peImage, error) {
 	if len(data) < peSignatureOffset+4 {
 		return nil, fmt.Errorf("too small to be a PE image")
 	}
+	// debug/pe only follows e_lfanew when the file starts with "MZ" and
+	// otherwise reads a bare COFF object from offset 0, so an image
+	// without the DOS signature would be a different file to it than to us.
+	if data[0] != 'M' || data[1] != 'Z' {
+		return nil, fmt.Errorf("missing MZ signature")
+	}
 	lfanew := int(binary.LittleEndian.Uint32(data[peSignatureOffset:]))
 	if lfanew < 0 || lfanew+4+coffHeaderSize > len(data) {
 		return nil, fmt.Errorf("invalid e_lfanew %#x", lfanew)
