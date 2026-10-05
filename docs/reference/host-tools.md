@@ -64,7 +64,8 @@ falls back to (much slower) software emulation otherwise:
   session.
 - Deploying a bundle for a *different* architecture than the host's own
   always falls back to software emulation (TCG): neither HVF nor KVM can
-  run a foreign architecture's instructions.
+  run a foreign architecture's instructions. Under TCG, arm64 guests use
+  the `neoverse-n1` CPU model and amd64 guests use `max`.
 
 No extra package installs this: `/dev/kvm` comes from the kernel, and
 Homebrew's qemu on Apple Silicon/Intel Macs already includes HVF support.

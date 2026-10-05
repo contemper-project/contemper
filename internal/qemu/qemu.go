@@ -209,14 +209,28 @@ func BuildArgs(opts Options) (args []string, err error) {
 func accelInfo(arch string) (accel, cpu string) {
 	switch {
 	case arch != runtime.GOARCH:
-		return "tcg", "max"
+		return "tcg", tcgCPU(arch)
 	case runtime.GOOS == "darwin":
 		return "hvf", "host"
 	case kvmUsable():
 		return "kvm", "host"
 	default:
-		return "tcg", "max"
+		return "tcg", tcgCPU(arch)
 	}
+}
+
+// tcgCPU returns the CPU model for a guest of arch under TCG. An arm64
+// guest gets a concrete Armv8.2 core rather than "max": with UEFI
+// firmware built from edk2-stable202508 or newer, "max" advertises
+// features (LPA2 among them) that the firmware then mishandles, and the
+// guest hangs right after the firmware banner
+// (https://github.com/tianocore/edk2/issues/11962). Other architectures
+// are unaffected, so they keep "max".
+func tcgCPU(arch string) string {
+	if arch == "arm64" {
+		return "neoverse-n1"
+	}
+	return "max"
 }
 
 func kvmUsable() bool {
