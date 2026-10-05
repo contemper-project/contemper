@@ -313,7 +313,17 @@ func TestAccelInfoForeignArchUsesTCG(t *testing.T) {
 	if runtime.GOARCH == "arm64" {
 		foreign = "amd64"
 	}
-	if accel, cpu := accelInfo(foreign); accel != "tcg" || cpu != "max" {
-		t.Errorf("accelInfo(%s) on %s = %s, %s; want tcg, max", foreign, runtime.GOARCH, accel, cpu)
+	want := tcgCPU(foreign)
+	if accel, cpu := accelInfo(foreign); accel != "tcg" || cpu != want {
+		t.Errorf("accelInfo(%s) on %s = %s, %s; want tcg, %s", foreign, runtime.GOARCH, accel, cpu, want)
+	}
+}
+
+func TestTCGCPU(t *testing.T) {
+	// arm64 must not get "max": see tcgCPU.
+	for arch, want := range map[string]string{"arm64": "neoverse-n1", "amd64": "max"} {
+		if got := tcgCPU(arch); got != want {
+			t.Errorf("tcgCPU(%s) = %s; want %s", arch, got, want)
+		}
 	}
 }
