@@ -1,7 +1,7 @@
 # Distribution test image: Fedora (systemd, dracut). Parameterized by base
 # image and extended with the in-guest boot check from ../common. Build
 # with the context set to test/distros (hack/e2e.sh --distro does this).
-ARG BASE=fedora:44
+ARG BASE=fedora:46
 FROM ${BASE}
 
 LABEL io.contemper.ready="true"
