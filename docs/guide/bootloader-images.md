@@ -146,7 +146,9 @@ the bootloader. The points that matter:
   needs to change when the kernel does.
 - **`/etc/default/grub.d/contemper.cfg`** sets the serial console on the
   kernel command line, a one second menu timeout and
-  `GRUB_TERMINAL="console serial"`. `update-grub` applies it in the
+  `GRUB_TERMINAL="console serial"` on amd64. On arm64 GRUB has no serial
+  port of its own, and the firmware console already is the serial port,
+  so it is `GRUB_TERMINAL=console`. `update-grub` applies it in the
   guest.
 - **A bootstrap `/boot/grub/grub.cfg`** boots `/vmlinuz` and
   `/initrd.img` with `root=LABEL=contemper-root`, plus the previous

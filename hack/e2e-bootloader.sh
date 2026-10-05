@@ -175,8 +175,9 @@ if [ "${status}" -ne 0 ]; then
 	echo "e2e-bootloader.sh: deploy failed (exit ${status}); serial log: ${log}" >&2
 	exit "${status}"
 fi
-# GRUB's menu is printed on the serial console (GRUB_TERMINAL has
-# "serial"); without it the checks above prove nothing about GRUB.
+# GRUB's menu reaches the serial console: through its own serial terminal
+# on amd64, through the firmware console on arm64. Without it the checks
+# above prove nothing about GRUB.
 if ! grep -q 'GNU GRUB' "${plain}"; then
 	echo "e2e-bootloader.sh: no GRUB output reached the console (serial log: ${log})" >&2
 	exit 1

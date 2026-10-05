@@ -111,17 +111,20 @@ RUN case "$TARGETARCH" in \
 # Settings update-grub applies when it generates the configuration in the
 # guest: the kernel console is the architecture's serial console (same
 # split as ../debian), the menu waits one second, and GRUB itself talks on
-# the console and the serial port. The root device is not set here:
+# the console, plus the 16550 serial port on amd64. On arm64 the PL011 is
+# driven by the UEFI firmware as its console and GRUB has no serial port of
+# its own (it fails with "serial port `auto' isn't found"), so the firmware
+# console already is the serial port. The root device is not set here:
 # update-grub writes root=UUID= of the real filesystem.
 RUN case "$TARGETARCH" in \
-      amd64) console=ttyS0 ;; \
-      arm64) console=ttyAMA0 ;; \
+      amd64) console=ttyS0; terminal="console serial" ;; \
+      arm64) console=ttyAMA0; terminal=console ;; \
     esac && \
     mkdir -p /etc/default/grub.d && \
     printf '%s\n' \
       "GRUB_CMDLINE_LINUX=\"console=${console}\"" \
       'GRUB_TIMEOUT=1' \
-      'GRUB_TERMINAL="console serial"' \
+      "GRUB_TERMINAL=\"${terminal}\"" \
       >/etc/default/grub.d/contemper.cfg
 
 # Bootstrap configuration. It is only used for the very first boot: the
