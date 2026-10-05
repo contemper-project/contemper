@@ -3,7 +3,7 @@
 // Replaces dependabot.yml's version-update entries (gomod, github-actions,
 // uv) and additionally covers the version pins Dependabot can't see: the
 // GoReleaser version, the pinned golangci-lint version (.golangci-lint-version),
-// the `go` directive in go.mod, the example/test container base images,
+// the `go` directive in go.mod, the example container base images,
 // the local end-to-end test registry image, and the embedded
 // systemd-boot-efi stub version.
 // Dependabot's security alerts stay on separately (a repository setting,
@@ -113,6 +113,20 @@
       pinDigests: false,
       semanticCommitType: 'build',
       semanticCommitScope: 'containers',
+    },
+    // The distribution boot-test Containerfiles (test/distros/*/Containerfile)
+    // are left alone. Their `ARG BASE=` defaults only serve manual builds;
+    // the versions the boot tests actually run come from
+    // test/distros/matrix.json (hack/e2e.sh passes them as --build-arg BASE),
+    // which Renovate doesn't manage. A newly released distribution version
+    // is a deliberate addition there, together with its row in
+    // docs/guide/distributions.md, not something to bump in a default
+    // (a bump could even land on a pre-release tag such as fedora:rawhide's
+    // next number). This rule comes after the one above so it wins.
+    {
+      matchManagers: ['dockerfile'],
+      matchFileNames: ['test/distros/**'],
+      enabled: false,
     },
 
     // --- Custom-managed version pins Dependabot can't see (see the
