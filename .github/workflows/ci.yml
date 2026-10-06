@@ -282,7 +282,7 @@ jobs:
     # arm64-nightly.yml.
     needs: changes
     if: needs.changes.outputs.go == 'true'
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     name: e2e (debian-grub, arm64)
     timeout-minutes: 45
     steps:
