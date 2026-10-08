@@ -2,9 +2,9 @@
 
 Every `io.contemper.*` label a source image can set, read from the image
 config the same way `io.contemper.ready` is (see [Authoring an
-image](../guide/authoring.md)). A support image's own annotations are a
+image](../guide/authoring.md)). A support image's own labels are a
 separate schema: see [Support image
-annotations](support-image-annotations.md).
+labels](support-image-labels.md).
 
 | Label | Meaning |
 | --- | --- |

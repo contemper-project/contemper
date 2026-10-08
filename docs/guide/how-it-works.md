@@ -12,7 +12,7 @@
 | 6. Assemble | Write the target's output: a UEFI-bootable disk with a Unified Kernel Image, as qcow2. |
 
 Steps 1, 2 and 4 are identical for every target. Steps 3 and 5 are
-target-specific but driven entirely by *data*: annotations on support
+target-specific but driven entirely by *data*: labels on support
 images, which can be republished without a contemper release. Only step 6
 is target-specific code inside contemper.
 

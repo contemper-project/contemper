@@ -5,7 +5,7 @@ have to know about: an agent binary, service definitions, boot
 configuration. It is an ordinary OCI image.
 
 **In its simplest form it is just a root filesystem.** Its layers merge
-on top of your image, with no annotations and no conditions. Most
+on top of your image, with no labels and no conditions. Most
 support images need no more than this.
 
 ```console
@@ -23,10 +23,10 @@ software.
 ## Requirements
 
 A support image can declare paths your image must provide, as an
-annotation on its manifest:
+label on its image config:
 
-```text
-io.contemper.requires.files=/usr/bin/cloud-init,/sbin/openrc-init
+```dockerfile
+LABEL io.contemper.requires.files="/usr/bin/cloud-init,/sbin/openrc-init"
 ```
 
 Every listed path must exist in the merged filesystem, or the conversion
@@ -54,18 +54,56 @@ and the paths checked. Candidates are evaluated by manifest first, so
 losing variants are never downloaded.
 
 Resolution is one level deep. Only the target's own support image is
-examined for annotations; an image pulled in because it won a branch is
+examined for labels; an image pulled in because it won a branch is
 merged as-is. That rules out cycles and unbounded resolution chains by
 construction.
 
-A support image declares a branch with annotations on its own manifest,
-naming the branch and variant in the key:
+A support image declares a branch with labels on its own image config,
+naming the branch and variant in the key. It is built from an ordinary
+Containerfile, with the same tooling as any other image (`podman`,
+`buildah`, `docker buildx`):
 
-```text
-io.contemper.branch.init-system.openrc.requires.files=/sbin/openrc-init
-io.contemper.branch.init-system.openrc.image=ghcr.io/example/support-openrc:v5
-io.contemper.branch.init-system.systemd.requires.files=/usr/lib/systemd/systemd
-io.contemper.branch.init-system.systemd.image=ghcr.io/example/support-systemd:v5
+```dockerfile
+FROM scratch
+
+# Where the variants live. Defaults are tags; pin digests at build time.
+ARG OPENRC_IMAGE=ghcr.io/example/support-openrc:v5
+ARG SYSTEMD_IMAGE=ghcr.io/example/support-systemd:v5
+
+# The support image's own files, merged for every build.
+COPY --chmod=0755 agent /usr/local/bin/agent
+
+LABEL io.contemper.branch.init-system.openrc.requires.files="/sbin/openrc-init" \
+      io.contemper.branch.init-system.openrc.image="${OPENRC_IMAGE}" \
+      io.contemper.branch.init-system.systemd.requires.files="/usr/lib/systemd/systemd" \
+      io.contemper.branch.init-system.systemd.image="${SYSTEMD_IMAGE}"
+```
+
+Each variant is itself a Containerfile that is just files:
+
+```dockerfile
+FROM scratch
+COPY --chmod=0644 agent.openrc /etc/init.d/agent
+```
+
+Build and push the variants first, as multi-arch images, then build the
+support image with each variant pinned by the digest of its pushed index,
+so that a given support image always names exactly the variant images it
+was built against. Each variant, and the support image itself, resolves
+per architecture the same way as any other image:
+
+```console
+$ for v in openrc systemd; do
+    podman build --platform linux/amd64,linux/arm64 \
+        --manifest ghcr.io/example/support-$v:v5 -f Containerfile.$v .
+    podman manifest push --digestfile $v.digest \
+        ghcr.io/example/support-$v:v5 docker://ghcr.io/example/support-$v:v5
+  done
+$ podman build --platform linux/amd64,linux/arm64 \
+    --manifest ghcr.io/example/support:v5 \
+    --build-arg OPENRC_IMAGE=ghcr.io/example/support-openrc@$(cat openrc.digest) \
+    --build-arg SYSTEMD_IMAGE=ghcr.io/example/support-systemd@$(cat systemd.digest) .
+$ podman manifest push ghcr.io/example/support:v5 docker://ghcr.io/example/support:v5
 ```
 
 Given an image with `/sbin/openrc-init` present, `convert` fetches and
@@ -100,11 +138,56 @@ also happened to already exist is still counted; a removal is counted
 whether or not there was ever anything at that path to remove. Both
 numbers are purely informational and aren't recorded in the bundle.
 
-The full annotation schema, the resolution algorithm, and a worked
-example with two branches are in [Support image
-annotations](../reference/support-image-annotations.md); why the
-mechanism looks the way it does is in [Design: support image
+The full label schema, the resolution algorithm, and a worked example
+with two branches are in [Support image
+labels](../reference/support-image-labels.md); why the mechanism looks
+the way it does is in [Design: support image
 resolution](../design/support-images.md).
+
+## Where variants may live
+
+A support image pulled from a registry may name variants in any registry
+or namespace. A variant in the same registry and namespace as the
+support image is pulled with your registry credentials, so a private
+support image can have private variants. Anywhere else, the variant is
+pulled anonymously, without your credentials, and a private image there
+fails with the registry's authorization error. The image's labels are
+content the image controls; this keeps them from making contemper pull a
+private image you have access to. The details are in [Support image
+labels](../reference/support-image-labels.md#keys).
+
+## Extending a published support image
+
+Because the declarations are image labels, a support image can be
+extended with an ordinary `FROM`. The result inherits the labels, so the
+published variants still apply, and the files you add merge in with the
+support image's own:
+
+```dockerfile
+FROM ghcr.io/contemper-project/incus-support:v1
+COPY --chmod=0644 my-agent.conf /etc/my-agent/agent.conf
+```
+
+Build it, push it, and pass it with `--support`. The inherited variants
+live in `contemper-project`, outside your namespace, so they are pulled
+anonymously; that works because the published ones are public. In
+general, a variant outside the derived image's own registry and
+namespace is fetched without credentials, so it must be public.
+
+To change what one variant contributes, override its `.image` label with
+an image of your own, built `FROM` that variant so it keeps everything
+the original provides:
+
+```dockerfile
+FROM ghcr.io/contemper-project/incus-support:v1
+LABEL io.contemper.branch.init-system.openrc.image="registry.example/team/my-openrc:v1"
+```
+
+```dockerfile
+# registry.example/team/my-openrc:v1
+FROM ghcr.io/contemper-project/incus-support-init-system-openrc:v1
+COPY --chmod=0755 my-openrc-hook /etc/local.d/my-hook.start
+```
 
 ## Naming
 
@@ -121,6 +204,6 @@ contemper's own support images (the ones a target uses by default; see
 
 This is a naming convention for contemper's own images, not a
 requirement the resolution mechanism enforces: a support image's
-`io.contemper.branch.*.image` annotations can point anywhere. Following
+`io.contemper.branch.*.image` labels can point anywhere. Following
 it just keeps a target's own images discoverable and consistently
 named.
