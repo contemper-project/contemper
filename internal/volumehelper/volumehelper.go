@@ -80,7 +80,7 @@ type Result struct {
 	Resolved []support.Resolved
 	// Variants is Resolved rendered as manifest records.
 	Variants []bundle.SupportVariant
-	// Schema is ref's parsed annotation schema, so the caller can also
+	// Schema is ref's parsed label schema, so the caller can also
 	// check its generic io.contemper.requires.files predicate against
 	// the final merged rootfs.
 	Schema *support.Schema
@@ -99,7 +99,7 @@ type Result struct {
 // A ref with no declared branches (a custom --volume-helper override
 // that isn't itself variant-aware) resolves with a nil Resolved/Variants
 // and is merged as a plain overlay, the same as a support image with no
-// annotations.
+// labels.
 //
 // On error, everything Merge opened so far is closed before it returns;
 // on success that's the caller's responsibility (Result.Img and each of
@@ -124,15 +124,7 @@ func Merge(ctx context.Context, ref string, srcImg v1.Image, platform v1.Platfor
 		}
 	}()
 
-	manifest, err := helperImg.Image.Manifest()
-	if err != nil {
-		return nil, fmt.Errorf("reading volume helper manifest: %w", err)
-	}
-	indexAnnotations, err := source.IndexAnnotations(ctx, parsedRef, platform)
-	if err != nil {
-		return nil, fmt.Errorf("reading volume helper index: %w", err)
-	}
-	schema, err := support.Parse(support.MergeAnnotations(indexAnnotations, manifest.Annotations))
+	schema, err := support.Load(ctx, helperImg, platform)
 	if err != nil {
 		return nil, fmt.Errorf("volume helper %s: %w", ref, err)
 	}

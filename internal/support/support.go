@@ -1,25 +1,30 @@
-// Package support parses and resolves a support image's annotations: its
-// unconditional file requirements, and its branch/variant declarations.
+// Package support parses and resolves a support image's declarations
+// (carried as image config labels): its unconditional file requirements,
+// and its branch/variant declarations.
 //
-// See docs/reference/support-image-annotations.md for the schema this
-// package implements.
+// See docs/reference/support-image-labels.md for the schema this package
+// implements.
 package support
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"sort"
 	"strings"
 
+	v1 "github.com/google/go-containerregistry/pkg/v1"
+
 	"github.com/contemper-project/contemper/internal/rootfs"
+	"github.com/contemper-project/contemper/internal/source"
 )
 
-// RequiresFilesAnnotation names a comma-separated list of absolute paths
-// that must exist in the final merged rootfs, set on the support image's
-// own manifest (or its index descriptor, see MergeAnnotations).
-const RequiresFilesAnnotation = "io.contemper.requires.files"
+// RequiresFilesLabel names a comma-separated list of absolute paths
+// that must exist in the final merged rootfs, set as a label on the
+// support image's config (see MergeDeclarations for the fallback sources).
+const RequiresFilesLabel = "io.contemper.requires.files"
 
-// branchPrefix introduces every branch/variant annotation key:
+// branchPrefix introduces every branch/variant label key:
 // "io.contemper.branch.<branch>.<rest>".
 const branchPrefix = "io.contemper.branch."
 
@@ -53,35 +58,54 @@ type Branch struct {
 	Default string
 }
 
-// Schema is a support image's fully parsed annotation set.
+// Schema is a support image's fully parsed declaration set.
 type Schema struct {
-	// Requires lists RequiresFilesAnnotation's paths.
+	// Requires lists RequiresFilesLabel's paths.
 	Requires []string
 	// Branches is every declared branch, sorted by name.
 	Branches []Branch
 }
 
-// MergeAnnotations combines a support image's index-descriptor
-// annotations (the fallback) with its platform manifest's annotations
-// (which win on any key present in both), as
-// docs/reference/support-image-annotations.md specifies. Either map may
-// be nil.
-func MergeAnnotations(indexAnnotations, manifestAnnotations map[string]string) map[string]string {
-	merged := make(map[string]string, len(indexAnnotations)+len(manifestAnnotations))
-	for k, v := range indexAnnotations {
-		merged[k] = v
-	}
-	for k, v := range manifestAnnotations {
-		merged[k] = v
+// MergeDeclarations combines the places a support image's declarations
+// can live, in precedence order: image config labels, then manifest
+// annotations, then index descriptor annotations. Any map may be nil.
+//
+// TODO(support-labels): remove the annotation fallback once the
+// published support images (volumes-support, incus-support) carry
+// labels.
+func MergeDeclarations(labels, manifestAnnotations, indexAnnotations map[string]string) map[string]string {
+	merged := make(map[string]string, len(labels)+len(manifestAnnotations)+len(indexAnnotations))
+	for _, m := range []map[string]string{indexAnnotations, manifestAnnotations, labels} {
+		for k, v := range m {
+			merged[k] = v
+		}
 	}
 	return merged
 }
 
-// Parse reads annotations (as produced by MergeAnnotations, or a plain
-// manifest's annotations when there is no index fallback) into a Schema,
+// Load reads and parses the schema declared by img, a loaded support
+// image (or volume helper): its config labels, with the manifest and
+// index descriptor annotations as a fallback (see MergeDeclarations).
+func Load(ctx context.Context, img *source.Image, platform v1.Platform) (*Schema, error) {
+	cfg, err := img.Image.ConfigFile()
+	if err != nil {
+		return nil, fmt.Errorf("reading support image config: %w", err)
+	}
+	manifest, err := img.Image.Manifest()
+	if err != nil {
+		return nil, fmt.Errorf("reading support image manifest: %w", err)
+	}
+	indexAnnotations, err := source.IndexAnnotations(ctx, img.Ref, platform)
+	if err != nil {
+		return nil, fmt.Errorf("reading support image index: %w", err)
+	}
+	return Parse(MergeDeclarations(cfg.Config.Labels, manifest.Annotations, indexAnnotations))
+}
+
+// Parse reads declarations (as produced by MergeDeclarations) into a Schema,
 // validating branch/variant names and each branch's shape as it goes.
 func Parse(annotations map[string]string) (*Schema, error) {
-	schema := &Schema{Requires: splitPaths(annotations[RequiresFilesAnnotation])}
+	schema := &Schema{Requires: splitPaths(annotations[RequiresFilesLabel])}
 
 	type building struct {
 		variants map[string]*Variant
@@ -126,14 +150,14 @@ func Parse(annotations map[string]string) (*Schema, error) {
 		rest := strings.TrimPrefix(key, branchPrefix)
 		segs := strings.Split(rest, ".")
 		if len(segs) < 2 || !nameRe.MatchString(segs[0]) {
-			return nil, fmt.Errorf("invalid support-image annotation %q", key)
+			return nil, fmt.Errorf("invalid support-image label %q", key)
 		}
 		b := branch(segs[0])
 		switch {
 		case len(segs) == 2 && segs[1] == "default":
 			name := strings.TrimSpace(value)
 			if !nameRe.MatchString(name) {
-				return nil, fmt.Errorf("invalid support-image annotation %q: default %q is not a valid variant name", key, name)
+				return nil, fmt.Errorf("invalid support-image label %q: default %q is not a valid variant name", key, name)
 			}
 			b.def = name
 			variant(b, name) // a default is a declared variant even if named nowhere else
@@ -145,7 +169,7 @@ func Parse(annotations map[string]string) (*Schema, error) {
 			variant(b, segs[1]).Requires = splitPaths(value)
 
 		default:
-			return nil, fmt.Errorf("invalid support-image annotation %q", key)
+			return nil, fmt.Errorf("invalid support-image label %q", key)
 		}
 	}
 

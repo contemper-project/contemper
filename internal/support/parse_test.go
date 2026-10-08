@@ -1,6 +1,7 @@
 package support_test
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -9,7 +10,7 @@ import (
 
 func TestParseTopLevelRequires(t *testing.T) {
 	schema, err := support.Parse(map[string]string{
-		support.RequiresFilesAnnotation: " /usr/bin/cloud-init , /sbin/openrc-init ,,",
+		support.RequiresFilesLabel: " /usr/bin/cloud-init , /sbin/openrc-init ,,",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -149,15 +150,14 @@ func TestParseVariantWithoutPredicateOrDefaultIsAnError(t *testing.T) {
 	}
 }
 
-func TestMergeAnnotationsManifestWins(t *testing.T) {
-	merged := support.MergeAnnotations(
-		map[string]string{"io.contemper.requires.files": "/from-index", "io.contemper.branch.x.y.image": "index-image"},
-		map[string]string{"io.contemper.requires.files": "/from-manifest"},
+func TestMergeDeclarationsPrecedence(t *testing.T) {
+	merged := support.MergeDeclarations(
+		map[string]string{"a": "label"},
+		map[string]string{"a": "manifest", "b": "manifest"},
+		map[string]string{"a": "index", "b": "index", "c": "index"},
 	)
-	if merged["io.contemper.requires.files"] != "/from-manifest" {
-		t.Errorf("manifest should win: got %q", merged["io.contemper.requires.files"])
-	}
-	if merged["io.contemper.branch.x.y.image"] != "index-image" {
-		t.Errorf("index-only key should survive: got %q", merged["io.contemper.branch.x.y.image"])
+	want := map[string]string{"a": "label", "b": "manifest", "c": "index"}
+	if !reflect.DeepEqual(merged, want) {
+		t.Errorf("merged = %v, want %v", merged, want)
 	}
 }

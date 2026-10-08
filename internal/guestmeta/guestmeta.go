@@ -46,8 +46,8 @@ type ImageRef struct {
 
 // pullSpec combines ref and digest into a single "ref@digest" pull spec
 // for /etc/contemper/build, unless ref is already digest-qualified (a
-// variant annotation can point at its image either way - see
-// docs/reference/support-image-annotations.md - and a support image
+// variant label can point at its image either way - see
+// docs/reference/support-image-labels.md - and a support image
 // that pins its own variants by digest would otherwise end up with both
 // appended, e.g. "...@sha256:x@sha256:x").
 func pullSpec(ref, digest string) string {
