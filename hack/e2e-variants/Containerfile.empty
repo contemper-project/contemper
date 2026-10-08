@@ -1,0 +1,5 @@
+# A support image with no files of its own, for the failure cases of
+# ../e2e-variants.sh. The script adds the labels under test with
+# `--label`.
+FROM scratch
+LABEL io.contemper.e2e.fixture="declarations-only"

@@ -1,0 +1,17 @@
+# The dummy support image of ../e2e-variants.sh: two branches, whose
+# variant references are passed as build args.
+FROM scratch
+
+ARG OPENRC_IMAGE
+ARG SYSTEMD_IMAGE
+ARG CUSTOM_IMAGE
+
+COPY --chmod=0644 files/support-marker /etc/contemper-support-marker
+
+LABEL io.contemper.branch.init-system.openrc.requires.files="/sbin/openrc" \
+      io.contemper.branch.init-system.openrc.image="${OPENRC_IMAGE}" \
+      io.contemper.branch.init-system.systemd.requires.files="/usr/lib/systemd/systemd" \
+      io.contemper.branch.init-system.systemd.image="${SYSTEMD_IMAGE}" \
+      io.contemper.branch.extras.custom.requires.files="/etc/contemper-e2e-extras-marker" \
+      io.contemper.branch.extras.custom.image="${CUSTOM_IMAGE}" \
+      io.contemper.branch.extras.default="none"
