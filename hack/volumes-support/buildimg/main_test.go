@@ -12,7 +12,7 @@ import (
 // TestBuildIndexAnnotations checks that buildIndex sets the OCI
 // annotations on both the index itself and each platform manifest,
 // while leaving the per-descriptor annotations (the ones contemper's
-// own reader looks at, docs/reference/support-image-annotations.md)
+// own reader looks at, docs/reference/support-image-labels.md)
 // exactly as given.
 func TestBuildIndexAnnotations(t *testing.T) {
 	dir := t.TempDir()

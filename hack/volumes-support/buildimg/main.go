@@ -8,7 +8,7 @@
 // architecture, not its files.
 //
 // It sets the base image's branch/variant annotations
-// (docs/reference/support-image-annotations.md) with each variant
+// (docs/reference/support-image-labels.md) with each variant
 // image's reference pinned BY DIGEST (the variant index's digest, which
 // resolves to the right platform on read, the same as any other
 // multi-platform reference), never a floating tag, so the support image

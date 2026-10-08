@@ -78,7 +78,7 @@ nav:
       - Source references: reference/sources.md
       - Bundle manifest: reference/bundle.md
       - Image labels: reference/labels.md
-      - Support image annotations: reference/support-image-annotations.md
+      - Support image labels: reference/support-image-labels.md
       - Host tools: reference/host-tools.md
   - Design:
       - Framing: design/index.md
