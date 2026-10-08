@@ -155,35 +155,53 @@ func FuzzParseAnnotations(f *testing.F) {
 	})
 }
 
-// FuzzMergeAnnotations checks that the manifest wins, that the result
-// holds exactly the union of the keys, and that the inputs are untouched.
-func FuzzMergeAnnotations(f *testing.F) {
-	f.Add("io.contemper.requires.files=/from-index\nk=v", "io.contemper.requires.files=/from-manifest")
-	f.Add("", "")
-	f.Add("a=1", "")
-	f.Add("", "a=2")
-	f.Fuzz(func(t *testing.T, index, manifest string) {
-		idx, man := annotationsFrom(index), annotationsFrom(manifest)
-		idxCopy, manCopy := annotationsFrom(index), annotationsFrom(manifest)
-		merged := support.MergeAnnotations(idx, man)
-		if !reflect.DeepEqual(idx, idxCopy) || !reflect.DeepEqual(man, manCopy) {
-			t.Fatalf("MergeAnnotations modified its input")
-		}
-		for k, v := range man {
-			if merged[k] != v {
-				t.Fatalf("manifest value for %q lost: %q", k, merged[k])
-			}
-		}
-		for k, v := range idx {
-			if _, inManifest := man[k]; !inManifest && merged[k] != v {
-				t.Fatalf("index value for %q lost: %q", k, merged[k])
-			}
+// FuzzMergeDeclarations checks the precedence (labels, then manifest,
+// then index), that the result holds exactly the union of the keys, and
+// that the inputs are untouched.
+func FuzzMergeDeclarations(f *testing.F) {
+	f.Add("io.contemper.requires.files=/from-index\nk=v", "io.contemper.requires.files=/from-manifest", "io.contemper.requires.files=/from-label")
+	f.Add("", "", "")
+	f.Add("a=1", "", "")
+	f.Add("", "a=2", "a=3")
+	f.Fuzz(func(t *testing.T, index, manifest, labels string) {
+		idx, man, lab := annotationsFrom(index), annotationsFrom(manifest), annotationsFrom(labels)
+		idxCopy, manCopy, labCopy := annotationsFrom(index), annotationsFrom(manifest), annotationsFrom(labels)
+		merged := support.MergeDeclarations(lab, man, idx)
+		if !reflect.DeepEqual(idx, idxCopy) || !reflect.DeepEqual(man, manCopy) || !reflect.DeepEqual(lab, labCopy) {
+			t.Fatalf("MergeDeclarations modified its input")
 		}
 		for k := range merged {
 			_, a := idx[k]
 			_, b := man[k]
-			if !a && !b {
+			_, c := lab[k]
+			if !a && !b && !c {
 				t.Fatalf("merged has extra key %q", k)
+			}
+		}
+		for k, v := range idx {
+			want := v
+			if mv, ok := man[k]; ok {
+				want = mv
+			}
+			if lv, ok := lab[k]; ok {
+				want = lv
+			}
+			if merged[k] != want {
+				t.Fatalf("merged[%q] = %q, want %q", k, merged[k], want)
+			}
+		}
+		for k, v := range man {
+			want := v
+			if lv, ok := lab[k]; ok {
+				want = lv
+			}
+			if merged[k] != want {
+				t.Fatalf("merged[%q] = %q, want %q", k, merged[k], want)
+			}
+		}
+		for k, v := range lab {
+			if merged[k] != v {
+				t.Fatalf("label value for %q lost: %q", k, merged[k])
 			}
 		}
 	})

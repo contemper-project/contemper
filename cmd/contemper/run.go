@@ -325,11 +325,7 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 		if err != nil {
 			return convertedBundle{}, fmt.Errorf("reading support image manifest: %w", err)
 		}
-		indexAnnotations, err := source.IndexAnnotations(ctx, supportRef, platform)
-		if err != nil {
-			return convertedBundle{}, fmt.Errorf("reading support image index: %w", err)
-		}
-		schema, err = support.Parse(support.MergeAnnotations(indexAnnotations, supportManifest.Annotations))
+		schema, err = support.Load(ctx, supportImg, platform)
 		if err != nil {
 			rep.Fail("support image", err.Error(), "")
 			return convertedBundle{}, err

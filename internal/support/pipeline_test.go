@@ -14,6 +14,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/registry"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/google/go-containerregistry/pkg/v1/empty"
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 
@@ -23,7 +24,7 @@ import (
 	"github.com/contemper-project/contemper/internal/support"
 )
 
-// This file exercises the full support-image pipeline - manifest read,
+// This file exercises the full support-image pipeline - config read,
 // schema parse, predicate resolution against the source's own merged
 // filesystem, then fetching only the winners and merging - against an
 // in-process registry, mirroring what cmd/contemper's convert pipeline
@@ -87,8 +88,30 @@ func pushImage(t *testing.T, host, repoTag string, img v1.Image) string {
 	return ref
 }
 
-// withAnnotations sets manifest-level annotations (not config labels) on
-// img, the way a real support image publishes its schema.
+// withLabels sets config labels on img, the way a real support image
+// publishes its schema (a Containerfile's LABEL instructions).
+func withLabels(t *testing.T, img v1.Image, labels map[string]string) v1.Image {
+	t.Helper()
+	cfg, err := img.ConfigFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg = cfg.DeepCopy()
+	if cfg.Config.Labels == nil {
+		cfg.Config.Labels = map[string]string{}
+	}
+	for k, v := range labels {
+		cfg.Config.Labels[k] = v
+	}
+	out, err := mutate.ConfigFile(img, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// withAnnotations sets manifest-level annotations on img: the
+// fallback source for images published before labels were used.
 func withAnnotations(img v1.Image, anns map[string]string) v1.Image {
 	return mutate.Annotations(img, anns).(v1.Image)
 }
@@ -110,17 +133,9 @@ func resolveAndMerge(t *testing.T, srcImg v1.Image, supportRef string, platform 
 	}
 	t.Cleanup(supportImg.Close)
 
-	manifest, err := supportImg.Image.Manifest()
+	schema, err := support.Load(t.Context(), supportImg, platform)
 	if err != nil {
-		t.Fatal(err)
-	}
-	indexAnnotations, err := source.IndexAnnotations(t.Context(), ref, platform)
-	if err != nil {
-		t.Fatal(err)
-	}
-	schema, err := support.Parse(support.MergeAnnotations(indexAnnotations, manifest.Annotations))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
+		t.Fatalf("Load schema: %v", err)
 	}
 
 	srcRfs, err := rootfs.Build(t.Context(), srcImg)
@@ -161,7 +176,7 @@ func resolveAndMerge(t *testing.T, srcImg v1.Image, supportRef string, platform 
 	return finalRfs, resolved
 }
 
-func TestPipelineIgnoresVariantImageOwnAnnotations(t *testing.T) {
+func TestPipelineIgnoresVariantImageOwnLabels(t *testing.T) {
 	host, _ := newTestRegistry(t)
 
 	src, err := imgtest.Image(linuxAMD64, nil, []imgtest.File{
@@ -172,7 +187,7 @@ func TestPipelineIgnoresVariantImageOwnAnnotations(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The variant image declares its own branch annotations, with an
+	// The variant image declares its own branch labels, with an
 	// invalid branch name so that if resolution ever mistakenly parsed
 	// them, it would fail loudly rather than silently. Resolution is
 	// exactly one level deep: this must never be read.
@@ -185,7 +200,7 @@ func TestPipelineIgnoresVariantImageOwnAnnotations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	variant = withAnnotations(variant, map[string]string{
+	variant = withLabels(t, variant, map[string]string{
 		"io.contemper.branch.Trap.oops.requires.files": "/", // invalid: uppercase branch name
 	})
 	variantRef := pushImage(t, host, "openrc:v1", variant)
@@ -194,7 +209,7 @@ func TestPipelineIgnoresVariantImageOwnAnnotations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	supportImg = withAnnotations(supportImg, map[string]string{
+	supportImg = withLabels(t, supportImg, map[string]string{
 		"io.contemper.branch.init-system.openrc.requires.files": "/sbin/openrc-init",
 		"io.contemper.branch.init-system.openrc.image":          variantRef,
 	})
@@ -242,7 +257,7 @@ func TestPipelineNeverFetchesLosingVariant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	supportImg = withAnnotations(supportImg, map[string]string{
+	supportImg = withLabels(t, supportImg, map[string]string{
 		"io.contemper.branch.init-system.openrc.requires.files":  "/sbin/openrc-init",
 		"io.contemper.branch.init-system.openrc.image":           openrcRef,
 		"io.contemper.branch.init-system.systemd.requires.files": "/usr/lib/systemd/systemd",
@@ -316,7 +331,7 @@ func TestPipelineMergeOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	supportImg = withAnnotations(supportImg, map[string]string{
+	supportImg = withLabels(t, supportImg, map[string]string{
 		"io.contemper.branch.aaa.a.requires.files": "/sbin/openrc-init",
 		"io.contemper.branch.aaa.a.image":          aRef,
 		"io.contemper.branch.bbb.b.requires.files": "/usr/bin/cloud-init",
@@ -340,5 +355,87 @@ func TestPipelineMergeOrder(t *testing.T) {
 	}
 	if _, ok := rfs.Lookup("/etc/support-only"); !ok {
 		t.Errorf("the support image's own layer should be merged in")
+	}
+}
+
+// TestSchemaSources checks each place a support image's declarations can
+// be read from, and that labels win over manifest annotations, which win
+// over index descriptor annotations.
+func TestSchemaSources(t *testing.T) {
+	host, _ := newTestRegistry(t)
+
+	base := func() v1.Image {
+		img, err := imgtest.Image(linuxAMD64, nil, []imgtest.File{{Path: "etc/", Typeflag: tar.TypeDir}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return img
+	}
+	decl := func(path string) map[string]string {
+		return map[string]string{support.RequiresFilesLabel: path}
+	}
+	// pushIndexed pushes img inside a one-entry index whose descriptor
+	// carries anns.
+	pushIndexed := func(repoTag string, img v1.Image, anns map[string]string) string {
+		t.Helper()
+		idx := mutate.AppendManifests(empty.Index, mutate.IndexAddendum{
+			Add: img,
+			Descriptor: v1.Descriptor{
+				Platform:    &linuxAMD64,
+				Annotations: anns,
+			},
+		})
+		ref := host + "/" + repoTag
+		tag, err := name.NewTag(ref, name.WeakValidation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := remote.WriteIndex(tag, idx); err != nil {
+			t.Fatal(err)
+		}
+		return ref
+	}
+
+	cases := []struct {
+		name string
+		ref  func() string
+		want string
+	}{
+		{"labels", func() string {
+			return pushImage(t, host, "labels:v1", withLabels(t, base(), decl("/from-labels")))
+		}, "/from-labels"},
+		{"manifest annotations", func() string {
+			return pushImage(t, host, "manifest:v1", withAnnotations(base(), decl("/from-manifest")))
+		}, "/from-manifest"},
+		{"index annotations", func() string {
+			return pushIndexed("index:v1", base(), decl("/from-index"))
+		}, "/from-index"},
+		{"labels over manifest and index", func() string {
+			img := withAnnotations(withLabels(t, base(), decl("/from-labels")), decl("/from-manifest"))
+			return pushIndexed("all:v1", img, decl("/from-index"))
+		}, "/from-labels"},
+		{"manifest over index", func() string {
+			return pushIndexed("mi:v1", withAnnotations(base(), decl("/from-manifest")), decl("/from-index"))
+		}, "/from-manifest"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ref, err := source.ParseRef(tc.ref())
+			if err != nil {
+				t.Fatal(err)
+			}
+			img, err := source.Load(t.Context(), ref, linuxAMD64)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer img.Close()
+			schema, err := support.Load(t.Context(), img, linuxAMD64)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(schema.Requires) != 1 || schema.Requires[0] != tc.want {
+				t.Errorf("Requires = %v, want [%s]", schema.Requires, tc.want)
+			}
+		})
 	}
 }

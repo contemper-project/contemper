@@ -27,7 +27,7 @@ func TestCheckRequiresSatisfied(t *testing.T) {
 	defer func() { _ = rfs.Close() }()
 
 	schema, err := support.Parse(map[string]string{
-		support.RequiresFilesAnnotation: "/usr/bin/cloud-init",
+		support.RequiresFilesLabel: "/usr/bin/cloud-init",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +51,7 @@ func TestCheckRequiresMissing(t *testing.T) {
 	defer func() { _ = rfs.Close() }()
 
 	schema, err := support.Parse(map[string]string{
-		support.RequiresFilesAnnotation: "/usr/bin/cloud-init, /etc/hostname",
+		support.RequiresFilesLabel: "/usr/bin/cloud-init, /etc/hostname",
 	})
 	if err != nil {
 		t.Fatal(err)

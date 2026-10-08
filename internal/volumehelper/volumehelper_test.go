@@ -46,8 +46,26 @@ func pushImage(t *testing.T, host, repoTag string, img v1.Image) string {
 	return ref
 }
 
-func withAnnotations(img v1.Image, anns map[string]string) v1.Image {
-	return mutate.Annotations(img, anns).(v1.Image)
+// withLabels sets config labels on img, the way a helper image declares
+// its branches.
+func withLabels(t *testing.T, img v1.Image, labels map[string]string) v1.Image {
+	t.Helper()
+	cfg, err := img.ConfigFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg = cfg.DeepCopy()
+	if cfg.Config.Labels == nil {
+		cfg.Config.Labels = map[string]string{}
+	}
+	for k, v := range labels {
+		cfg.Config.Labels[k] = v
+	}
+	out, err := mutate.ConfigFile(img, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
 
 // sourceWithTools builds a minimal source image providing every tool
@@ -126,7 +144,7 @@ func TestMergeResolvesWinningVariant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	helperImg = withAnnotations(helperImg, map[string]string{
+	helperImg = withLabels(t, helperImg, map[string]string{
 		"io.contemper.branch.init-system.openrc.requires.files":  "/sbin/openrc",
 		"io.contemper.branch.init-system.openrc.image":           openrcRef,
 		"io.contemper.branch.init-system.systemd.requires.files": "/usr/lib/systemd/systemd",
@@ -158,7 +176,7 @@ func TestMergeResolvesWinningVariant(t *testing.T) {
 // merged-/usr source image (real openrc at /usr/sbin/openrc, /sbin a
 // symlink to /usr/sbin - as on Fedora, Arch and current Debian/Ubuntu):
 // the "openrc" branch's requires.files is written as "/sbin/openrc" (see
-// docs/reference/support-image-annotations.md and
+// docs/reference/support-image-labels.md and
 // docs/guide/volumes.md), which only matches such an image because
 // rootfs.Resolve follows a symlink in an intermediate path segment, not
 // just the final one.
@@ -189,7 +207,7 @@ func TestMergeResolvesOnMergedUsr(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	helperImg = withAnnotations(helperImg, map[string]string{
+	helperImg = withLabels(t, helperImg, map[string]string{
 		"io.contemper.branch.init-system.openrc.requires.files":  "/sbin/openrc",
 		"io.contemper.branch.init-system.openrc.image":           openrcRef,
 		"io.contemper.branch.init-system.systemd.requires.files": "/usr/lib/systemd/systemd",
@@ -221,7 +239,7 @@ func TestMergeNoMatchNoDefaultMentionsNoVolumeHelper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	helperImg = withAnnotations(helperImg, map[string]string{
+	helperImg = withLabels(t, helperImg, map[string]string{
 		"io.contemper.branch.init-system.openrc.requires.files":  "/sbin/openrc",
 		"io.contemper.branch.init-system.systemd.requires.files": "/usr/lib/systemd/systemd",
 	})
