@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # End-to-end support-image variant test: build the Alpine example image,
 # a dummy support image with two branches ("init-system" and "extras")
-# and one variant image, push them to a local registry at
-# localhost:5555 (E2E_REGISTRY overrides), convert with `contemper convert --target qemu --support
-# <ref>`, assert the resolved variants recorded in contemper.json, then
-# boot the bundle exactly like hack/e2e.sh but waiting for the winning
-# variant's own marker. It also exercises two failure cases (an
-# ambiguous branch and one with no match and no default) without
-# booting anything.
+# and one variant image, each from a Containerfile under
+# hack/e2e-variants/ with the same container engine, push them to a local
+# registry at localhost:5555 (E2E_REGISTRY overrides), convert with
+# `contemper convert --target qemu --support <ref>`, assert the resolved
+# variants recorded in contemper.json, then boot the bundle exactly like
+# hack/e2e.sh but waiting for the winning variant's own marker. It also
+# exercises two failure cases (an ambiguous branch and one with no match
+# and no default) without booting anything.
 #
 # Usage: hack/e2e-variants.sh [--timeout DURATION]
 #
@@ -20,15 +21,7 @@
 # source-code coverage instrumentation and collect the integration
 # coverage from every invocation below (including the two negative
 # convert cases) into it (see `go help testflag`'s GOCOVERDIR, and `go
-# tool covdata`). The e2e-variants buildimg helper is never instrumented.
-# Unset, nothing here changes.
-#
-# The support and variant images are built by hack/e2e-variants/buildimg
-# (see that command's doc comment for why: it lets this script set
-# manifest-level annotations the same way regardless of which container
-# engine built the Alpine example, rather than relying on
-# `podman build --annotation`/`docker buildx --annotation`, which differ
-# enough between engines and versions to be a poor fit here).
+# tool covdata`).
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -95,18 +88,14 @@ fi
 rm -rf "${OUT}"
 mkdir -p "${OUT}"
 
-buildimg="${OUT}/buildimg"
-echo "==> go build hack/e2e-variants/buildimg" >&2
-(cd "${REPO}" && go build -o "${buildimg}" ./hack/e2e-variants/buildimg)
-
 # --- local registry -------------------------------------------------------
 #
 # go-containerregistry (which contemper uses to talk to registries)
 # treats any "localhost:<port>" reference as plain HTTP automatically
-# (see name.Registry.Scheme in the vendored library), so no extra
-# insecure-registry configuration is needed on either contemper's side or
-# this script's: pushing to localhost:<port> and pulling it back with
-# `contemper convert --support` both just work.
+# (see name.Registry.Scheme in the vendored library), so contemper needs
+# no extra insecure-registry configuration to pull from it. The engines
+# pushing to it do: podman needs --tls-verify=false for a plain-HTTP
+# registry; docker already treats localhost as insecure.
 registry_started=0
 registry_up() { curl -fsS -o /dev/null "http://${REGISTRY_HOST}/v2/"; }
 
@@ -148,7 +137,7 @@ podman)
 	;;
 esac
 
-# --- dummy support image + one variant, pushed to the local registry ------
+# --- dummy support image + one variant, built and pushed ------------------
 #
 # Branch "init-system": variant "openrc" matches (the Alpine example has
 # /sbin/openrc) and contributes a local.d script; variant "systemd"
@@ -161,25 +150,38 @@ esac
 # exists) and, like "systemd" above, is never pushed; "none" is the
 # branch's declared default and is a no-op (no .image), exercising the
 # default path.
+#
+# The images are plain Containerfiles (FROM scratch), built with the same
+# engine as the Alpine example; the variant references reach the support
+# image's labels through build args.
 support_ref="${REPO_PREFIX}/support:${TAG}"
 openrc_ref="${REPO_PREFIX}/support-openrc:${TAG}"
 never_pushed_systemd_ref="${REPO_PREFIX}/support-systemd:not-pushed"
 never_pushed_custom_ref="${REPO_PREFIX}/support-custom:not-pushed"
 
-echo "==> pushing support-openrc variant image" >&2
-"${buildimg}" -ref "${openrc_ref}" -arch "${arch}" \
-	-exec "/etc/local.d/zzz-contemper-variant-openrc.start=${REPO}/hack/e2e-variants/files/openrc-local.start"
+# build_push REF CONTAINERFILE [BUILD-ARGS...]: build hack/e2e-variants/
+# CONTAINERFILE for the host architecture as REF and push it to the local
+# registry.
+build_push() {
+	local ref="$1" containerfile="$2"
+	shift 2
+	"${engine}" build --platform "linux/${arch}" -t "${ref}" \
+		-f "${REPO}/hack/e2e-variants/${containerfile}" "$@" \
+		"${REPO}/hack/e2e-variants" >&2
+	case "${engine}" in
+	podman) "${engine}" push --tls-verify=false "${ref}" >&2 ;;
+	*) "${engine}" push "${ref}" >&2 ;;
+	esac
+}
 
-echo "==> pushing dummy support image" >&2
-"${buildimg}" -ref "${support_ref}" -arch "${arch}" \
-	-file "/etc/contemper-support-marker=${REPO}/hack/e2e-variants/files/support-marker" \
-	-annotation "io.contemper.branch.init-system.openrc.requires.files=/sbin/openrc" \
-	-annotation "io.contemper.branch.init-system.openrc.image=${openrc_ref}" \
-	-annotation "io.contemper.branch.init-system.systemd.requires.files=/usr/lib/systemd/systemd" \
-	-annotation "io.contemper.branch.init-system.systemd.image=${never_pushed_systemd_ref}" \
-	-annotation "io.contemper.branch.extras.custom.requires.files=/etc/contemper-e2e-extras-marker" \
-	-annotation "io.contemper.branch.extras.custom.image=${never_pushed_custom_ref}" \
-	-annotation "io.contemper.branch.extras.default=none"
+echo "==> building and pushing the support-openrc variant image" >&2
+build_push "${openrc_ref}" Containerfile.openrc
+
+echo "==> building and pushing the dummy support image" >&2
+build_push "${support_ref}" Containerfile.support \
+	--build-arg "OPENRC_IMAGE=${openrc_ref}" \
+	--build-arg "SYSTEMD_IMAGE=${never_pushed_systemd_ref}" \
+	--build-arg "CUSTOM_IMAGE=${never_pushed_custom_ref}"
 
 # --- convert, boot ---------------------------------------------------------
 echo "==> contemper convert --support ${support_ref}" >&2
@@ -221,8 +223,8 @@ echo "==> boot OK: both ${BOOT_MARKER} and ${MARKER} seen on the serial console"
 
 # --- negative cases: convert must fail, without booting anything ----------
 #
-# assert_convert_fails builds a support image from the given annotations,
-# runs `contemper convert` against it, and checks it fails naming
+# assert_convert_fails runs `contemper convert` against an already pushed
+# support image and checks it fails naming
 # every expected substring (the branch name, plus whatever else pins the
 # failure down) in its combined output.
 assert_convert_fails() {
@@ -251,16 +253,16 @@ assert_convert_fails() {
 
 echo "==> pushing ambiguous-branch support image (negative case)" >&2
 ambiguous_ref="${REPO_PREFIX}/support-ambiguous:${TAG}"
-"${buildimg}" -ref "${ambiguous_ref}" -arch "${arch}" \
-	-annotation "io.contemper.branch.init-system.openrc.requires.files=/sbin/openrc" \
-	-annotation "io.contemper.branch.init-system.always.requires.files=/etc/os-release"
+build_push "${ambiguous_ref}" Containerfile.empty \
+	--label "io.contemper.branch.init-system.openrc.requires.files=/sbin/openrc" \
+	--label "io.contemper.branch.init-system.always.requires.files=/etc/os-release"
 assert_convert_fails "ambiguous" "${ambiguous_ref}" \
 	"branch init-system" "openrc" "always"
 
 echo "==> pushing no-match-no-default support image (negative case)" >&2
 missing_ref="${REPO_PREFIX}/support-missing:${TAG}"
-"${buildimg}" -ref "${missing_ref}" -arch "${arch}" \
-	-annotation "io.contemper.branch.init-system.systemd.requires.files=/usr/lib/systemd/systemd"
+build_push "${missing_ref}" Containerfile.empty \
+	--label "io.contemper.branch.init-system.systemd.requires.files=/usr/lib/systemd/systemd"
 assert_convert_fails "missing" "${missing_ref}" \
 	"branch init-system" "no default is declared" "/usr/lib/systemd/systemd"
 

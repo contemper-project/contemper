@@ -1,0 +1,5 @@
+# The openrc variant of the dummy support image (see
+# ../e2e-variants.sh): one OpenRC local.d script that prints a marker on
+# the console at boot.
+FROM scratch
+COPY --chmod=0755 files/openrc-local.start /etc/local.d/zzz-contemper-variant-openrc.start

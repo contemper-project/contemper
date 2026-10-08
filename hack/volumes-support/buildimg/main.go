@@ -24,10 +24,10 @@
 //
 // Used both by .github/workflows/volumes-support.yml (publishing to
 // ghcr.io/contemper-project) and by hack/e2e-volumes.sh (publishing to a
-// local registry for the boot test), for the same reason
-// hack/e2e-variants/buildimg exists: building the image directly with
+// local registry for the boot test). It builds the image directly with
 // go-containerregistry - the library contemper itself uses to read it
-// back - sidesteps engine-specific ways of setting manifest annotations.
+// back - which sidesteps engine-specific ways of setting manifest
+// annotations.
 //
 // Usage:
 //
