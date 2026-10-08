@@ -492,57 +492,69 @@ func TestParseVariantRef(t *testing.T) {
 	}
 }
 
-func TestParseVariantRefRegistryMatch(t *testing.T) {
+func TestParseVariantRefRegistryScope(t *testing.T) {
 	registry := source.Ref{Kind: source.KindRegistry, Value: "ghcr.io/example/support:v1"}
 	local := source.Ref{Kind: source.KindOCIArchive, Value: "support.tar"}
 
-	// A sibling repository under the same registry host is fine.
-	if _, err := source.ParseVariantRef(registry, "ghcr.io/example/support-openrc:v1"); err != nil {
-		t.Errorf("same registry, different repository: got error %v, want none", err)
+	// anonymous reports whether a variant of parent comes back marked
+	// for anonymous pulls.
+	anonymous := func(parent source.Ref, raw string) bool {
+		t.Helper()
+		ref, err := source.ParseVariantRef(parent, raw)
+		if err != nil {
+			t.Fatalf("ParseVariantRef(%q, %q): %v", parent.Value, raw, err)
+		}
+		if ref.Value != raw || ref.Kind != source.KindRegistry {
+			t.Errorf("ParseVariantRef(%q) = %+v, want the registry ref unchanged", raw, ref)
+		}
+		return ref.Anonymous
 	}
 
-	// A different registry host is rejected, naming both registries.
-	_, err := source.ParseVariantRef(registry, "docker.io/example/support-openrc:v1")
-	if err == nil {
-		t.Fatal("different registry: succeeded, want an error")
-	}
-	if !strings.Contains(err.Error(), "ghcr.io") || !strings.Contains(err.Error(), "index.docker.io") {
-		t.Errorf("different registry: error %q does not name both registries", err.Error())
+	// Same registry and namespace: credentials are used, whether the
+	// repository is a sibling or nested.
+	for _, raw := range []string{"ghcr.io/example/support-openrc:v1", "ghcr.io/example/sub/variant:v1"} {
+		if anonymous(registry, raw) {
+			t.Errorf("%q in the parent's namespace should keep credentials", raw)
+		}
 	}
 
 	// "docker.io" and "index.docker.io" name the same registry.
 	dockerParent := source.Ref{Kind: source.KindRegistry, Value: "docker.io/example/support:v1"}
-	if _, err := source.ParseVariantRef(dockerParent, "index.docker.io/example/support-openrc:v1"); err != nil {
-		t.Errorf("docker.io vs index.docker.io: got error %v, want none (same registry)", err)
+	if anonymous(dockerParent, "index.docker.io/example/support-openrc:v1") {
+		t.Error("docker.io vs index.docker.io: same registry, should keep credentials")
 	}
 	indexParent := source.Ref{Kind: source.KindRegistry, Value: "index.docker.io/example/support:v1"}
-	if _, err := source.ParseVariantRef(indexParent, "docker.io/example/support-openrc:v1"); err != nil {
-		t.Errorf("index.docker.io vs docker.io: got error %v, want none (same registry)", err)
+	if anonymous(indexParent, "docker.io/example/support-openrc:v1") {
+		t.Error("index.docker.io vs docker.io: same registry, should keep credentials")
 	}
 
-	// A different namespace on the same registry is rejected, naming both.
-	_, err = source.ParseVariantRef(registry, "ghcr.io/someone-else/private:v1")
-	if err == nil {
-		t.Fatal("different namespace: succeeded, want an error")
+	// Another registry or another namespace is allowed, but anonymous.
+	for _, raw := range []string{
+		"docker.io/example/support-openrc:v1",
+		"ghcr.io/someone-else/private:v1",
+		"ghcr.io/contemper-project/incus-support-openrc:v1",
+	} {
+		if !anonymous(registry, raw) {
+			t.Errorf("%q outside the parent's namespace should be anonymous", raw)
+		}
 	}
-	if !strings.Contains(err.Error(), "someone-else") || !strings.Contains(err.Error(), "example") {
-		t.Errorf("different namespace: error %q does not name both namespaces", err.Error())
+	// A support image derived into another namespace still reaches the
+	// published variants, anonymously.
+	provider := source.Ref{Kind: source.KindRegistry, Value: "ghcr.io/provider/incus-support:v1"}
+	if !anonymous(provider, "ghcr.io/contemper-project/incus-support-openrc@sha256:"+strings.Repeat("a", 64)) {
+		t.Error("derived support image: published variant should be anonymous")
 	}
-	// A nested repository under the same namespace is fine.
-	if _, err := source.ParseVariantRef(registry, "ghcr.io/example/sub/variant:v1"); err != nil {
-		t.Errorf("same namespace, nested repository: got error %v", err)
-	}
-	// A parent with no namespace (a single path component) only accepts
-	// variants in that same repository, with any tag or digest.
+
+	// A parent with no namespace (a single path component) keeps
+	// credentials only for that same repository, with any tag or digest.
 	local5000 := source.Ref{Kind: source.KindRegistry, Value: "localhost:5000/support:v1"}
-	if _, err := source.ParseVariantRef(local5000, "localhost:5000/support:v2"); err != nil {
-		t.Errorf("no namespace, same repository: got error %v", err)
+	if anonymous(local5000, "localhost:5000/support:v2") {
+		t.Error("no namespace, same repository: should keep credentials")
 	}
-	if _, err := source.ParseVariantRef(local5000, "localhost:5000/other:v1"); err == nil {
-		t.Errorf("no namespace parent accepted a sibling repository")
-	}
-	if _, err := source.ParseVariantRef(local5000, "localhost:5000/ns/other:v1"); err == nil {
-		t.Errorf("no namespace parent accepted a namespaced variant")
+	for _, raw := range []string{"localhost:5000/other:v1", "localhost:5000/ns/other:v1"} {
+		if !anonymous(local5000, raw) {
+			t.Errorf("no namespace parent: %q should be anonymous", raw)
+		}
 	}
 
 	// Paths that are not clean could be resolved to another repository
@@ -552,15 +564,14 @@ func TestParseVariantRefRegistryMatch(t *testing.T) {
 		"ghcr.io/example/./support-openrc:v1",
 		"ghcr.io/../victim/private:v1",
 	} {
-		_, err := source.ParseVariantRef(registry, raw)
-		if err == nil {
+		if _, err := source.ParseVariantRef(registry, raw); err == nil {
 			t.Errorf("ParseVariantRef(%q) succeeded, want an error", raw)
 		}
 	}
 
-	// A local parent may still name a variant in any registry.
-	if ref, err := source.ParseVariantRef(local, "docker.io/example/support-openrc:v1"); err != nil || ref.Kind != source.KindRegistry {
-		t.Errorf("ParseVariantRef(local parent, registry ref) = %+v, %v; want a registry ref, no error", ref, err)
+	// A local parent may name a variant in any registry, with credentials.
+	if anonymous(local, "docker.io/example/support-openrc:v1") {
+		t.Error("local parent: registry variant should keep credentials")
 	}
 }
 
@@ -596,5 +607,42 @@ func TestSecureBoot(t *testing.T) {
 	}
 	if got, err := source.SecureBoot(nil, "uki"); err != nil || got {
 		t.Errorf("SecureBoot(nil) = %v, %v", got, err)
+	}
+}
+
+func TestParseVariantRefRefusesLocalAndPrivateRegistries(t *testing.T) {
+	parent := source.Ref{Kind: source.KindRegistry, Value: "ghcr.io/example/support:v1"}
+	for _, host := range []string{
+		"localhost:5000", "foo.localhost", "LOCALHOST.:80", "127.0.0.1", "127.0.0.1:5000", "127.1.2.3:80",
+		"[::1]", "[::1]:5000", "foo.local", "foo.local:8080", "10.0.0.5", "10.1.2.3:5000",
+		"172.16.0.1", "172.31.255.1:80", "192.168.1.1", "192.168.1.1:5000",
+		"169.254.169.254", "169.254.169.254:80", "[fe80::1]", "[fe80::1]:5000",
+		"0.0.0.0", "0.0.0.0:80", "[fd00::1]", "[::]:80",
+	} {
+		_, err := source.ParseVariantRef(parent, host+"/ns/variant:v1")
+		if err == nil {
+			t.Errorf("variant on %s from a registry parent was accepted", host)
+			continue
+		}
+		if !strings.Contains(err.Error(), "local or private address") {
+			t.Errorf("variant on %s: error %q does not explain the refusal", host, err)
+		}
+		// A local parent trusts what the user supplied.
+		local := source.Ref{Kind: source.KindOCIArchive, Value: "support.tar"}
+		if _, err := source.ParseVariantRef(local, host+"/ns/variant:v1"); err != nil {
+			t.Errorf("variant on %s from a local parent: %v", host, err)
+		}
+	}
+	// The same registry is unaffected, so a local registry holding every
+	// image still works.
+	lp := source.Ref{Kind: source.KindRegistry, Value: "localhost:5555/ns/support:v1"}
+	if _, err := source.ParseVariantRef(lp, "localhost:5555/other/variant:v1"); err != nil {
+		t.Errorf("same local registry: %v", err)
+	}
+	// Public hosts, by name or address, remain allowed.
+	for _, host := range []string{"docker.io", "registry.example.com:5000", "8.8.8.8", "[2001:db8::1]:443"} {
+		if _, err := source.ParseVariantRef(parent, host+"/ns/variant:v1"); err != nil {
+			t.Errorf("variant on %s refused: %v", host, err)
+		}
 	}
 }
