@@ -8,8 +8,11 @@ package source
 import (
 	"archive/tar"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path"
@@ -22,6 +25,7 @@ import (
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/layout"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
 
 	"github.com/contemper-project/contemper/internal/limits"
@@ -102,6 +106,11 @@ type Ref struct {
 	// image reference to `docker save` for KindDockerDaemon, or a
 	// filesystem path (tarball or directory) for the other kinds.
 	Value string
+	// Anonymous makes every registry request for this reference go
+	// out without the user's credentials. ParseVariantRef sets it for
+	// variants outside their support image's namespace. Ignored for
+	// the other kinds.
+	Anonymous bool
 }
 
 // ParseRef parses a source reference of the form understood by contemper:
@@ -134,26 +143,31 @@ func ParseRef(raw string) (Ref, error) {
 }
 
 // ParseVariantRef parses raw, a variant image reference read from the
-// annotations of the image parent was loaded from. Annotations are
-// image content: a support image pulled from a registry must not be able
-// to point contemper at files on the build host, so when parent is a
-// registry reference, raw must be one too. A local parent (an archive or
-// layout the user supplied) may name local variants.
+// labels of the image parent was loaded from. Labels are image content:
+// a support image pulled from a registry must not be able to point
+// contemper at files on the build host, so when parent is a registry
+// reference, raw must be a registry reference too. A local parent (an
+// archive or layout the user supplied) may name local variants, or any
+// registry, and those are pulled with the user's credentials since the
+// user already chose to trust that parent image directly.
 //
-// A registry parent also constrains where a variant may come from: the
-// same registry and the same repository namespace (the first path
-// component, as in "ghcr.io/acme/" for "ghcr.io/acme/support"); the
-// repository itself may differ - the published variants of a real
-// support image live in sibling repositories. A support image in a
-// repository with no namespace (one path component) only allows
-// variants in that same repository. Repository paths with ".", ".." or
-// empty segments are refused. Without this, a support
-// image's annotations - content the image itself controls - could name
-// a variant in any registry or in someone else's namespace, pulled with
-// the user's own credentials, so a third-party support image could pull
-// a private image the user has access to into the disk. A local parent
-// may still name a variant anywhere, since the user already chose to
-// trust that parent image directly.
+// A registry parent constrains how a variant is pulled. A variant in the
+// same registry and repository namespace (the first path component, as
+// in "ghcr.io/acme/" for "ghcr.io/acme/support"; the repository itself
+// may differ, since the published variants of a real support image live
+// in sibling repositories) is pulled with the user's credentials, so a
+// private support image can have private variants. For a support image
+// in a repository with no namespace (one path component), only that
+// same repository counts. A variant anywhere else (another registry or
+// namespace) is allowed but returned with Anonymous set: every request
+// for it goes out without credentials. Labels are content the image
+// controls, and without credentials they cannot make contemper pull a
+// private image the user has access to into the disk. Repository paths
+// with ".", ".." or empty segments are refused. A variant in a different
+// registry than a registry parent is also refused when that registry is
+// a local or private address (see localRegistry): otherwise a published
+// support image could make contemper send requests to services on the
+// build host's network. Same-registry variants are not affected.
 func ParseVariantRef(parent Ref, raw string) (Ref, error) {
 	ref, err := ParseRef(raw)
 	if err != nil {
@@ -173,20 +187,48 @@ func ParseVariantRef(parent Ref, raw string) (Ref, error) {
 	if err != nil {
 		return Ref{}, fmt.Errorf("parsing variant image %q: %w", raw, err)
 	}
-	if variantRegistry != parentRegistry {
-		return Ref{}, fmt.Errorf("variant image %q is in registry %q, but the image declaring it is in registry %q; a variant must come from the same registry and namespace (a different repository there is fine)", raw, variantRegistry, parentRegistry)
-	}
-	parentNS, variantNS := repoNamespace(parentRepo), repoNamespace(variantRepo)
-	if parentNS == "" {
-		// A repository with no namespace: nothing groups it with others,
-		// so only that same repository qualifies.
-		if variantRepo != parentRepo {
-			return Ref{}, fmt.Errorf("variant image %q is in the repository %q of %s, but the image declaring it is in %q, which has no namespace; a variant of such an image must be in the same repository (any tag or digest)", raw, variantRepo, variantRegistry, parentRepo)
+	parentNS := repoNamespace(parentRepo)
+	switch {
+	case variantRegistry != parentRegistry:
+		if localRegistry(variantRegistry) {
+			return Ref{}, fmt.Errorf("variant image %q is on %s, a local or private address; a support image from %s may not name variants there", raw, variantRegistry, parentRegistry)
 		}
-	} else if variantNS != parentNS {
-		return Ref{}, fmt.Errorf("variant image %q is in the namespace %q of %s, but the image declaring it is in %q; a variant must come from the same registry and namespace (a different repository there is fine)", raw, variantNS, variantRegistry, parentNS)
+		ref.Anonymous = true
+	case parentNS == "":
+		// A repository with no namespace: nothing groups it with others,
+		// so only that same repository is trusted with credentials.
+		ref.Anonymous = variantRepo != parentRepo
+	default:
+		ref.Anonymous = repoNamespace(variantRepo) != parentNS
 	}
 	return ref, nil
+}
+
+// localRegistry reports whether host (a registry host, with an optional
+// port) is one go-containerregistry would contact over plain HTTP
+// (localhost, loopback, ".local" names, private ranges), or an IP
+// literal that is loopback, link-local, private or unspecified. A support
+// image from another registry must not be able to make contemper send
+// requests to services on the build host's network by naming such a
+// variant.
+func localRegistry(host string) bool {
+	reg, err := name.NewRegistry(host)
+	if err != nil || reg.Scheme() == "http" {
+		return true
+	}
+	h := host
+	if hh, _, err := net.SplitHostPort(host); err == nil {
+		h = hh
+	}
+	h = strings.ToLower(strings.TrimSuffix(strings.Trim(h, "[]"), "."))
+	if h == "localhost" || strings.HasSuffix(h, ".localhost") || strings.HasSuffix(h, ".local") {
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+			ip.IsPrivate() || ip.IsUnspecified()
+	}
+	return false
 }
 
 // registryRepository returns the normalized registry host of a registry
@@ -200,7 +242,7 @@ func registryRepository(raw string) (host, repo string, err error) {
 		return "", "", err
 	}
 	repo = nref.Context().RepositoryStr()
-	if path.Clean(repo) != repo {
+	if path.Clean(repo) != repo || strings.HasPrefix(repo, "../") || repo == ".." {
 		return "", "", fmt.Errorf("repository path %q must not contain \".\", \"..\" or empty segments", repo)
 	}
 	return nref.Context().RegistryStr(), repo, nil
@@ -294,8 +336,28 @@ func Load(ctx context.Context, ref Ref, platform v1.Platform) (*Image, error) {
 
 // registryOptions are the remote options every registry read uses, so
 // listing a source's platforms and loading one see the same registry.
-func registryOptions(ctx context.Context) []remote.Option {
-	return []remote.Option{remote.WithContext(ctx), remote.WithAuthFromKeychain(authn.DefaultKeychain)}
+func registryOptions(ctx context.Context, anonymous bool) []remote.Option {
+	auth := remote.WithAuthFromKeychain(authn.DefaultKeychain)
+	if anonymous {
+		auth = remote.WithAuth(authn.Anonymous)
+	}
+	return []remote.Option{remote.WithContext(ctx), auth}
+}
+
+// anonymousPullError adds to err, a failed registry request for ref, a
+// note that the request carried no credentials when ref is anonymous and
+// the registry answered with an authentication or authorization error
+// (some registries answer 404 for a private repository).
+func anonymousPullError(ref Ref, err error) error {
+	var terr *transport.Error
+	if !ref.Anonymous || !errors.As(err, &terr) {
+		return err
+	}
+	switch terr.StatusCode {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+		return fmt.Errorf("%w (the variant image is outside its support image's namespace and was fetched without credentials)", err)
+	}
+	return err
 }
 
 // loadRegistry resolves a registry ref the way a layout is resolved: an
@@ -307,9 +369,9 @@ func loadRegistry(ctx context.Context, ref Ref, platform v1.Platform) (*Image, e
 	if err != nil {
 		return nil, fmt.Errorf("parsing registry ref %q: %w", ref.Value, err)
 	}
-	desc, err := remote.Get(nref, registryOptions(ctx)...)
+	desc, err := remote.Get(nref, registryOptions(ctx, ref.Anonymous)...)
 	if err != nil {
-		return nil, fmt.Errorf("pulling %s: %w", ref.Value, err)
+		return nil, fmt.Errorf("pulling %s: %w", ref.Value, anonymousPullError(ref, err))
 	}
 	var img v1.Image
 	var digest v1.Hash
@@ -621,7 +683,7 @@ func archiveHasIndexJSON(archivePath string) (bool, error) {
 // IndexAnnotations returns the annotations recorded on the index
 // descriptor that selects platform's manifest, for support-image
 // resolution's manifest/index-descriptor annotation fallback (see
-// docs/reference/support-image-annotations.md). It returns nil, nil (not
+// docs/reference/support-image-labels.md). It returns nil, nil (not
 // an error) for a reference that doesn't resolve through a multi-platform
 // index, since there is then no descriptor-level fallback to read.
 func IndexAnnotations(ctx context.Context, ref Ref, platform v1.Platform) (map[string]string, error) {
@@ -654,7 +716,7 @@ func registryIndexAnnotations(ctx context.Context, ref Ref, platform v1.Platform
 	if err != nil {
 		return nil, fmt.Errorf("parsing registry ref %q: %w", ref.Value, err)
 	}
-	desc, err := remote.Get(nref, remote.WithContext(ctx), remote.WithAuthFromKeychain(authn.DefaultKeychain))
+	desc, err := remote.Get(nref, registryOptions(ctx, ref.Anonymous)...)
 	if err != nil {
 		return nil, fmt.Errorf("fetching %s: %w", ref.Value, err)
 	}

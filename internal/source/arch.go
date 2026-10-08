@@ -157,7 +157,7 @@ func Platforms(ctx context.Context, ref Ref) ([]v1.Platform, error) {
 		if err != nil {
 			return nil, fmt.Errorf("parsing registry ref %q: %w", ref.Value, err)
 		}
-		desc, err := remote.Get(nref, registryOptions(ctx)...)
+		desc, err := remote.Get(nref, registryOptions(ctx, ref.Anonymous)...)
 		if err != nil {
 			return nil, fmt.Errorf("fetching %s: %w", ref.Value, err)
 		}

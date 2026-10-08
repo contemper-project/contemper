@@ -61,10 +61,12 @@ func FuzzParseRef(f *testing.F) {
 }
 
 // FuzzParseVariantRef checks the rule that keeps a registry image's
-// annotations from naming local files or other namespaces: when the
-// parent is a registry reference, an accepted variant is a registry
-// reference in the same registry, within the parent's namespace (or the
-// parent's own repository if it has none), with a clean repository path.
+// labels from naming local files or pulling with credentials from other
+// namespaces: when the parent is a registry reference, an accepted
+// variant is a registry reference with a clean repository path, and it
+// is not marked Anonymous only if it is in the same registry, within the
+// parent's namespace (or the parent's own repository if it has none). A
+// local parent's variants are never anonymous.
 func FuzzParseVariantRef(f *testing.F) {
 	f.Add("ghcr.io/acme/support:v1", "ghcr.io/acme/openrc:v1", true)
 	f.Add("ghcr.io/acme/support:v1", "ghcr.io/other/openrc:v1", true)
@@ -91,10 +93,14 @@ func FuzzParseVariantRef(f *testing.F) {
 			return
 		}
 		plain, plainErr := ParseRef(raw)
+		plain.Anonymous = ref.Anonymous
 		if plainErr != nil || plain != ref {
 			t.Fatalf("ParseVariantRef(%q) = %+v but ParseRef gives %+v, %v", raw, ref, plain, plainErr)
 		}
 		if !registryParent {
+			if ref.Anonymous {
+				t.Fatalf("local parent %q produced the anonymous variant %q", parentRaw, raw)
+			}
 			return
 		}
 		if ref.Kind != KindRegistry {
@@ -106,9 +112,6 @@ func FuzzParseVariantRef(f *testing.F) {
 			t.Fatalf("accepted references do not parse: %v, %v", perr, verr)
 		}
 		pRepo, vRepo := pr.Context().RepositoryStr(), vr.Context().RepositoryStr()
-		if pr.Context().RegistryStr() != vr.Context().RegistryStr() {
-			t.Fatalf("variant %q is in another registry than %q", raw, parentRaw)
-		}
 		for _, repo := range []string{pRepo, vRepo} {
 			if path.Clean(repo) != repo {
 				t.Fatalf("unclean repository %q accepted", repo)
@@ -116,11 +119,10 @@ func FuzzParseVariantRef(f *testing.F) {
 		}
 		pNS, _, pHas := strings.Cut(pRepo, "/")
 		vNS, _, _ := strings.Cut(vRepo, "/")
-		if pHas && pNS != vNS {
-			t.Fatalf("variant %q is outside the namespace %q of %q", raw, pNS, parentRaw)
-		}
-		if !pHas && vRepo != pRepo {
-			t.Fatalf("variant %q is not in the namespace-less repository %q", raw, pRepo)
+		sameScope := pr.Context().RegistryStr() == vr.Context().RegistryStr() &&
+			((pHas && pNS == vNS) || (!pHas && vRepo == pRepo))
+		if ref.Anonymous == sameScope {
+			t.Fatalf("variant %q of %q: Anonymous = %v but same scope = %v", raw, parentRaw, ref.Anonymous, sameScope)
 		}
 	})
 }
