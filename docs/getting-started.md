@@ -175,9 +175,10 @@ The example lives in `examples/alpine/Containerfile`. It installs a
 kernel, generates a generic initrd, writes a kernel command line and
 enables OpenRC, all at the paths contemper expects.
 
-`contemper build` runs `docker buildx build --load` (or `podman build`,
-see `--engine`) on it and converts the result in one step. It picks up the `Containerfile` on its own when
-the directory has no `Dockerfile`:
+`contemper build` runs the build with docker buildx or podman (see
+[Choosing the build engine](#choosing-the-build-engine)) and converts the
+result in one step. It picks up the `Containerfile` on its own when the
+directory has no `Dockerfile`:
 
 ```console
 $ contemper build --target qemu -o _out examples/alpine
@@ -211,15 +212,63 @@ $ contemper deploy --to local-qemu "$(contemper build --target qemu -o _out exam
     --expect contemper-boot-ok --timeout 180s
 ```
 
-`contemper build` uses Docker with buildx when it is usable and podman
-otherwise; `--engine docker` or `--engine podman` picks one. See
-[source references](reference/sources.md) for the `docker-daemon:` and
-`containers-storage:` sources it converts through.
+### Choosing the build engine
+
+`--engine auto` is the default. It uses Docker when `docker buildx` works
+and podman otherwise. A `docker` command that is really podman's docker
+emulation counts as podman, since it has no buildx. `--engine docker` or
+`--engine podman` skips the detection and uses just that engine; if it
+isn't usable, `build` fails and prints the command to run by hand.
+
+The two engines build with these commands, and load the image into their
+own local image store:
+
+=== "podman"
+
+    ```console
+    $ podman build --platform linux/arm64 -t alpine:dev \
+        -f examples/alpine/Containerfile examples/alpine
+    ```
+
+    The converted image is read back with a `containers-storage:` source.
+    On macOS, podman needs a running podman machine.
+
+=== "docker"
+
+    ```console
+    $ docker buildx build --load --platform linux/arm64 -t alpine:dev \
+        -f examples/alpine/Containerfile examples/alpine
+    ```
+
+    The converted image is read back with a `docker-daemon:` source.
+
+(The platform is the host's, or whatever `--arch` names.)
+
+To build without converting, pass `--image-only`. It stops after the
+build and prints the image tag on stdout; `--target` is not needed. Pass
+that tag on to `convert` with the source prefix that matches the engine:
+
+=== "podman"
+
+    ```console
+    $ tag=$(contemper build --engine podman --image-only examples/alpine)
+    $ contemper convert --target qemu "containers-storage:$tag" -o _out
+    ```
+
+=== "docker"
+
+    ```console
+    $ tag=$(contemper build --engine docker --image-only examples/alpine)
+    $ contemper convert --target qemu "docker-daemon:$tag" -o _out
+    ```
+
+See [source references](reference/sources.md) for the `docker-daemon:` and
+`containers-storage:` sources.
 
 ## Build by hand
 
-Prefer this if you use podman, or want an OCI archive to keep or push
-rather than loading the image straight into Docker's local image store.
+Prefer this if you want an OCI archive to keep or push rather than
+loading the image straight into the engine's local image store.
 These are the steps `build` runs for you: build and save the image with
 your container engine, then convert the archive.
 

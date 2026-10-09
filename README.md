@@ -23,8 +23,8 @@ $ contemper deploy --to local-qemu my-appliance-dev.aarch64/
 ```
 
 `<tool>` is `podman` or `docker`; the two commands above are identical
-either way. With Docker, `contemper build` runs the build and the
-convert step together and skips the registry; see
+either way. `contemper build` runs the build (with Docker buildx or
+podman) and the convert step together and skips the registry; see
 [Getting started](docs/getting-started.md) for that walkthrough.
 
 ## Why
@@ -121,8 +121,7 @@ contemper is pre-1.0: the CLI and the bundle format may still change.
 - `convert` for the qemu and incus targets (the latter adds the Incus
   agent through the default
   [`incus-support`](https://github.com/contemper-project/support-images)
-  image), `build` (with Docker; podman support is
-  planned), and `deploy --to local-qemu`.
+  image), `build` (with Docker or podman), and `deploy --to local-qemu`.
 - Two boot modes: a UKI built by contemper, or the image's own
   bootloader with in-place kernel updates and Secure Boot support.
 - `convert` and `deploy` handle several architectures at once.

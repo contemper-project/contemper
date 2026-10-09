@@ -4,7 +4,8 @@ Everything before conversion is a conventional container pipeline, and
 conversion itself is side-effect-free: it reads images and writes a
 bundle, nothing more.
 
-- **Build** with `docker buildx build --platform linux/amd64,linux/arm64`
+- **Build** with `docker buildx build --platform linux/amd64,linux/arm64`,
+  `podman build --platform linux/amd64,linux/arm64 --manifest ...`
   or equivalent. An ordinary container build; emulation handled here.
 - **Label** the image with `LABEL io.contemper.ready="true"` in the build
   file.
