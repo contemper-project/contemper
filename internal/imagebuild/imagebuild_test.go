@@ -11,7 +11,7 @@ import (
 )
 
 func TestArgs(t *testing.T) {
-	got := imagebuild.Args(imagebuild.Options{
+	got := imagebuild.Docker.Args(imagebuild.Options{
 		Context:   "./my-app",
 		File:      "docker/Containerfile",
 		Tag:       "my-app:dev",
@@ -33,7 +33,7 @@ func TestArgs(t *testing.T) {
 }
 
 func TestArgsNoFileNoBuildArgs(t *testing.T) {
-	got := imagebuild.Args(imagebuild.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
+	got := imagebuild.Docker.Args(imagebuild.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
 	want := []string{"buildx", "build", "--load", "--platform", "linux/amd64", "-t", "my-app:dev", "."}
 	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 		t.Errorf("Args = %q, want %q", got, want)
@@ -41,7 +41,7 @@ func TestArgsNoFileNoBuildArgs(t *testing.T) {
 }
 
 func TestCommandIsShellQuotedAndCopyPasteable(t *testing.T) {
-	cmd := imagebuild.Command(imagebuild.Options{
+	cmd := imagebuild.Docker.Command(imagebuild.Options{
 		Context:  "a dir/with spaces",
 		Tag:      "my-app:dev",
 		Platform: "linux/amd64",
@@ -148,7 +148,7 @@ func TestArgsDefaultFile(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			got := imagebuild.Args(imagebuild.Options{Context: ctx, File: imagebuild.DefaultFile(ctx), Tag: "my-app:dev", Platform: "linux/amd64"})
+			got := imagebuild.Docker.Args(imagebuild.Options{Context: ctx, File: imagebuild.DefaultFile(ctx), Tag: "my-app:dev", Platform: "linux/amd64"})
 			want := []string{"buildx", "build", "--load", "--platform", "linux/amd64", "-t", "my-app:dev"}
 			if tc.wantF {
 				want = append(want, "-f", filepath.Join(ctx, "Containerfile"))
@@ -178,7 +178,7 @@ func TestBuildKeepsStdoutClean(t *testing.T) {
 	defer func() { _ = stdout.Close() }()
 	orig := os.Stdout
 	os.Stdout = stdout
-	err = imagebuild.Build(t.Context(), dockerPath, imagebuild.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
+	err = imagebuild.Docker.Build(t.Context(), dockerPath, imagebuild.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
 	os.Stdout = orig
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -195,7 +195,7 @@ func TestBuildKeepsStdoutClean(t *testing.T) {
 
 func TestCheckAvailableMissingDocker(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	_, err := imagebuild.CheckAvailable(t.Context(), imagebuild.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
+	_, err := imagebuild.Docker.CheckAvailable(t.Context(), imagebuild.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
 	if err == nil {
 		t.Fatalf("CheckAvailable: expected an error when docker is not on PATH")
 	}
@@ -212,7 +212,7 @@ func TestCheckAvailableMissingBuildx(t *testing.T) {
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	_, err := imagebuild.CheckAvailable(t.Context(), imagebuild.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
+	_, err := imagebuild.Docker.CheckAvailable(t.Context(), imagebuild.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
 	if err == nil {
 		t.Fatalf("CheckAvailable: expected an error when docker buildx version fails")
 	}
@@ -229,7 +229,7 @@ func TestCheckAvailableOK(t *testing.T) {
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	dockerPath, err := imagebuild.CheckAvailable(t.Context(), imagebuild.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
+	dockerPath, err := imagebuild.Docker.CheckAvailable(t.Context(), imagebuild.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
 	if err != nil {
 		t.Fatalf("CheckAvailable: %v", err)
 	}

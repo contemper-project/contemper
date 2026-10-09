@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -324,7 +325,7 @@ func TestBuildCommandImageOnly(t *testing.T) {
 }
 
 // TestBuildCommandChecksFlagsBeforeBuilding checks that a missing or bad
-// convert flag is reported before any docker command runs.
+// convert flag is reported before any engine command runs.
 func TestBuildCommandChecksFlagsBeforeBuilding(t *testing.T) {
 	for _, c := range []struct {
 		args    []string
@@ -338,20 +339,25 @@ func TestBuildCommandChecksFlagsBeforeBuilding(t *testing.T) {
 		{args: []string{"--target", "qemu", "--arch", "all", "--tag", "my-app:dev"}, wantErr: "build produces one architecture at a time"},
 		{args: []string{"--target", "qemu", "--arch", "amd64,arm64", "--tag", "my-app:dev"}, wantErr: "build produces one architecture at a time"},
 	} {
-		args := c.args
-		logPath := installFakeBuildDocker(t, filepath.Join(t.TempDir(), "unused.tar"))
-		cmd := newBuildCmd()
-		cmd.SetOut(io.Discard)
-		cmd.SetErr(io.Discard)
-		cmd.SetArgs(append(args, t.TempDir()))
-		err := cmd.Execute()
-		if err == nil {
-			t.Errorf("build %v: expected an error", args)
-		} else if c.wantErr != "" && !strings.Contains(err.Error(), c.wantErr) {
-			t.Errorf("build %v error = %q, want one containing %q", args, err, c.wantErr)
-		}
-		if log, err := os.ReadFile(logPath); err == nil && len(log) > 0 {
-			t.Errorf("build %v ran docker before failing: %q", args, log)
+		for _, engine := range []string{"docker", "podman"} {
+			args := append([]string{"--engine", engine}, c.args...)
+			dockerLog := installFakeBuildDocker(t, filepath.Join(t.TempDir(), "unused.tar"))
+			podmanLog := installFakeBuildPodman(t, filepath.Join(t.TempDir(), "unused.tar"))
+			cmd := newBuildCmd()
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs(append(args, t.TempDir()))
+			err := cmd.Execute()
+			if err == nil {
+				t.Errorf("build %v: expected an error", args)
+			} else if c.wantErr != "" && !strings.Contains(err.Error(), c.wantErr) {
+				t.Errorf("build %v error = %q, want one containing %q", args, err, c.wantErr)
+			}
+			for _, p := range []string{dockerLog, podmanLog} {
+				if log, err := os.ReadFile(p); err == nil && len(log) > 0 {
+					t.Errorf("build %v ran an engine before failing: %q", args, log)
+				}
+			}
 		}
 	}
 }
@@ -377,9 +383,9 @@ func captureProcessStdout(t *testing.T, fn func()) string {
 	return string(data)
 }
 
-// TestBuildCommandMissingDocker checks the missing-docker path: no host
-// tools are needed for it, so it always runs.
-func TestBuildCommandMissingDocker(t *testing.T) {
+// TestBuildCommandMissingEngines checks the path where neither engine
+// is installed: no host tools are needed for it, so it always runs.
+func TestBuildCommandMissingEngines(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 
 	ctxDir := t.TempDir()
@@ -390,9 +396,191 @@ func TestBuildCommandMissingDocker(t *testing.T) {
 
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatalf("build: expected an error when docker is not on PATH")
+		t.Fatalf("build: expected an error when no engine is on PATH")
 	}
-	if !strings.Contains(err.Error(), "docker buildx build") || !strings.Contains(err.Error(), "contemper convert docker-daemon:my-app:dev") {
-		t.Errorf("error %q does not show the copy-pasteable command and the convert suggestion", err.Error())
+	for _, want := range []string{
+		"docker buildx build", "contemper convert docker-daemon:my-app:dev",
+		"podman build", "contemper convert containers-storage:my-app:dev",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err.Error(), want)
+		}
+	}
+}
+
+// TestBuildCommandMissingEngine checks that an explicit --engine is
+// checked alone and shows only its own hand-run commands.
+func TestBuildCommandMissingEngine(t *testing.T) {
+	installFakeBuildDocker(t, filepath.Join(t.TempDir(), "unused.tar"))
+	// Hide any real podman behind the fake docker's directory only.
+	t.Setenv("PATH", filepath.Dir(mustLookPath(t, "docker")))
+
+	cmd := newBuildCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--engine", "podman", "--target", "qemu", "--tag", "my-app:dev", t.TempDir()})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("build: expected an error when podman is not on PATH")
+	}
+	if !strings.Contains(err.Error(), "podman is not installed") ||
+		!strings.Contains(err.Error(), "contemper convert containers-storage:my-app:dev") ||
+		strings.Contains(err.Error(), "docker") {
+		t.Errorf("error %q, want podman's reason and hand-run commands only", err.Error())
+	}
+}
+
+func mustLookPath(t *testing.T, name string) string {
+	t.Helper()
+	p, err := exec.LookPath(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// fakeBuildPodmanScript stands in for the real `podman` binary: it
+// records every invocation's argv to $FAKE_PODMAN_LOG and handles
+// "version" (health check), "build ..." (pretends to build) and "save
+// --format oci-archive -o <path> <ref>" (copies $FAKE_PODMAN_ARCHIVE to
+// <path>).
+const fakeBuildPodmanScript = `#!/bin/sh
+echo "$@" >> "$FAKE_PODMAN_LOG"
+case "$1" in
+	version)
+		exit 0
+		;;
+	build)
+		echo "podman-stdout-noise"
+		exit 0
+		;;
+	save)
+		if [ "$2 $3 $4" = "--format oci-archive -o" ]; then
+			cp "$FAKE_PODMAN_ARCHIVE" "$5"
+			exit 0
+		fi
+		;;
+esac
+echo "fake podman: unsupported invocation: $*" >&2
+exit 1
+`
+
+// installFakeBuildPodman puts fakeBuildPodmanScript on PATH as "podman"
+// and has it serve archivePath for `podman save`.
+func installFakeBuildPodman(t *testing.T, archivePath string) (logPath string) {
+	t.Helper()
+	dir := installFakeTool(t, "podman", fakeBuildPodmanScript)
+	logPath = filepath.Join(t.TempDir(), "podman.log")
+	t.Setenv("FAKE_PODMAN_LOG", logPath)
+	t.Setenv("FAKE_PODMAN_ARCHIVE", archivePath)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return logPath
+}
+
+// TestBuildCommandPodmanProducesBundle is the podman counterpart of
+// TestBuildCommandProducesBundle: build runs `podman build`, then
+// converts through containers-storage: (`podman save`).
+func TestBuildCommandPodmanProducesBundle(t *testing.T) {
+	for _, name := range []string{"mkfs.ext4", "debugfs", "e2fsck", "qemu-img"} {
+		if hostenv.Find(name) == "" {
+			t.Skipf("%s not found; skipping build command test", name)
+		}
+	}
+
+	logPath := installFakeBuildPodman(t, buildFixtureArchive(t))
+
+	ctxDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(ctxDir, "Containerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	outDir := t.TempDir()
+	t.Setenv("TMPDIR", t.TempDir())
+	cmd := newBuildCmd()
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"--engine", "podman", "--target", "qemu", "--tag", "my-app:dev", "--build-arg", "A=b", "--out", outDir, ctxDir})
+
+	processStdout := captureProcessStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("build: %v", err)
+		}
+	})
+	if processStdout != "" {
+		t.Errorf("process stdout = %q, want nothing beyond the command's own output", processStdout)
+	}
+
+	wantBundle := filepath.Join(outDir, "my-app-dev."+machineArch(runtime.GOARCH))
+	if got := stdout.String(); got != wantBundle+"\n" {
+		t.Fatalf("build stdout = %q, want the bundle path %q", got, wantBundle+"\n")
+	}
+	if _, err := bundle.Read(wantBundle); err != nil {
+		t.Fatalf("reading bundle manifest: %v", err)
+	}
+
+	log, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logStr := string(log)
+	if !strings.HasPrefix(logStr, "version\n") {
+		t.Errorf("podman log = %q, want a version check first", logStr)
+	}
+	wantBuild := "build --platform linux/" + runtime.GOARCH + " -t my-app:dev -f " + filepath.Join(ctxDir, "Containerfile") + " --build-arg A=b " + ctxDir
+	if !strings.Contains(logStr, wantBuild+"\n") {
+		t.Errorf("podman log = %q, want %q", logStr, wantBuild)
+	}
+	if !strings.Contains(logStr, "save --format oci-archive -o ") || !strings.Contains(logStr, " my-app:dev\n") {
+		t.Errorf("podman log = %q, want a podman save of my-app:dev", logStr)
+	}
+}
+
+// TestBuildCommandPodmanImageOnly checks that --image-only with podman
+// prints the tag and never runs podman save.
+func TestBuildCommandPodmanImageOnly(t *testing.T) {
+	logPath := installFakeBuildPodman(t, filepath.Join(t.TempDir(), "unused.tar"))
+
+	cmd := newBuildCmd()
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"--engine", "podman", "--image-only", "--tag", "my-app:dev", t.TempDir()})
+	processStdout := captureProcessStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("build --image-only: %v", err)
+		}
+	})
+	if processStdout != "" {
+		t.Errorf("process stdout = %q, want nothing", processStdout)
+	}
+	if got := stdout.String(); got != "my-app:dev\n" {
+		t.Errorf("stdout = %q, want %q", got, "my-app:dev\n")
+	}
+	log, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(log), "save") || !strings.Contains(string(log), "build --platform") {
+		t.Errorf("podman log = %q, want a build and no save", log)
+	}
+}
+
+// TestBuildCommandRejectsBadEngine checks that a bad --engine value is
+// refused before any subprocess runs.
+func TestBuildCommandRejectsBadEngine(t *testing.T) {
+	dockerLog := installFakeBuildDocker(t, filepath.Join(t.TempDir(), "unused.tar"))
+	podmanLog := installFakeBuildPodman(t, filepath.Join(t.TempDir(), "unused.tar"))
+
+	cmd := newBuildCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--engine", "buildah", "--target", "qemu", "--tag", "my-app:dev", t.TempDir()})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), `--engine "buildah"`) {
+		t.Fatalf("build --engine buildah error = %v", err)
+	}
+	for _, p := range []string{dockerLog, podmanLog} {
+		if log, err := os.ReadFile(p); err == nil && len(log) > 0 {
+			t.Errorf("an engine ran before the flag was refused: %q", log)
+		}
 	}
 }
