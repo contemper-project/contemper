@@ -10,6 +10,7 @@ takes another, in the same forms.
 | `oci:<path>` | an OCI image layout directory |
 | `docker-archive:<path>` | a docker archive, as written by `docker save` (Docker 24 and earlier) or `podman save --format docker-archive` |
 | `docker-daemon:<ref>` | an image already loaded into the local Docker daemon, e.g. `docker-daemon:my-app:dev` |
+| `containers-storage:<ref>` | an image in podman's local image store, e.g. `containers-storage:my-app:dev` |
 
 `docker-daemon:<ref>` needs `docker` on `PATH`. It runs `docker save`
 into a temporary archive, reads that back with the same code the
@@ -28,6 +29,13 @@ lists the per-platform manifests alongside attestation manifests;
 `convert` follows that nesting and ignores the attestation manifests
 when selecting a platform.
 
+`containers-storage:<ref>` works the same way with `podman`: it runs
+`podman save --format oci-archive` into a temporary archive, reads it
+back like an `oci-archive:` source and removes it afterwards. `<ref>` is
+a plain image reference as podman lists it; skopeo's `[storage-specifier]`
+prefix is not supported. On macOS, `podman` needs a running podman
+machine.
+
 ## Platform selection
 
 `convert` builds for the host architecture unless `--arch amd64|arm64`
@@ -40,8 +48,8 @@ following nested indexes and skipping attestation manifests along the
 way; if there is no manifest for the requested platform, the conversion
 fails at that point. For a list or `all`, every requested platform is
 checked against the index up front. A `docker-daemon:` source can't be
-listed without a `docker save`, so it accepts one explicit architecture
-only.
+listed without a `docker save`, and a `containers-storage:` source
+without a `podman save`, so each accepts one explicit architecture only.
 
 ## Bundle naming
 
@@ -69,12 +77,17 @@ A `docker-daemon:<ref>` source is always named after `<ref>` itself
 (`docker-daemon:my-app:dev` gives `my-app-dev.<arch>`), regardless of
 what naming annotations the `docker save` output carries.
 
+A `containers-storage:<ref>` source is named the same way, after `<ref>`
+as typed: podman stores an unqualified `my-app:dev` as
+`localhost/my-app:dev`, but `containers-storage:my-app:dev` still gives
+`my-app-dev.<arch>`.
+
 ## Recorded references
 
 The bundle manifest records each reference in the same form, with local
-paths cleaned up (`a/../b.tar` becomes `b.tar`; a `docker-daemon:<ref>`
-reference is kept as given, since `<ref>` is an image reference, not a
+paths cleaned up (`a/../b.tar` becomes `b.tar`; a `docker-daemon:<ref>` or
+`containers-storage:<ref>` reference is kept as given, since `<ref>` is an image reference, not a
 path), and the digest of the image that was actually used. Bundles from
-local archives, layouts and the local Docker daemon are marked as not
+local archives, layouts, the local Docker daemon and podman's image store are marked as not
 reproducible, since none of them can be fetched again the way a
 registry digest can.
