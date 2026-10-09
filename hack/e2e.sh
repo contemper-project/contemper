@@ -37,10 +37,13 @@
 #
 # --build-command builds and converts the example through `contemper
 # build` instead of the engine build/save + `contemper convert` steps
-# below, exercising the build command and its docker-daemon: source
-# against a real Docker daemon. It requires docker with the buildx
-# plugin on PATH (podman/docker/CONTAINER_ENGINE selection is skipped);
-# missing either fails fast, before the go build below.
+# below, exercising the build command and its image sources against a
+# real engine. With CONTAINER_ENGINE unset it requires docker with the
+# buildx plugin on PATH and runs `contemper build` with its default
+# engine selection (docker, when usable). CONTAINER_ENGINE=docker or
+# CONTAINER_ENGINE=podman checks that engine up front and passes it as
+# `contemper build --engine`; any other value is refused. A missing
+# engine fails fast, before the go build below.
 #
 # Set CONTEMPER_E2E_COVERDIR to a directory to build contemper with Go's
 # source-code coverage instrumentation and collect the integration
@@ -166,11 +169,23 @@ fi
 [ -n "${DISTRO}" ] || IMAGE="contemper-example-${EXAMPLE}:dev"
 
 if [ "${BUILD_COMMAND}" -eq 1 ]; then
-	# `contemper build` itself shells out to docker buildx; check here too,
-	# so a missing docker/buildx fails before the go build below rather
-	# than after.
-	command -v docker >/dev/null || { echo "e2e.sh: --build-command requires docker on PATH" >&2; exit 1; }
-	docker buildx version >/dev/null 2>&1 || { echo "e2e.sh: --build-command requires docker buildx ('docker buildx version' failed)" >&2; exit 1; }
+	# `contemper build` shells out to the engine itself; check here too, so
+	# a missing engine fails before the go build below rather than after.
+	build_engine="${CONTAINER_ENGINE:-}"
+	case "${build_engine}" in
+	"" | docker)
+		command -v docker >/dev/null || { echo "e2e.sh: --build-command requires docker on PATH" >&2; exit 1; }
+		docker buildx version >/dev/null 2>&1 || { echo "e2e.sh: --build-command requires docker buildx ('docker buildx version' failed)" >&2; exit 1; }
+		;;
+	podman)
+		command -v podman >/dev/null || { echo "e2e.sh: --build-command with CONTAINER_ENGINE=podman requires podman on PATH" >&2; exit 1; }
+		podman version >/dev/null 2>&1 || { echo "e2e.sh: --build-command with CONTAINER_ENGINE=podman requires a working podman ('podman version' failed)" >&2; exit 1; }
+		;;
+	*)
+		echo "e2e.sh: --build-command: unsupported CONTAINER_ENGINE '${build_engine}' (use docker or podman)" >&2
+		exit 2
+		;;
+	esac
 else
 	engine="${CONTAINER_ENGINE:-}"
 	if [ -z "${engine}" ]; then
@@ -213,7 +228,7 @@ mkdir -p "${OUT}"
 
 if [ "${BUILD_COMMAND}" -eq 1 ]; then
 	echo "==> contemper build examples/${EXAMPLE}" >&2
-	bundle="$("${contemper}" build --target qemu -o "${OUT}" -t "${IMAGE}" "${REPO}/examples/${EXAMPLE}")"
+	bundle="$("${contemper}" build ${build_engine:+--engine "${build_engine}"} --target qemu -o "${OUT}" -t "${IMAGE}" "${REPO}/examples/${EXAMPLE}")"
 else
 	echo "==> ${engine} build ${LABEL}" >&2
 	if [ -n "${DISTRO}" ]; then
