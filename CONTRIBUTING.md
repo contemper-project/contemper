@@ -109,8 +109,10 @@ pulls Docker Hub base images through that mirror instead; other
 registries are not affected.
 
 The `Distributions` workflow (`.github/workflows/distros.yml`) runs every
-entry nightly, and again for each release. It is not part of the CI
-checks that gate pull requests. When an entry fails, the workflow opens
+entry nightly, and again for each release. It also runs on pull
+requests that change the boot script, the distribution matrix or the
+test images, but it is not part of the CI checks that gate pull
+requests. When an entry fails, the workflow opens
 one issue for it and architecture, labelled `distro-test-failure` and
 `area: target-distros`, with the run, the stage that failed (build,
 convert or boot) and the base image digest. Later failing runs add a
