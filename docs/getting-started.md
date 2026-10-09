@@ -102,9 +102,9 @@ your machine with the least fuss:
     there is no tagged release yet) rather than the exact commit and
     build date a downloaded binary embeds.
 
-Building the example below with `contemper build` currently needs Docker
-with buildx (podman support is planned). If you only have podman, skip
-to [Build by hand](#build-by-hand), which works with either engine.
+Building the example below with `contemper build` needs Docker with
+buildx or podman. [Build by hand](#build-by-hand) works with either
+engine without it.
 
 ### Shell completion
 
@@ -175,8 +175,8 @@ The example lives in `examples/alpine/Containerfile`. It installs a
 kernel, generates a generic initrd, writes a kernel command line and
 enables OpenRC, all at the paths contemper expects.
 
-`contemper build` runs `docker buildx build --load` on it and converts
-the result in one step. It picks up the `Containerfile` on its own when
+`contemper build` runs `docker buildx build --load` (or `podman build`,
+see `--engine`) on it and converts the result in one step. It picks up the `Containerfile` on its own when
 the directory has no `Dockerfile`:
 
 ```console
@@ -187,8 +187,8 @@ _out/alpine-dev.aarch64
 The image is tagged after the directory (`alpine:dev`), and the bundle
 is named after the tag and the architecture (`x86_64` on an x86-64
 host). A *bundle* is a directory holding a UEFI-bootable qcow2 disk and
-a `contemper.json` manifest. The build's progress, buildx's own output
-included, goes to stderr; stdout carries only the bundle's path.
+a `contemper.json` manifest. The build's progress, the engine's own
+output included, goes to stderr; stdout carries only the bundle's path.
 
 Boot it:
 
@@ -211,9 +211,10 @@ $ contemper deploy --to local-qemu "$(contemper build --target qemu -o _out exam
     --expect contemper-boot-ok --timeout 180s
 ```
 
-`contemper build` currently requires Docker with buildx; podman support
-is planned. See [source references](reference/sources.md) for the
-`docker-daemon:` source it converts through.
+`contemper build` uses Docker with buildx when it is usable and podman
+otherwise; `--engine docker` or `--engine podman` picks one. See
+[source references](reference/sources.md) for the `docker-daemon:` and
+`containers-storage:` sources it converts through.
 
 ## Build by hand
 
