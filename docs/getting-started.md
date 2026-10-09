@@ -154,6 +154,17 @@ $ gh attestation verify contemper_0.1.0_linux_amd64.tar.gz --repo contemper-proj
 
 (with the archive, `.deb` or `.rpm` name you downloaded).
 
+The release also carries the attestations as Sigstore bundles
+(`checksums.txt.sigstore.json` for `checksums.txt`, and
+`contemper_<version>_provenance.sigstore.json` for every archive and
+package), so you can verify offline after downloading the bundle next to
+the file:
+
+```console
+$ gh attestation verify contemper_0.1.0_linux_amd64.tar.gz \
+    --bundle contemper_0.1.0_provenance.sigstore.json --repo contemper-project/contemper
+```
+
 That's on top of the usual checksum check against the release's
 `checksums.txt`, which lists every archive and package and is itself
 attested the same way.
