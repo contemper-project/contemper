@@ -118,7 +118,10 @@ contemper is pre-1.0: the CLI and the bundle format may still change.
 
 **Works today:**
 
-- `convert` for the qemu target, `build` (with Docker; podman support is
+- `convert` for the qemu and incus targets (the latter adds the Incus
+  agent through the default
+  [`incus-support`](https://github.com/contemper-project/support-images)
+  image), `build` (with Docker; podman support is
   planned), and `deploy --to local-qemu`.
 - Two boot modes: a UKI built by contemper, or the image's own
   bootloader with in-place kernel updates and Secure Boot support.
@@ -129,8 +132,7 @@ contemper is pre-1.0: the CLI and the bundle format may still change.
   sizes, formats and mounts it in the guest through a first-boot helper,
   persisted across redeploys for `local-qemu` instances.
 
-**Planned:** building with podman, and an Incus target with `publish` and
-`deploy`. See the
+**Planned:** building with podman, and `publish` and `deploy` for Incus. See the
 [roadmap](docs/design/roadmap.md) for the rest.
 
 ## Documentation

@@ -192,7 +192,11 @@ COPY --chmod=0755 my-openrc-hook /etc/local.d/my-hook.start
 ## Naming
 
 contemper's own support images (the ones a target uses by default; see
-[Targets](targets.md#default-support-images)) follow one convention:
+[Targets](targets.md#default-support-images)) are developed in the
+[support-images repository](https://github.com/contemper-project/support-images)
+and released independently of contemper. The `incus` target uses
+`ghcr.io/contemper-project/incus-support:v1` unless `--support` names
+another. They follow one convention:
 
 - The entry point for `<name>`'s target lives at
   `ghcr.io/contemper-project/<name>-support`, for example
