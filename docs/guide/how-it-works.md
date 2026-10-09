@@ -81,7 +81,10 @@ architectures), so scripts can capture it.
 
 - `--progress auto|tty|plain`: `auto` (the default) shows a live spinner
   and timer on a terminal and plain lines otherwise, including in CI and
-  when `NO_COLOR` or `TERM=dumb` is set.
+  when `NO_COLOR` or `TERM=dumb` is set. While the disk is assembled,
+  the spinner line names the current step (`staging 4096 / 9626 files`,
+  `writing ext4 42%`, `checking ext4`, `converting to qcow2 87%`);
+  plain output keeps one line for the whole stage.
 - `-v, --verbose`: also show each host tool invocation. Their own output
   is otherwise shown only when they fail.
 - `-q, --quiet`: no progress output.
