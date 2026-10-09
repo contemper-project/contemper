@@ -240,12 +240,14 @@ func (UEFIQcow2) Assemble(ctx context.Context, rfs *rootfs.Rootfs, val *validate
 		gptOpts.ESPSizeBytes = espSize
 		gptOpts.ESPTree = espTree(rfs, bl)
 	}
+	stage.SetPhase("building disk image")
 	if _, err := disk.BuildGPTImage(rawPath, gptOpts); err != nil {
 		stage.Fail("assemble", "building the GPT disk image failed", err.Error())
 		return nil, nil, fmt.Errorf("building disk image: %w", err)
 	}
 
 	if opts.KeepRaw {
+		stage.SetPhase("keeping disk.raw")
 		if err := copyFile(rawPath, filepath.Join(outDir, "disk.raw")); err != nil {
 			stage.Fail("assemble", err.Error(), "")
 			return nil, nil, fmt.Errorf("keeping disk.raw: %w", err)
@@ -253,7 +255,8 @@ func (UEFIQcow2) Assemble(ctx context.Context, rfs *rootfs.Rootfs, val *validate
 	}
 
 	qcow2Path := filepath.Join(outDir, "disk.qcow2")
-	if err := disk.ConvertToQcow2(ctx, rawPath, qcow2Path, rep); err != nil {
+	stage.SetPhase("converting to qcow2")
+	if err := disk.ConvertToQcow2(ctx, rawPath, qcow2Path, rep, stage); err != nil {
 		hint := ""
 		if hostenv.Find("qemu-img") == "" {
 			hint = "install qemu-img: " + hostenv.InstallHint("qemu-img")
@@ -262,6 +265,7 @@ func (UEFIQcow2) Assemble(ctx context.Context, rfs *rootfs.Rootfs, val *validate
 		return nil, nil, err
 	}
 
+	stage.SetPhase("hashing")
 	info, err := diskInfoFor(qcow2Path, "qcow2")
 	if err != nil {
 		stage.Fail("assemble", err.Error(), "")

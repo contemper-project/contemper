@@ -227,7 +227,7 @@ func captureQemuImg(t *testing.T) string {
 	t.Helper()
 	bin := t.TempDir()
 	capture := filepath.Join(t.TempDir(), "disk.raw")
-	script := "#!/bin/sh\nmv \"$4\" \"" + capture + "\" && printf 'placeholder qcow2\\n' > \"$5\"\n"
+	script := "#!/bin/sh\nfor a; do src=$dst; dst=$a; done\nmv \"$src\" \"" + capture + "\" && printf 'placeholder qcow2\\n' > \"$dst\"\n"
 	if err := os.WriteFile(filepath.Join(bin, "qemu-img"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}

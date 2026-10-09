@@ -98,3 +98,16 @@ func TestDebugfsCommandCounterReportsPercent(t *testing.T) {
 func TestDebugfsCommandCounterEmptyScript(t *testing.T) {
 	debugfsCommandCounter("", func(int) { t.Error("reported progress for an empty script") })("debugfs: x")
 }
+
+func TestStripQemuProgress(t *testing.T) {
+	// Recorded shape of a failing `qemu-img convert -p`: readouts end in
+	// \r, the error comes on its own line.
+	out := "    (0.00/100%)\r    (1.32/100%)\r    (2.41/100%)\r\nqemu-img: error while writing at byte 1048576: No space left on device\n"
+	want := "qemu-img: error while writing at byte 1048576: No space left on device\n"
+	if got := stripQemuProgress(out); got != want {
+		t.Errorf("stripQemuProgress = %q, want %q", got, want)
+	}
+	if got := stripQemuProgress("    (5.00/100%)\r"); got != "" {
+		t.Errorf("readouts only = %q, want empty", got)
+	}
+}

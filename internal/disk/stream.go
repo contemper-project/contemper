@@ -100,3 +100,19 @@ func parseQemuProgress(line string) (float64, bool) {
 	}
 	return pct, true
 }
+
+// stripQemuProgress removes the `qemu-img -p` readouts from out, leaving
+// the tool's own messages (its error text) for a failure report.
+func stripQemuProgress(out string) string {
+	var kept []string
+	for _, seg := range strings.FieldsFunc(out, func(r rune) bool { return r == '\n' || r == '\r' }) {
+		if _, ok := parseQemuProgress(seg); ok {
+			continue
+		}
+		kept = append(kept, seg)
+	}
+	if len(kept) == 0 {
+		return ""
+	}
+	return strings.Join(kept, "\n") + "\n"
+}
