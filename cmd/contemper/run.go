@@ -19,10 +19,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/contemper-project/contemper/internal/buildinfo"
-	"github.com/contemper-project/contemper/internal/buildx"
 	"github.com/contemper-project/contemper/internal/bundle"
 	"github.com/contemper-project/contemper/internal/disk"
 	"github.com/contemper-project/contemper/internal/guestmeta"
+	"github.com/contemper-project/contemper/internal/imagebuild"
 	"github.com/contemper-project/contemper/internal/limits"
 	"github.com/contemper-project/contemper/internal/localqemu"
 	"github.com/contemper-project/contemper/internal/progress"
@@ -691,7 +691,7 @@ func runBuild(ctx context.Context, cmd *cobra.Command, opts buildOptions) error 
 
 	tag := opts.tag
 	if tag == "" {
-		tag = buildx.DefaultTag(opts.context)
+		tag = imagebuild.DefaultTag(opts.context)
 		if !opts.convert.quiet {
 			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "contemper: build: no --tag given, using %s\n", tag)
 		}
@@ -701,10 +701,10 @@ func runBuild(ctx context.Context, cmd *cobra.Command, opts buildOptions) error 
 
 	file := opts.file
 	if file == "" {
-		file = buildx.DefaultFile(opts.context)
+		file = imagebuild.DefaultFile(opts.context)
 	}
 
-	bxOpts := buildx.Options{
+	bxOpts := imagebuild.Options{
 		Context:   opts.context,
 		File:      file,
 		Tag:       tag,
@@ -712,12 +712,12 @@ func runBuild(ctx context.Context, cmd *cobra.Command, opts buildOptions) error 
 		BuildArgs: opts.buildArgs,
 	}
 
-	dockerPath, err := buildx.CheckAvailable(ctx, bxOpts)
+	dockerPath, err := imagebuild.CheckAvailable(ctx, bxOpts)
 	if err != nil {
 		return err
 	}
 
-	if err := buildx.Build(ctx, dockerPath, bxOpts); err != nil {
+	if err := imagebuild.Build(ctx, dockerPath, bxOpts); err != nil {
 		return fmt.Errorf("docker buildx build: %w", err)
 	}
 
