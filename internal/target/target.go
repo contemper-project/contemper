@@ -65,14 +65,17 @@ func KernelCmdline(author string) string {
 	return strings.TrimSpace("root=LABEL=" + RootLabel + " " + strings.TrimSpace(author))
 }
 
+// IncusSupportRef is the incus targets' default support image.
+const IncusSupportRef = "ghcr.io/contemper-project/incus-support:v1"
+
 // table maps every accepted spelling (aliases and canonical names alike)
 // to a canonical name, its Assembler, and its default support image
 // reference (empty for none).
 //
-// TODO(incus-support): once ghcr.io/contemper-project/incus-support is
-// published, set incus-qcow2's defaultSupport to it. Until then, leaving
-// it empty is deliberate: pointing at a reference that doesn't exist yet
-// would make every incus conversion fail.
+// The incus targets default to the floating major tag v1 of the Incus
+// support image. v1 is the contemper <-> support-image interface
+// contract: releases within it stay compatible with this contemper, and
+// the bundle manifest records the digests the tag resolved to.
 var table = map[string]struct {
 	canonical      string
 	assembler      Assembler
@@ -80,8 +83,8 @@ var table = map[string]struct {
 }{
 	"qemu":        {canonical: "qemu-qcow2", assembler: UEFIQcow2{}},
 	"qemu-qcow2":  {canonical: "qemu-qcow2", assembler: UEFIQcow2{}},
-	"incus":       {canonical: "incus-qcow2", assembler: UEFIQcow2{}},
-	"incus-qcow2": {canonical: "incus-qcow2", assembler: UEFIQcow2{}},
+	"incus":       {canonical: "incus-qcow2", assembler: UEFIQcow2{}, defaultSupport: IncusSupportRef},
+	"incus-qcow2": {canonical: "incus-qcow2", assembler: UEFIQcow2{}, defaultSupport: IncusSupportRef},
 }
 
 // Resolve maps name (an alias or a canonical name) to its canonical
