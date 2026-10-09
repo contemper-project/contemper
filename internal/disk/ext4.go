@@ -88,8 +88,9 @@ type Ext4Options struct {
 	SizeBytes int64
 	// Progress, if non-nil, receives --verbose host-tool argv lines.
 	Progress *progress.Reporter
-	// Stage, if non-nil, receives a live "files done/total" readout
-	// while the debugfs script is being built (TTY progress mode).
+	// Stage, if non-nil, receives the live phase and progress readout
+	// (staging files, writing and checking the filesystem) in TTY
+	// progress mode.
 	Stage *progress.Stage
 }
 
@@ -142,12 +143,14 @@ func PopulateExt4(ctx context.Context, rfs *rootfs.Rootfs, imgPath string, opts 
 	if err := os.WriteFile(confPath, []byte(mke2fsConf), 0o600); err != nil {
 		return nil, fmt.Errorf("writing mke2fs.conf: %w", err)
 	}
+	opts.Stage.SetPhase("creating ext4")
 	mkfsArgs := []string{"-F", "-L", opts.Label, "-E", "root_owner=0:0", imgPath}
 	opts.Progress.VerboseCmd(mkfsPath, mkfsArgs)
 	if out, err := runCmdEnv(ctx, "", []string{mke2fsConfigEnv + "=" + confPath}, mkfsPath, mkfsArgs...); err != nil {
 		return nil, fmt.Errorf("mkfs.ext4: %w\n%s", err, out)
 	}
 
+	opts.Stage.SetPhase("staging")
 	script, warnings, err := buildDebugfsScript(ctx, rfs, payloadDir, opts.Stage)
 	if err != nil {
 		return nil, err
@@ -161,9 +164,10 @@ func PopulateExt4(ctx context.Context, rfs *rootfs.Rootfs, imgPath string, opts 
 		return nil, fmt.Errorf("writing debugfs script: %w", err)
 	}
 
+	opts.Stage.SetPhase("writing ext4")
 	debugfsArgs := []string{"-w", "-f", scriptPath, imgPath}
 	opts.Progress.VerboseCmd(debugfsPath, debugfsArgs)
-	out, runErr := runCmd(ctx, payloadDir, debugfsPath, debugfsArgs...)
+	out, runErr := runCmdStream(ctx, payloadDir, debugfsPath, debugfsCommandCounter(script, func(pct int) { opts.Stage.SetProgressPercent(float64(pct)) }), debugfsArgs...)
 	if marker := findErrorMarker(script, out); marker != "" {
 		return nil, fmt.Errorf("debugfs reported an error while populating %s (matched %q):\n%s", imgPath, marker, out)
 	}
@@ -171,6 +175,7 @@ func PopulateExt4(ctx context.Context, rfs *rootfs.Rootfs, imgPath string, opts 
 		return nil, fmt.Errorf("debugfs: %w\n%s", runErr, out)
 	}
 
+	opts.Stage.SetPhase("checking ext4")
 	fsckArgs := []string{"-fn", imgPath}
 	opts.Progress.VerboseCmd(e2fsckPath, fsckArgs)
 	fsckOut, fsckErr := runCmd(ctx, "", e2fsckPath, fsckArgs...)
@@ -416,6 +421,9 @@ func buildDebugfsScript(ctx context.Context, rfs *rootfs.Rootfs, payloadDir stri
 		fmt.Fprintf(&b, "sif %s links_count %d\n", qp, n)
 	}
 
+	if stage != nil {
+		stage.SetProgressCount(int64(len(paths)), int64(len(paths)), "files")
+	}
 	return b.String(), warnings, nil
 }
 
