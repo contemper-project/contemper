@@ -53,10 +53,11 @@ while true; do sleep 0.05; done
 `
 
 // fastQemuImgScript stands in for a qemu-img that finishes at once: for
-// "qemu-img convert -O qcow2 SRC DST" it writes a small placeholder to
+// "qemu-img convert [-p] -O qcow2 SRC DST" it writes a small placeholder to
 // DST, enough for a conversion to finish and commit a bundle.
 const fastQemuImgScript = `#!/bin/sh
-printf 'placeholder qcow2\n' > "$5"
+for a; do dst=$a; done
+printf 'placeholder qcow2\n' > "$dst"
 `
 
 // installFakeSlowTool puts slowToolScript on PATH as name (e.g.
