@@ -150,9 +150,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
+      - uses: ./.github/actions/setup-go
       # Pin GoReleaser's own version here and in release.yml to the same
       # value, so this snapshot build always matches what actually
       # publishes a release.
