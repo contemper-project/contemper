@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -279,6 +280,15 @@ func TestConvertSeveralArchitecturesOfDockerDaemonRejected(t *testing.T) {
 	}
 }
 
+func TestConvertSeveralArchitecturesOfContainersStorageRejected(t *testing.T) {
+	for _, arch := range []string{"all", "amd64,arm64"} {
+		_, err := runConvertCmd(t, "--arch", arch, "-o", t.TempDir(), "containers-storage:x")
+		if err == nil || !strings.Contains(err.Error(), "containers-storage: sources convert one architecture per run; pass --arch amd64 or --arch arm64") {
+			t.Errorf("--arch %s: error = %v", arch, err)
+		}
+	}
+}
+
 func TestConvertMultiArchReport(t *testing.T) {
 	requireExt4HostTools(t)
 	archive := buildFixtureArchiveFor(t, "arm64", "amd64")
@@ -319,6 +329,55 @@ func TestConvertSingleArchReportHasNoArchitectureHeaders(t *testing.T) {
 	for _, want := range []string{"linux/arm64", "contemper-ready"} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("stderr lacks %q:\n%s", want, stderr)
+		}
+	}
+}
+
+// TestConvertContainersStorage runs `contemper convert` end to end
+// against a fake `podman` that hands back a prebuilt archive for
+// `podman save --format oci-archive`, and checks the bundle is named
+// after the reference and records no host path.
+func TestConvertContainersStorage(t *testing.T) {
+	requireExt4HostTools(t)
+	archive := buildFixtureArchive(t)
+	dir := installFakeTool(t, "podman", "#!/bin/sh\n"+
+		"echo \"$@\" >> \"$FAKE_PODMAN_LOG\"\n"+
+		"[ \"$1 $2 $3 $4\" = \"save --format oci-archive -o\" ] || exit 1\n"+
+		"cp \"$FAKE_PODMAN_ARCHIVE\" \"$5\"\n")
+	logPath := filepath.Join(t.TempDir(), "podman.log")
+	t.Setenv("FAKE_PODMAN_LOG", logPath)
+	t.Setenv("FAKE_PODMAN_ARCHIVE", archive)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	tmpDir := t.TempDir()
+	t.Setenv("TMPDIR", tmpDir)
+
+	outDir := t.TempDir()
+	stdout, err := runConvertCmd(t, "-o", outDir, "containers-storage:my-app:dev")
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	want := filepath.Join(outDir, "my-app-dev."+machineArch(runtime.GOARCH))
+	if strings.TrimSpace(stdout) != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+	m, err := bundle.Read(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Reproducible {
+		t.Errorf("a containers-storage-sourced bundle should not be marked reproducible")
+	}
+	if strings.Contains(m.Source.Ref, tmpDir) {
+		t.Errorf("manifest source ref %q records a host path", m.Source.Ref)
+	}
+	log, _ := os.ReadFile(logPath)
+	if !strings.Contains(string(log), "save --format oci-archive -o ") || !strings.HasSuffix(strings.TrimSpace(string(log)), " my-app:dev") {
+		t.Errorf("podman log = %q", log)
+	}
+	entries, _ := os.ReadDir(tmpDir)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "contemper-containers-storage-") {
+			t.Errorf("temp dir %s left behind", e.Name())
 		}
 	}
 }

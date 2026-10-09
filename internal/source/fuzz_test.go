@@ -19,7 +19,7 @@ func FuzzParseRef(f *testing.F) {
 	for _, s := range []string{
 		"", "alpine", "ghcr.io/acme/app:v1", "docker.io/library/alpine@sha256:" + strings.Repeat("a", 64),
 		"oci-archive:img.tar", "oci:layout", "docker-archive:a/../b.tar", "docker-daemon:app:dev",
-		"oci-archive:", "oci:", "docker-archive:", "docker-daemon:", "docker-daemon:-x", "docker-daemon:--rm",
+		"oci-archive:", "oci:", "docker-archive:", "docker-daemon:", "docker-daemon:-x", "docker-daemon:--rm", "containers-storage:app:dev", "containers-storage:", "containers-storage:-x", "containers-storage:[s]app",
 		"oci:/", "oci:.", "OCI:x", "oci-archive", "docker-daemon:a:b:c", "oci:a//b/",
 	} {
 		f.Add(s)
@@ -36,7 +36,7 @@ func FuzzParseRef(f *testing.F) {
 			if ref.Value != raw {
 				t.Fatalf("registry ref %q changed to %q", raw, ref.Value)
 			}
-			for _, k := range []Kind{KindOCIArchive, KindOCILayout, KindDockerArchive, KindDockerDaemon} {
+			for _, k := range []Kind{KindOCIArchive, KindOCILayout, KindDockerArchive, KindDockerDaemon, KindContainersStorage} {
 				if strings.HasPrefix(raw, string(k)+":") {
 					t.Fatalf("%q has the %s prefix but parsed as a registry ref", raw, k)
 				}
@@ -44,14 +44,14 @@ func FuzzParseRef(f *testing.F) {
 		} else if !strings.HasPrefix(raw, string(ref.Kind)+":") || raw[len(ref.Kind)+1:] != ref.Value {
 			t.Fatalf("ParseRef(%q) = %+v does not match its prefix", raw, ref)
 		}
-		if ref.Kind == KindDockerDaemon && strings.HasPrefix(ref.Value, "-") {
+		if (ref.Kind == KindDockerDaemon || ref.Kind == KindContainersStorage) && strings.HasPrefix(ref.Value, "-") {
 			t.Fatalf("docker-daemon ref %q would be read as a flag", ref.Value)
 		}
 		back, err := ParseRef(ref.String())
 		if err != nil || back.Kind != ref.Kind {
 			t.Fatalf("String %q of %+v does not parse back: %+v, %v", ref.String(), ref, back, err)
 		}
-		if back.Kind != KindRegistry && back.Kind != KindDockerDaemon && back.Value != filepath.Clean(ref.Value) {
+		if back.Kind != KindRegistry && back.Kind != KindDockerDaemon && back.Kind != KindContainersStorage && back.Value != filepath.Clean(ref.Value) {
 			t.Fatalf("path %q came back as %q", ref.Value, back.Value)
 		}
 		if again := back.String(); again != ref.String() {
@@ -73,6 +73,7 @@ func FuzzParseVariantRef(f *testing.F) {
 	f.Add("ghcr.io/acme/support:v1", "docker.io/acme/openrc", true)
 	f.Add("ghcr.io/acme/support:v1", "oci:/etc", true)
 	f.Add("ghcr.io/acme/support:v1", "docker-daemon:secret", true)
+	f.Add("ghcr.io/acme/support:v1", "containers-storage:secret", true)
 	f.Add("ghcr.io/acme/support:v1", "ghcr.io/acme/../victim/x:v1", true)
 	f.Add("ghcr.io/acme/support:v1", "ghcr.io/acme//x:v1", true)
 	f.Add("ghcr.io/acme/support:v1", "ghcr.io/acme/a/b:v1", true)

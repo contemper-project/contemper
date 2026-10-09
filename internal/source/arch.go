@@ -72,8 +72,8 @@ func ParseArchSelection(value string) (ArchSelection, error) {
 }
 
 // ErrPlatformsUnknown is returned by Platforms for a source whose
-// platforms can't be listed without loading it (a docker-daemon: source,
-// which would need a docker save), or that is a single image whose
+// platforms can't be listed without loading it (a docker-daemon: or
+// containers-storage: source, which would need a save), or that is a single image whose
 // config doesn't say which architecture it is (a legacy docker-archive,
 // or a layout with one image and no platform metadata). Load accepts
 // such an image for whatever architecture is asked for.
@@ -98,6 +98,9 @@ func (s ArchSelection) Resolve(ctx context.Context, ref Ref) ([]v1.Platform, err
 		// returned above.
 		if ref.Kind == KindDockerDaemon {
 			return nil, fmt.Errorf("docker-daemon: sources convert one architecture per run; pass --arch amd64 or --arch arm64 (or push or `docker save` the multi-platform image and convert that)")
+		}
+		if ref.Kind == KindContainersStorage {
+			return nil, fmt.Errorf("containers-storage: sources convert one architecture per run; pass --arch amd64 or --arch arm64 (or push or `podman save` the multi-platform image and convert that)")
 		}
 		return nil, fmt.Errorf("%s has no platform metadata to choose architectures from; pass --arch with one architecture", ref.String())
 	}
@@ -198,7 +201,7 @@ func Platforms(ctx context.Context, ref Ref) ([]v1.Platform, error) {
 			return nil, fmt.Errorf("reading docker-archive %q: %w", ref.Value, err)
 		}
 		return platformsOfImage(img, ref.Value)
-	case KindDockerDaemon:
+	case KindDockerDaemon, KindContainersStorage:
 		return nil, ErrPlatformsUnknown
 	default:
 		return nil, fmt.Errorf("unknown source kind %q", ref.Kind)
