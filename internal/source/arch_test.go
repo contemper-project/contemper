@@ -105,6 +105,13 @@ func TestPlatformsOfDockerDaemonUnknown(t *testing.T) {
 	}
 }
 
+func TestPlatformsOfContainersStorageUnknown(t *testing.T) {
+	_, err := source.Platforms(t.Context(), source.Ref{Kind: source.KindContainersStorage, Value: "x:y"})
+	if !errors.Is(err, source.ErrPlatformsUnknown) {
+		t.Errorf("Platforms(containers-storage) error = %v, want ErrPlatformsUnknown", err)
+	}
+}
+
 func TestArchSelectionResolve(t *testing.T) {
 	dir := t.TempDir()
 	buildLayout(t, dir)
@@ -172,6 +179,20 @@ func TestArchSelectionResolve(t *testing.T) {
 	sel, _ = source.ParseArchSelection("amd64")
 	if ps, err := sel.Resolve(t.Context(), dref); err != nil || len(ps) != 1 {
 		t.Errorf("single arch on docker-daemon = %v, %v", ps, err)
+	}
+}
+
+func TestArchSelectionResolveContainersStorage(t *testing.T) {
+	cref := source.Ref{Kind: source.KindContainersStorage, Value: "x:y"}
+	for _, arch := range []string{"all", "amd64,arm64"} {
+		sel, _ := source.ParseArchSelection(arch)
+		if _, err := sel.Resolve(t.Context(), cref); err == nil || !strings.Contains(err.Error(), "containers-storage: sources convert one architecture per run; pass --arch amd64 or --arch arm64") {
+			t.Errorf("%s on containers-storage error = %v", arch, err)
+		}
+	}
+	sel, _ := source.ParseArchSelection("arm64")
+	if ps, err := sel.Resolve(t.Context(), cref); err != nil || len(ps) != 1 {
+		t.Errorf("single arch on containers-storage = %v, %v", ps, err)
 	}
 }
 

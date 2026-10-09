@@ -87,7 +87,7 @@ const (
 // Kind identifies which of the five supported source forms a Ref names.
 type Kind string
 
-// The five supported Kind values, one per source form Ref.Kind can name.
+// The supported Kind values, one per source form Ref.Kind can name.
 const (
 	KindRegistry      Kind = "registry"
 	KindOCIArchive    Kind = "oci-archive"
@@ -97,14 +97,19 @@ const (
 	// Docker daemon's image store, read out with `docker save` (skopeo's
 	// name for this source form).
 	KindDockerDaemon Kind = "docker-daemon"
+	// KindContainersStorage names an image in podman's local image
+	// store, read out with `podman save` (skopeo's name for this source
+	// form, without its [storage-specifier] prefix).
+	KindContainersStorage Kind = "containers-storage"
 )
 
 // Ref is a parsed source reference.
 type Ref struct {
 	Kind Kind
 	// Value is the registry reference string for KindRegistry, the
-	// image reference to `docker save` for KindDockerDaemon, or a
-	// filesystem path (tarball or directory) for the other kinds.
+	// image reference to `docker save` or `podman save` for
+	// KindDockerDaemon and KindContainersStorage, or a filesystem path
+	// (tarball or directory) for the other kinds.
 	Value string
 	// Anonymous makes every registry request for this reference go
 	// out without the user's credentials. ParseVariantRef sets it for
@@ -115,23 +120,30 @@ type Ref struct {
 
 // ParseRef parses a source reference of the form understood by contemper:
 // a plain registry reference, or one of "oci-archive:<path>",
-// "oci:<path>", "docker-archive:<path>", "docker-daemon:<ref>".
+// "oci:<path>", "docker-archive:<path>", "docker-daemon:<ref>",
+// "containers-storage:<ref>".
 func ParseRef(raw string) (Ref, error) {
-	for _, prefix := range []Kind{KindOCIArchive, KindOCILayout, KindDockerArchive, KindDockerDaemon} {
+	for _, prefix := range []Kind{KindOCIArchive, KindOCILayout, KindDockerArchive, KindDockerDaemon, KindContainersStorage} {
 		p := string(prefix) + ":"
 		if strings.HasPrefix(raw, p) {
 			value := strings.TrimPrefix(raw, p)
 			if value == "" {
 				what := "path"
-				if prefix == KindDockerDaemon {
+				if prefix == KindDockerDaemon || prefix == KindContainersStorage {
 					what = "image reference"
 				}
 				return Ref{}, fmt.Errorf("source ref %q: missing %s after %q", raw, what, p)
 			}
-			if prefix == KindDockerDaemon && strings.HasPrefix(value, "-") {
-				// The value becomes an argument to `docker save`; one
-				// starting with "-" would be read as a flag there.
-				return Ref{}, fmt.Errorf("source ref %q: image reference must not start with \"-\"", raw)
+			if prefix == KindDockerDaemon || prefix == KindContainersStorage {
+				if strings.HasPrefix(value, "-") {
+					// The value becomes an argument to `docker save` or
+					// `podman save`; one starting with "-" would be read
+					// as a flag there.
+					return Ref{}, fmt.Errorf("source ref %q: image reference must not start with \"-\"", raw)
+				}
+				if prefix == KindContainersStorage && strings.HasPrefix(value, "[") {
+					return Ref{}, fmt.Errorf("source ref %q: a [storage-specifier] prefix is not supported; give a plain image reference", raw)
+				}
 			}
 			return Ref{Kind: prefix, Value: value}, nil
 		}
@@ -261,13 +273,13 @@ func repoNamespace(repo string) string {
 
 // String returns the reference in the form ParseRef accepts, with local
 // paths cleaned (so "a/../b.tar" is recorded as "b.tar"). A
-// KindDockerDaemon Value is a Docker image reference, not a path, so it
-// is left as given.
+// KindDockerDaemon or KindContainersStorage Value is an image reference,
+// not a path, so it is left as given.
 func (r Ref) String() string {
 	switch r.Kind {
 	case KindRegistry:
 		return r.Value
-	case KindDockerDaemon:
+	case KindDockerDaemon, KindContainersStorage:
 		return string(r.Kind) + ":" + r.Value
 	default:
 		return string(r.Kind) + ":" + filepath.Clean(r.Value)
@@ -316,7 +328,7 @@ func (img *Image) Close() {
 }
 
 // Load resolves ref to a platform-selected image. Canceling ctx stops a
-// registry pull or `docker save` (KindDockerDaemon) in progress.
+// registry pull or `docker save` or `podman save` in progress.
 func Load(ctx context.Context, ref Ref, platform v1.Platform) (*Image, error) {
 	switch ref.Kind {
 	case KindRegistry:
@@ -329,6 +341,8 @@ func Load(ctx context.Context, ref Ref, platform v1.Platform) (*Image, error) {
 		return loadDockerArchive(ref, platform)
 	case KindDockerDaemon:
 		return loadDockerDaemon(ctx, ref, platform)
+	case KindContainersStorage:
+		return loadContainersStorage(ctx, ref, platform)
 	default:
 		return nil, fmt.Errorf("unknown source kind %q", ref.Kind)
 	}
@@ -563,12 +577,61 @@ func loadDockerArchive(ref Ref, platform v1.Platform) (*Image, error) {
 // Canceling ctx stops the `docker save` subprocess (see
 // internal/subprocess).
 func loadDockerDaemon(ctx context.Context, ref Ref, platform v1.Platform) (*Image, error) {
-	dockerPath, err := exec.LookPath("docker")
+	return loadViaSave(ctx, ref, platform, saveSource{
+		tool:      "docker",
+		notFound:  "docker not found on PATH; install Docker to use a docker-daemon: source (https://docs.docker.com/get-docker/)",
+		tmpPrefix: "contemper-docker-daemon-",
+		args: func(archivePath, value string) []string {
+			return []string{"save", "-o", archivePath, value}
+		},
+	})
+}
+
+// loadContainersStorage resolves ref (a "containers-storage:<ref>" source,
+// ref.Value being the image reference as podman's local image store knows
+// it) by running `podman save --format oci-archive` into a temporary
+// archive and reading it back like an oci-archive: source. The bundle is
+// named after ref.Value itself, as for loadDockerDaemon; podman stores
+// unqualified names as "localhost/<name>", which does not affect naming.
+//
+// It is also the entry point for callers that already hold a podman image
+// reference (e.g. a podman-backed build): pass Ref{Kind:
+// KindContainersStorage, Value: ref}.
+func loadContainersStorage(ctx context.Context, ref Ref, platform v1.Platform) (*Image, error) {
+	return loadViaSave(ctx, ref, platform, saveSource{
+		tool:      "podman",
+		notFound:  "podman not found on PATH; install podman to use a containers-storage: source (https://podman.io/docs/installation)",
+		tmpPrefix: "contemper-containers-storage-",
+		args: func(archivePath, value string) []string {
+			return []string{"save", "--format", "oci-archive", "-o", archivePath, value}
+		},
+	})
+}
+
+// saveSource describes a container tool whose `save` command exports a
+// locally stored image as a tarball.
+type saveSource struct {
+	// tool is the executable looked up on PATH; it also labels errors
+	// ("<tool> save <ref>").
+	tool string
+	// notFound is the error text when tool is not on PATH.
+	notFound string
+	// tmpPrefix is the prefix of the temporary directory.
+	tmpPrefix string
+	// args builds the argv (after the executable) that writes the image
+	// named value to archivePath.
+	args func(archivePath, value string) []string
+}
+
+// loadViaSave is the shared body of loadDockerDaemon and
+// loadContainersStorage; see loadDockerDaemon for the archive handling.
+func loadViaSave(ctx context.Context, ref Ref, platform v1.Platform, src saveSource) (*Image, error) {
+	toolPath, err := exec.LookPath(src.tool)
 	if err != nil {
-		return nil, fmt.Errorf("docker not found on PATH; install Docker to use a docker-daemon: source (https://docs.docker.com/get-docker/)")
+		return nil, errors.New(src.notFound)
 	}
 
-	tmpDir, err := os.MkdirTemp("", "contemper-docker-daemon-")
+	tmpDir, err := os.MkdirTemp("", src.tmpPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("creating temp dir: %w", err)
 	}
@@ -576,17 +639,17 @@ func loadDockerDaemon(ctx context.Context, ref Ref, platform v1.Platform) (*Imag
 
 	archivePath := filepath.Join(tmpDir, "image.tar")
 	// ref.Value is the user-given source ref, never a shell.
-	cmd := subprocess.Command(ctx, dockerPath, "save", "-o", archivePath, ref.Value)
+	cmd := subprocess.Command(ctx, toolPath, src.args(archivePath, ref.Value)...)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		cleanup()
-		return nil, fmt.Errorf("docker save %s: %w", ref.Value, err)
+		return nil, fmt.Errorf("%s save %s: %w", src.tool, ref.Value, err)
 	}
 
 	isOCILayout, err := archiveHasIndexJSON(archivePath)
 	if err != nil {
 		cleanup()
-		return nil, fmt.Errorf("reading docker save output for %q: %w", ref.Value, err)
+		return nil, fmt.Errorf("reading %s save output for %q: %w", src.tool, ref.Value, err)
 	}
 
 	var img *Image
@@ -605,7 +668,7 @@ func loadDockerDaemon(ctx context.Context, ref Ref, platform v1.Platform) (*Imag
 		_ = f.Close()
 		if extractErr != nil {
 			cleanup()
-			return nil, fmt.Errorf("extracting docker save output for %q: %w", ref.Value, extractErr)
+			return nil, fmt.Errorf("extracting %s save output for %q: %w", src.tool, ref.Value, extractErr)
 		}
 		// Only the extracted layout is read from here on; drop the
 		// archive now rather than keep two copies of the image on disk
@@ -632,8 +695,8 @@ func loadDockerDaemon(ctx context.Context, ref Ref, platform v1.Platform) (*Imag
 }
 
 // daemonRefName derives the bundle-naming (basename, tag) pair for a
-// docker-daemon: reference the same way a registry reference is named
-// (see referenceName). A value that doesn't parse as an image reference
+// docker-daemon: or containers-storage: reference the same way a
+// registry reference is named (see referenceName). A value that doesn't parse as an image reference
 // falls back to splitRepoTag.
 func daemonRefName(value string) (string, string) {
 	nref, err := name.ParseReference(value)
@@ -697,6 +760,9 @@ func IndexAnnotations(ctx context.Context, ref Ref, platform v1.Platform) (map[s
 	case KindDockerArchive:
 		// docker-archive's manifest.json has no index-descriptor
 		// annotation concept.
+		return nil, nil
+	case KindContainersStorage:
+		// As for docker-daemon: another podman save is not worth it.
 		return nil, nil
 	case KindDockerDaemon:
 		// A user can pass --support docker-daemon:<ref> directly. Reading
