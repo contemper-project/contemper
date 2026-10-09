@@ -5,8 +5,9 @@ name: arm64 nightly
 # has no /dev/kvm (and won't get it, see
 # https://github.com/actions/runner-images/issues/14062), so QEMU runs
 # under TCG and the test takes too long to gate every PR. It runs on a
-# schedule instead and is deliberately not part of ci.yml's `ci-result`;
-# a failure shows up as a red run here.
+# schedule, on pushes to main and on pull requests that change what it
+# uses, and is deliberately not part of ci.yml's `ci-result`; a failure
+# shows up as a red run here.
 
 on:
   schedule:
@@ -16,6 +17,15 @@ on:
     branches: [main]
     paths:
       - 'hack/e2e-bootloader*'
+      - 'hack/e2e-bootloader/**'
+      - 'examples/debian-grub/**'
+      - 'internal/qemu/**'
+      - 'internal/validate/**'
+      - '.github/workflows/arm64-nightly.yml'
+  pull_request:
+    paths:
+      - 'hack/e2e-bootloader*'
+      - 'hack/e2e-bootloader/**'
       - 'examples/debian-grub/**'
       - 'internal/qemu/**'
       - 'internal/validate/**'

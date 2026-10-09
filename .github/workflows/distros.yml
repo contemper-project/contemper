@@ -12,15 +12,24 @@ name: Distributions
 # GitHub issue per entry and architecture instead (hack/distro-report);
 # see CONTRIBUTING.md.
 #
-# Runs on a schedule, and by hand (Actions tab, or `gh workflow run
-# distros.yml -f ids=fedora-44`). A release starts it through
-# release.yml with `report` set, so the release run itself stays short
-# and the suite shows up as a run of its own. A manual run only files
-# issues when `report` is set.
+# Runs on a schedule, by hand (Actions tab, or `gh workflow run
+# distros.yml -f ids=fedora-44`), and on pull requests that change what
+# it runs (the boot script, the matrix and test images, the entry
+# helper); a pull request run covers every entry on both architectures.
+# A release starts it through release.yml with `report` set, so the
+# release run itself stays short and the suite shows up as a run of its
+# own. Only scheduled runs and runs with `report` set file issues; pull
+# request and plain manual runs never do.
 
 on:
   schedule:
     - cron: "13 4 * * *"
+  pull_request:
+    paths:
+      - 'hack/e2e.sh'
+      - 'hack/distro-entry/**'
+      - 'test/distros/**'
+      - '.github/workflows/distros.yml'
   workflow_dispatch:
     inputs:
       ids:
@@ -42,7 +51,9 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  # A new commit on a pull request supersedes its older run; scheduled,
+  # manual and release runs are never cancelled.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   matrix:
