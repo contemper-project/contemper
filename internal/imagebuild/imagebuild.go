@@ -1,8 +1,9 @@
-// Package imagebuild drives `docker buildx build` as a subprocess, for
-// `contemper build` to build an image before handing it to the
-// docker-daemon: source. The argv construction lives in one place (see
-// Args) so a second build engine can be added later without reshaping
-// the command.
+// Package imagebuild drives a container build engine - `docker buildx
+// build` or `podman build` - as a subprocess, for `contemper build` to
+// build an image before handing it to the docker-daemon: or
+// containers-storage: source. The argv construction for each engine
+// lives in one place (see Engine.Args) so that the command, its error
+// messages and its hand-run alternatives all agree.
 package imagebuild
 
 import (
@@ -16,12 +17,35 @@ import (
 	"github.com/contemper-project/contemper/internal/subprocess"
 )
 
-// Options describes one `docker buildx build --load` invocation.
+// Engine names a container build engine, or Auto to pick one.
+type Engine string
+
+const (
+	// Auto picks Docker when it is usable, else Podman. See Resolve.
+	Auto Engine = "auto"
+	// Docker builds with `docker buildx build --load` and hands the
+	// image over through the docker-daemon: source.
+	Docker Engine = "docker"
+	// Podman builds with `podman build` and hands the image over
+	// through the containers-storage: source.
+	Podman Engine = "podman"
+)
+
+// ParseEngine validates the value of an --engine flag.
+func ParseEngine(s string) (Engine, error) {
+	switch e := Engine(s); e {
+	case Auto, Docker, Podman:
+		return e, nil
+	}
+	return "", fmt.Errorf("--engine %q: must be auto, docker or podman", s)
+}
+
+// Options describes one build invocation.
 type Options struct {
 	// Context is the build context directory.
 	Context string
-	// File is the Containerfile/Dockerfile path; empty uses buildx's own
-	// default (<Context>/Dockerfile). See DefaultFile.
+	// File is the Containerfile/Dockerfile path; empty uses the
+	// engine's own default (<Context>/Dockerfile). See DefaultFile.
 	File string
 	// Tag is the image tag to build and load as.
 	Tag string
@@ -31,10 +55,17 @@ type Options struct {
 	BuildArgs []string
 }
 
-// Args returns the argv `docker buildx build --load` runs with, not
-// including the leading "docker".
-func Args(opts Options) []string {
-	args := []string{"buildx", "build", "--load", "--platform", opts.Platform, "-t", opts.Tag}
+// Args returns the argv the engine builds with, not including the
+// leading program name: `buildx build --load ...` for docker, `build
+// ...` for podman, which builds into its local image store without
+// being asked to.
+func (e Engine) Args(opts Options) []string {
+	var args []string
+	if e == Podman {
+		args = []string{"build", "--platform", opts.Platform, "-t", opts.Tag}
+	} else {
+		args = []string{"buildx", "build", "--load", "--platform", opts.Platform, "-t", opts.Tag}
+	}
 	if opts.File != "" {
 		args = append(args, "-f", opts.File)
 	}
@@ -44,11 +75,29 @@ func Args(opts Options) []string {
 	return append(args, opts.Context)
 }
 
-// Command returns the full "docker buildx build ..." invocation as a
-// shell-quoted, copy-pasteable string, for messages shown when contemper
-// cannot run it itself.
-func Command(opts Options) string {
-	return shellQuote(append([]string{"docker"}, Args(opts)...))
+// Command returns the full build invocation as a shell-quoted,
+// copy-pasteable string, for messages shown when contemper cannot run
+// it itself.
+func (e Engine) Command(opts Options) string {
+	return shellQuote(append([]string{string(e)}, e.Args(opts)...))
+}
+
+// BuildName is how errors from the engine's build are labelled:
+// "docker buildx build" or "podman build".
+func (e Engine) BuildName() string {
+	if e == Podman {
+		return "podman build"
+	}
+	return "docker buildx build"
+}
+
+// SourceRef returns the source reference the built image is converted
+// through: docker-daemon:<tag> or containers-storage:<tag>.
+func (e Engine) SourceRef(tag string) string {
+	if e == Podman {
+		return "containers-storage:" + tag
+	}
+	return "docker-daemon:" + tag
 }
 
 // DefaultFile returns the build file to pass as -f for contextDir when
@@ -72,48 +121,103 @@ func isFile(p string) bool {
 	return err == nil && !st.IsDir()
 }
 
-// Build runs `docker buildx build --load` as a subprocess at dockerPath,
-// argv only (no shell). Both its stdout and stderr go to the current
-// process's stderr (buildx writes build progress there), so the
+// Build runs the engine's build as a subprocess at enginePath, argv
+// only (no shell). Both its stdout and stderr go to the current
+// process's stderr (the engines write build progress there), so the
 // caller's stdout carries only its own result; stdin is passed through
 // for a context or file read from "-". Canceling ctx stops it.
-func Build(ctx context.Context, dockerPath string, opts Options) error {
-	args := Args(opts)
-	cmd := subprocess.Command(ctx, dockerPath, args...)
+func (e Engine) Build(ctx context.Context, enginePath string, opts Options) error {
+	cmd := subprocess.Command(ctx, enginePath, e.Args(opts)...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
-// CheckAvailable verifies that docker is on PATH and its buildx plugin
-// works, returning the resolved docker path. On failure it returns an
-// error that shows the exact command opts describes, shell-quoted and
-// copy-pasteable, along with a suggestion to build the image by hand and
-// convert it with `contemper convert docker-daemon:<tag>` - it names no
-// docker/buildx invocation beyond `docker buildx version`, the check
-// itself.
-func CheckAvailable(ctx context.Context, opts Options) (string, error) {
-	dockerPath, err := exec.LookPath("docker")
-	if err != nil {
-		return "", unavailableError(opts, "docker is not installed, or not on PATH")
+// CheckAvailable verifies that the engine can build, returning its
+// resolved path. Docker needs `docker` on PATH with a working buildx
+// plugin, and not to be podman's docker emulation (which has no
+// buildx); podman needs `podman` on PATH with a working `podman
+// version`. On failure the error shows why and the exact command opts
+// describes, shell-quoted and copy-pasteable, with a suggestion to
+// build the image by hand and convert it - it names no engine
+// invocation beyond the cheap check itself.
+func (e Engine) CheckAvailable(ctx context.Context, opts Options) (string, error) {
+	path, reason := e.check(ctx)
+	if reason != "" {
+		return "", fmt.Errorf("%s\n\n%s", reason, handRun("build the image by hand and run this instead", e, opts))
 	}
-	cmd := subprocess.Command(ctx, dockerPath, "buildx", "version")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		reason := "docker buildx is not available"
-		if trimmed := strings.TrimSpace(string(out)); trimmed != "" {
-			reason += ": " + trimmed
-		}
-		return "", unavailableError(opts, reason)
-	}
-	return dockerPath, nil
+	return path, nil
 }
 
-func unavailableError(opts Options, reason string) error {
-	return fmt.Errorf(
-		"%s\n\nbuild the image by hand and run this instead:\n\n  %s\n\n  contemper convert docker-daemon:%s",
-		reason, Command(opts), opts.Tag,
+// Resolve picks the engine to build with. An explicit Docker or Podman
+// is only checked for itself. Auto tries docker first, which keeps
+// hosts that have both building as they always did, then podman; when
+// neither is usable the error gives each engine's reason and both
+// hand-run alternatives.
+func Resolve(ctx context.Context, want Engine, opts Options) (Engine, string, error) {
+	if want != Auto {
+		path, err := want.CheckAvailable(ctx, opts)
+		return want, path, err
+	}
+	dockerPath, dockerReason := Docker.check(ctx)
+	if dockerReason == "" {
+		return Docker, dockerPath, nil
+	}
+	podmanPath, podmanReason := Podman.check(ctx)
+	if podmanReason == "" {
+		return Podman, podmanPath, nil
+	}
+	return "", "", fmt.Errorf(
+		"neither docker buildx nor podman is usable:\n\n  docker: %s\n  podman: %s\n\n%s",
+		dockerReason, podmanReason,
+		handRun("build the image by hand with either engine and run the matching pair instead", Docker, opts, Podman),
 	)
+}
+
+// check reports why the engine is unusable, or "" and its path when it
+// is usable.
+func (e Engine) check(ctx context.Context) (path, reason string) {
+	path, err := exec.LookPath(string(e))
+	if err != nil {
+		return "", string(e) + " is not installed, or not on PATH"
+	}
+	if e == Podman {
+		if out, err := subprocess.Command(ctx, path, "version").CombinedOutput(); err != nil {
+			return "", withOutput("podman is not working", out)
+		}
+		return path, ""
+	}
+	// podman's docker emulation answers `docker --version` as podman.
+	if out, err := subprocess.Command(ctx, path, "--version").Output(); err == nil &&
+		strings.HasPrefix(strings.TrimSpace(string(out)), "podman version") {
+		return "", "docker is podman's docker emulation, which has no buildx"
+	}
+	if out, err := subprocess.Command(ctx, path, "buildx", "version").CombinedOutput(); err != nil {
+		return "", withOutput("docker buildx is not available", out)
+	}
+	return path, ""
+}
+
+func withOutput(reason string, out []byte) string {
+	if trimmed := strings.TrimSpace(string(out)); trimmed != "" {
+		reason += ": " + trimmed
+	}
+	return reason
+}
+
+// handRun formats the hand-run alternative for each of engines: the
+// build command and the contemper convert command for its image.
+func handRun(intro string, first Engine, opts Options, more ...Engine) string {
+	var b strings.Builder
+	b.WriteString(intro + ":\n")
+	for i, e := range append([]Engine{first}, more...) {
+		if i > 0 {
+			b.WriteString("\nor:\n")
+		}
+		fmt.Fprintf(&b, "\n  %s\n\n  contemper convert %s\n", e.Command(opts), e.SourceRef(opts.Tag))
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // shellQuote joins args into a POSIX-shell-safe, copy-pasteable command

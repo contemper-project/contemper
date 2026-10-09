@@ -59,10 +59,13 @@ type buildOptions struct {
 	tag       string
 	buildArgs []string
 	imageOnly bool
+	// engine is the --engine value: auto, docker or podman.
+	engine string
 	// convert carries every flag `build` shares with `convert` (see
-	// registerConvertFlags); convert.arch also selects the buildx
+	// registerConvertFlags); convert.arch also selects the build
 	// --platform, and convert.sourceRef is filled in by runBuild once
-	// the tag is known, from "docker-daemon:<tag>".
+	// the tag is known, from "docker-daemon:<tag>" or
+	// "containers-storage:<tag>" depending on the engine.
 	convert convertOptions
 }
 
@@ -669,17 +672,22 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 	}, nil
 }
 
-// runBuild builds opts.context with `docker buildx build --load`, then -
-// unless --image-only stops it there - converts the resulting image
-// through the docker-daemon: source with the same runConvert code path
-// `convert` uses, so every convert flag applies to build too.
+// runBuild builds opts.context with `docker buildx build --load` or
+// `podman build`, then - unless --image-only stops it there - converts
+// the resulting image through the docker-daemon: or containers-storage:
+// source with the same runConvert code path `convert` uses, so every
+// convert flag applies to build too.
 func runBuild(ctx context.Context, cmd *cobra.Command, opts buildOptions) error {
+	want, err := imagebuild.ParseEngine(opts.engine)
+	if err != nil {
+		return err
+	}
 	sel, err := source.ParseArchSelection(opts.convert.arch)
 	if err != nil {
 		return err
 	}
 	if sel.All || sel.Group {
-		return fmt.Errorf("--arch %q: build produces one architecture at a time; build a multi-platform image with docker buildx, then run `contemper convert --arch all` on it", opts.convert.arch)
+		return fmt.Errorf("--arch %q: build produces one architecture at a time; build a multi-platform image with docker buildx or podman, then run `contemper convert --arch all` on it", opts.convert.arch)
 	}
 	platform := v1.Platform{OS: "linux", Architecture: sel.Archs[0]}
 	if !opts.imageOnly {
@@ -704,7 +712,7 @@ func runBuild(ctx context.Context, cmd *cobra.Command, opts buildOptions) error 
 		file = imagebuild.DefaultFile(opts.context)
 	}
 
-	bxOpts := imagebuild.Options{
+	buildOpts := imagebuild.Options{
 		Context:   opts.context,
 		File:      file,
 		Tag:       tag,
@@ -712,13 +720,13 @@ func runBuild(ctx context.Context, cmd *cobra.Command, opts buildOptions) error 
 		BuildArgs: opts.buildArgs,
 	}
 
-	dockerPath, err := imagebuild.CheckAvailable(ctx, bxOpts)
+	engine, enginePath, err := imagebuild.Resolve(ctx, want, buildOpts)
 	if err != nil {
 		return err
 	}
 
-	if err := imagebuild.Build(ctx, dockerPath, bxOpts); err != nil {
-		return fmt.Errorf("docker buildx build: %w", err)
+	if err := engine.Build(ctx, enginePath, buildOpts); err != nil {
+		return fmt.Errorf("%s: %w", engine.BuildName(), err)
 	}
 
 	if opts.imageOnly {
@@ -726,7 +734,7 @@ func runBuild(ctx context.Context, cmd *cobra.Command, opts buildOptions) error 
 		return nil
 	}
 
-	opts.convert.sourceRef = "docker-daemon:" + tag
+	opts.convert.sourceRef = engine.SourceRef(tag)
 	return runConvert(ctx, cmd, opts.convert)
 }
 
