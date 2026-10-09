@@ -1,4 +1,4 @@
-package buildx_test
+package imagebuild_test
 
 import (
 	"os"
@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contemper-project/contemper/internal/buildx"
+	"github.com/contemper-project/contemper/internal/imagebuild"
 )
 
 func TestArgs(t *testing.T) {
-	got := buildx.Args(buildx.Options{
+	got := imagebuild.Args(imagebuild.Options{
 		Context:   "./my-app",
 		File:      "docker/Containerfile",
 		Tag:       "my-app:dev",
@@ -33,7 +33,7 @@ func TestArgs(t *testing.T) {
 }
 
 func TestArgsNoFileNoBuildArgs(t *testing.T) {
-	got := buildx.Args(buildx.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
+	got := imagebuild.Args(imagebuild.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
 	want := []string{"buildx", "build", "--load", "--platform", "linux/amd64", "-t", "my-app:dev", "."}
 	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 		t.Errorf("Args = %q, want %q", got, want)
@@ -41,7 +41,7 @@ func TestArgsNoFileNoBuildArgs(t *testing.T) {
 }
 
 func TestCommandIsShellQuotedAndCopyPasteable(t *testing.T) {
-	cmd := buildx.Command(buildx.Options{
+	cmd := imagebuild.Command(imagebuild.Options{
 		Context:  "a dir/with spaces",
 		Tag:      "my-app:dev",
 		Platform: "linux/amd64",
@@ -64,7 +64,7 @@ func TestDefaultTag(t *testing.T) {
 		"-":              "image",
 		"./.hidden_":     "hidden",
 	} {
-		got := buildx.DefaultTag(dir)
+		got := imagebuild.DefaultTag(dir)
 		want := wantBase + ":dev"
 		if got != want {
 			t.Errorf("DefaultTag(%q) = %q, want %q", dir, got, want)
@@ -87,7 +87,7 @@ func TestDefaultTagCurrentDir(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(cwd) })
 
-	got := buildx.DefaultTag(".")
+	got := imagebuild.DefaultTag(".")
 	want := "my-project:dev"
 	if got != want {
 		t.Errorf("DefaultTag(.) = %q, want %q", got, want)
@@ -117,7 +117,7 @@ func TestSanitizeRepoName(t *testing.T) {
 		"!!!":              "",
 	}
 	for in, want := range cases {
-		got := buildx.SanitizeRepoName(in)
+		got := imagebuild.SanitizeRepoName(in)
 		if got != want {
 			t.Errorf("SanitizeRepoName(%q) = %q, want %q", in, got, want)
 		}
@@ -148,7 +148,7 @@ func TestArgsDefaultFile(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			got := buildx.Args(buildx.Options{Context: ctx, File: buildx.DefaultFile(ctx), Tag: "my-app:dev", Platform: "linux/amd64"})
+			got := imagebuild.Args(imagebuild.Options{Context: ctx, File: imagebuild.DefaultFile(ctx), Tag: "my-app:dev", Platform: "linux/amd64"})
 			want := []string{"buildx", "build", "--load", "--platform", "linux/amd64", "-t", "my-app:dev"}
 			if tc.wantF {
 				want = append(want, "-f", filepath.Join(ctx, "Containerfile"))
@@ -178,7 +178,7 @@ func TestBuildKeepsStdoutClean(t *testing.T) {
 	defer func() { _ = stdout.Close() }()
 	orig := os.Stdout
 	os.Stdout = stdout
-	err = buildx.Build(t.Context(), dockerPath, buildx.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
+	err = imagebuild.Build(t.Context(), dockerPath, imagebuild.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
 	os.Stdout = orig
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -195,7 +195,7 @@ func TestBuildKeepsStdoutClean(t *testing.T) {
 
 func TestCheckAvailableMissingDocker(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	_, err := buildx.CheckAvailable(t.Context(), buildx.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
+	_, err := imagebuild.CheckAvailable(t.Context(), imagebuild.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
 	if err == nil {
 		t.Fatalf("CheckAvailable: expected an error when docker is not on PATH")
 	}
@@ -212,7 +212,7 @@ func TestCheckAvailableMissingBuildx(t *testing.T) {
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	_, err := buildx.CheckAvailable(t.Context(), buildx.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
+	_, err := imagebuild.CheckAvailable(t.Context(), imagebuild.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
 	if err == nil {
 		t.Fatalf("CheckAvailable: expected an error when docker buildx version fails")
 	}
@@ -229,7 +229,7 @@ func TestCheckAvailableOK(t *testing.T) {
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	dockerPath, err := buildx.CheckAvailable(t.Context(), buildx.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
+	dockerPath, err := imagebuild.CheckAvailable(t.Context(), imagebuild.Options{Context: ".", Tag: "my-app:dev", Platform: "linux/amd64"})
 	if err != nil {
 		t.Fatalf("CheckAvailable: %v", err)
 	}

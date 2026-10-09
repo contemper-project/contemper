@@ -1,9 +1,9 @@
-// Package buildx drives `docker buildx build` as a subprocess, for
+// Package imagebuild drives `docker buildx build` as a subprocess, for
 // `contemper build` to build an image before handing it to the
 // docker-daemon: source. The argv construction lives in one place (see
 // Args) so a second build engine can be added later without reshaping
 // the command.
-package buildx
+package imagebuild
 
 import (
 	"context"

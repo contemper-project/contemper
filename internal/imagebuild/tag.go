@@ -1,4 +1,4 @@
-package buildx
+package imagebuild
 
 import (
 	"path/filepath"
