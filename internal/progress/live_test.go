@@ -140,6 +140,8 @@ func TestNilStageIsSafe(t *testing.T) {
 	var s *Stage
 	s.SetProgress(1, 2, "B")
 	s.SetProgressCount(1, 2, "files")
+	s.SetPhase("p")
+	s.SetProgressPercent(5)
 	s.Done("✔", "x", "y")
 	s.Fail("x", "y", "z")
 	s.clearLine()
@@ -360,4 +362,66 @@ func TestLiveBookkeeping(t *testing.T) {
 	if liveOf(r) != nil {
 		t.Error("live pointer not cleared once the live stage stopped")
 	}
+}
+
+func TestSetPhaseAndPercent(t *testing.T) {
+	quietTicker(t)
+	r, w := newTTY()
+	s := r.BeginStage("💿", "assembling")
+	defer s.Done("✔", "x", "")
+	s.start = time.Now()
+
+	s.SetProgressCount(3, 5, "files")
+	s.SetPhase("writing ext4")
+	if s.progress != "" || s.phase != "writing ext4" {
+		t.Errorf("SetPhase left phase=%q progress=%q", s.phase, s.progress)
+	}
+	s.draw()
+	if got, want := w.String(), clr+"💿  assembling ⠋ 0s  writing ext4"; got != want {
+		t.Errorf("phase-only draw = %q, want %q", got, want)
+	}
+
+	s.SetProgressPercent(41.9)
+	if s.progress != "41%" {
+		t.Errorf("percent = %q, want 41%%", s.progress)
+	}
+	s.draw()
+	if got := w.String(); !strings.HasSuffix(got, clr+"💿  assembling ⠙ 0s  writing ext4 41%") {
+		t.Errorf("phase+percent draw = %q", got)
+	}
+
+	s.SetProgressPercent(-3)
+	if s.progress != "0%" {
+		t.Errorf("negative percent = %q, want 0%%", s.progress)
+	}
+	s.SetProgressPercent(250)
+	if s.progress != "100%" {
+		t.Errorf("large percent = %q, want 100%%", s.progress)
+	}
+}
+
+func TestSetPhaseSanitizes(t *testing.T) {
+	s := &Stage{}
+	s.SetPhase("a\x1b[31mb")
+	if s.phase != "a\\x1b[31mb" {
+		t.Errorf("phase = %q", s.phase)
+	}
+}
+
+func TestStageLive(t *testing.T) {
+	var nilStage *Stage
+	if nilStage.Live() {
+		t.Error("nil stage reported live")
+	}
+	r, _ := newTTY()
+	s := r.BeginStage("x", "y")
+	if !s.Live() {
+		t.Error("TTY stage not live")
+	}
+	s.Done("x", "y", "")
+	p := New(&syncBuf{}, ModePlain, false, false).BeginStage("x", "y")
+	if p.Live() {
+		t.Error("plain stage reported live")
+	}
+	p.Done("x", "y", "")
 }
