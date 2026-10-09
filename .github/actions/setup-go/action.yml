@@ -1,0 +1,21 @@
+name: Set up Go
+description: >-
+  Installs the Go version from go.mod and downloads every module the
+  workflows need, including the ones only `go tool` uses.
+
+# setup-go saves GOMODCACHE and GOCACHE under a key derived from go.sum,
+# once, from whichever job finishes first. A job that never runs a `go
+# tool` command would save a module cache without those tools' modules,
+# and every later run would restore that incomplete cache. Downloading
+# all modules here makes the saved cache complete whichever job saves it.
+# Needs the repository checked out first.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version-file: go.mod
+    - name: Download modules
+      shell: bash
+      run: go mod download

@@ -29,8 +29,8 @@ jobs:
     #       the example images they boot, the distribution matrix and
     #       test images (whose Go package and tests run with the rest),
     #       the support images the volumes e2e job installs, the
-    #       embedded systemd-stub checksums, and
-    #       this workflow file itself.
+    #       embedded systemd-stub checksums, the local composite
+    #       actions, and this workflow file itself.
     #   workflows: any workflow file or actionlint's config. Only the
     #       lint job (which actionlints every workflow) needs to run for
     #       these, so a change to e.g. docs.yml alone doesn't trigger
@@ -66,8 +66,10 @@ jobs:
               - 'support/**'
               - 'internal/uki/stubs/**'
               - '.github/workflows/ci.yml'
+              - '.github/actions/**'
             workflows:
               - '.github/workflows/**'
+              - '.github/actions/**'
               - '.github/actionlint.y*ml'
 
   lint:
@@ -78,9 +80,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
+      - uses: ./.github/actions/setup-go
       # Runs the linters and formatters configured in .golangci.yml
       # (gofmt and goimports included - "run", unlike "fmt", reports
       # formatting diffs rather than applying them) against the whole
@@ -125,9 +125,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
+      - uses: ./.github/actions/setup-go
       # Host tools the disk assembler shells out to. Without them the
       # assembler tests skip rather than fail, so install them to get real
       # coverage. ubuntu-latest ships e2fsprogs already.
@@ -184,9 +182,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
+      - uses: ./.github/actions/setup-go
       - name: go build
         env:
           GOOS: ${{ matrix.goos }}
@@ -225,9 +221,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
+      - uses: ./.github/actions/setup-go
       # The runner has /dev/kvm, but not accessible to the runner user.
       - name: Enable KVM
         run: |
@@ -294,9 +288,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
+      - uses: ./.github/actions/setup-go
       # podman and e2fsprogs are preinstalled on the runner. ipxe-qemu
       # provides the virtio network ROMs QEMU needs for virtio-net-pci,
       # which --no-install-recommends would otherwise skip.
@@ -349,9 +341,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
+      - uses: ./.github/actions/setup-go
       # The runner has /dev/kvm, but not accessible to the runner user.
       - name: Enable KVM
         run: |
@@ -414,9 +404,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
+      - uses: ./.github/actions/setup-go
       # The runner has /dev/kvm, but not accessible to the runner user.
       - name: Enable KVM
         run: |
@@ -479,9 +467,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
+      - uses: ./.github/actions/setup-go
       # The runner has /dev/kvm, but not accessible to the runner user.
       - name: Enable KVM
         run: |
@@ -542,9 +528,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
+      - uses: ./.github/actions/setup-go
       # The runner has /dev/kvm, but not accessible to the runner user.
       - name: Enable KVM
         run: |
