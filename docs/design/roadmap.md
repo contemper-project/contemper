@@ -25,7 +25,7 @@ The themes currently open as milestones:
 
 - **Podman builds:** building with podman, and a `containers-storage:`
   source.
-- **Incus:** an Incus target and its support image, publish and deploy
+- **Incus:** publish and deploy
   against a remote Incus, Incus volumes, and deployment metadata in the
   bundle manifest.
 - **Root filesystem:** faster population with `mkfs.ext4 -d`, keeping

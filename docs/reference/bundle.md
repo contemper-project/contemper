@@ -106,7 +106,9 @@ from:
 ```
 
 `"origin": "flag"` records the same thing when `--support` on the command
-line replaced the target's default instead.
+line replaced the target's default instead. `digest` is what the
+reference resolved to when the bundle was built, so a floating tag such
+as `:v1` stays traceable.
 
 The manifest doubles as the deployment metadata format and the
 provenance record: the digests linking a disk to its inputs are recorded
