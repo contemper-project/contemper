@@ -2,6 +2,7 @@ package progress
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -21,6 +22,7 @@ type Stage struct {
 	label string
 
 	mu            sync.Mutex
+	phase         string
 	progress      string
 	start         time.Time
 	frame         int
@@ -54,6 +56,43 @@ func (r *Reporter) BeginStage(icon, label string) *Stage {
 		s.headerPrinted = true
 	}
 	return s
+}
+
+// Live reports whether the stage animates in place (TTY mode), i.e.
+// whether its readouts are ever shown. Callers use it to skip work that
+// only feeds the readout. Safe to call on a nil Stage.
+func (s *Stage) Live() bool { return s != nil && s.r.tty }
+
+// SetPhase names what the stage is doing right now ("writing ext4",
+// "converting to qcow2"), shown ahead of the progress readout in TTY
+// mode, and clears the readout left over from the previous phase. A
+// no-op otherwise, like SetProgress.
+func (s *Stage) SetPhase(phase string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.phase = SanitizeLine(phase)
+	s.progress = ""
+}
+
+// SetProgressPercent updates the readout to a whole-number percentage,
+// for work whose size is known only as a fraction (a host tool's own
+// progress output). Values outside 0..100 are clamped.
+func (s *Stage) SetProgressPercent(pct float64) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch {
+	case pct < 0:
+		pct = 0
+	case pct > 100:
+		pct = 100
+	}
+	s.progress = fmt.Sprintf("%d%%", int(pct))
 }
 
 // SetProgress updates the stage's live "done/total" readout (TTY mode
@@ -115,6 +154,9 @@ func (s *Stage) draw() {
 	s.frame++
 	elapsed := time.Since(s.start).Round(time.Second)
 	progress := s.progress
+	if s.phase != "" {
+		progress = strings.TrimSpace(s.phase + " " + progress)
+	}
 	s.mu.Unlock()
 
 	// Same shape as Done's final line: an empty icon leaves the two-space
