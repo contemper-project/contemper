@@ -215,6 +215,10 @@ type convertedBundle struct {
 	source bundle.ImageRef
 }
 
+// defaultSupportFor returns a target's default support image reference;
+// a variable so tests can point it at a local registry.
+var defaultSupportFor = target.DefaultSupport
+
 // convertPlatform converts ref's image for one platform into a bundle
 // and describes the bundle it wrote. It is a complete, independent
 // conversion: the same support-image and volume-helper resolution,
@@ -304,7 +308,7 @@ func convertPlatform(ctx context.Context, rep *progress.Reporter, opts convertOp
 	var resolvedVariants []bundle.SupportVariant
 	baseImg := img.Image
 
-	resolvedSupportRef, supportOrigin := target.ResolveSupport(target.DefaultSupport(canonicalTarget), opts.supportRef)
+	resolvedSupportRef, supportOrigin := target.ResolveSupport(defaultSupportFor(canonicalTarget), opts.supportRef)
 
 	if resolvedSupportRef != "" {
 		supportRef, err := source.ParseRef(resolvedSupportRef)

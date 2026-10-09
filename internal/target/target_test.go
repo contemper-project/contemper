@@ -41,17 +41,18 @@ func TestResolve(t *testing.T) {
 	}
 }
 
-// TestDefaultSupport pins today's target defaults: neither qemu-qcow2 nor
-// incus-qcow2 has one yet (the Incus support image isn't published; see
-// the TODO on the target table).
+// TestDefaultSupport pins the target defaults: qemu-qcow2 has none, the
+// incus targets use the Incus support image's floating major tag.
 func TestDefaultSupport(t *testing.T) {
-	for _, canonical := range []string{"qemu-qcow2", "incus-qcow2"} {
-		if got := target.DefaultSupport(canonical); got != "" {
-			t.Errorf("DefaultSupport(%s) = %q, want none", canonical, got)
-		}
+	want := map[string]string{
+		"qemu-qcow2":  "",
+		"incus-qcow2": "ghcr.io/contemper-project/incus-support:v1",
+		"bogus":       "",
 	}
-	if got := target.DefaultSupport("bogus"); got != "" {
-		t.Errorf("DefaultSupport(bogus) = %q, want none", got)
+	for canonical, ref := range want {
+		if got := target.DefaultSupport(canonical); got != ref {
+			t.Errorf("DefaultSupport(%s) = %q, want %q", canonical, got, ref)
+		}
 	}
 }
 
