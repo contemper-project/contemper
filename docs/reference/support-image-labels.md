@@ -78,10 +78,10 @@ pulled, depends on where the support image itself came from:
 
     Labels are content the image controls. Without credentials they
     cannot make contemper pull a private image you have access to into
-    the disk. Local `oci-archive:`, `oci:`, `docker-archive:` and
-    `docker-daemon:` references are refused, so labels can never point
-    contemper at files on the build host, and a repository path with `.`
-    or `..` segments is refused. On some registries (Amazon ECR,
+    the disk. Local `oci-archive:`, `oci:`, `docker-archive:`,
+    `docker-daemon:` and `containers-storage:` references are refused, so
+    labels can never point contemper at files on the build host, and a
+    repository path with `.` or `..` segments is refused. On some registries (Amazon ECR,
     single-tenant registries) the first path component is not an
     ownership boundary, so the same-namespace rule gives less protection
     there.

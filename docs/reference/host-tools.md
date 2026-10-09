@@ -78,4 +78,6 @@ No container runtime is needed to convert a plain registry, archive or
 layout reference. You need one only to build images in the first place,
 and `docker` specifically for `contemper build` or a `docker-daemon:`
 source: both run `docker` (`buildx` too, for `build`) as a subprocess,
-the same way as the tools above.
+the same way as the tools above. A `containers-storage:` source needs
+`podman` in the same way (on macOS, from Homebrew, with a podman machine
+running).
