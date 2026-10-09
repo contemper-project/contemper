@@ -4,7 +4,7 @@
 run, so producing an arm64 disk on an x86-64 host is not a special case.
 
 Building the image in the first place may well need emulation, since
-`RUN` steps do execute guest code. That's handled by `docker buildx` or
+`RUN` steps do execute guest code. That's handled by `docker buildx`, podman or
 native runners, at a stage the container ecosystem already solves well.
 The point isn't that emulation disappears; it's that it stays confined
 there instead of reappearing at conversion time.
@@ -54,9 +54,36 @@ can't be listed without a `docker save`, so `all` and lists are rejected
 for it. Pass `--arch amd64` or `--arch arm64`, or push (or `docker save`)
 the multi-platform image and convert that instead.
 
-`contemper build` builds one architecture at a time and rejects a list
-or `all`. To get every architecture, build a multi-platform image with
-`docker buildx` or podman and run `convert --arch all` on it.
+A `containers-storage:` source is the same: one architecture per run,
+`--arch amd64` or `--arch arm64`.
+
+`contemper build` builds one architecture at a time, with either docker
+buildx or podman, and rejects a list or `all`. To get every architecture,
+build a multi-platform image yourself, push it to a registry, and run
+`convert --arch all` on the reference:
+
+=== "podman"
+
+    ```console
+    $ podman build --platform linux/amd64,linux/arm64 \
+        --manifest registry.example.com/my-appliance:dev .
+    $ podman manifest push registry.example.com/my-appliance:dev \
+        docker://registry.example.com/my-appliance:dev
+    $ contemper convert --target qemu --arch all registry.example.com/my-appliance:dev
+    ```
+
+=== "docker"
+
+    ```console
+    $ docker buildx build --platform linux/amd64,linux/arm64 --push \
+        -t registry.example.com/my-appliance:dev .
+    $ contemper convert --target qemu --arch all registry.example.com/my-appliance:dev
+    ```
+
+A manifest list that exists only in podman's local storage can't be
+converted with `--arch all`. To convert a single architecture without a
+registry, use `podman save --format oci-archive` on the image for that
+architecture and convert the archive.
 
 ### Output
 
