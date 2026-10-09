@@ -256,13 +256,35 @@ jobs:
       # digests a `sha256sum -c` against that file would verify. Anyone can
       # check either with `gh attestation verify`.
       - name: Attest checksums.txt
+        id: attest-checksums
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: dist/checksums.txt
       - name: Attest release archives
+        id: attest-archives
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-checksums: dist/checksums.txt
+      # Also attach the Sigstore bundles to the release as assets, so the
+      # provenance can be verified offline and is visible to tools that
+      # look at release assets rather than GitHub attestations (OpenSSF
+      # Scorecard's Signed-Releases check matches the .sigstore.json
+      # suffix). The archives bundle covers every archive and package
+      # listed in checksums.txt in one file.
+      - name: Upload Sigstore bundles to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.release.outputs.tag_name }}
+          CHECKSUMS_BUNDLE: ${{ steps.attest-checksums.outputs.bundle-path }}
+          ARCHIVES_BUNDLE: ${{ steps.attest-archives.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          out="$(mktemp -d)"
+          cp "${CHECKSUMS_BUNDLE}" "${out}/checksums.txt.sigstore.json"
+          cp "${ARCHIVES_BUNDLE}" "${out}/contemper_${version}_provenance.sigstore.json"
+          gh release upload "${TAG}" "${out}"/*.sigstore.json --clobber
 
   distros:
     # Starts the distribution test suite against the new tag, with issue
