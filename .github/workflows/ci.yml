@@ -200,23 +200,27 @@ jobs:
     # waiting for the boot marker; one leg per init system - alpine/
     # OpenRC, debian/systemd, archlinux/systemd (mkinitcpio instead of
     # initramfs-tools), and debian-grub, which boots with its own GRUB
-    # instead of a UKI. The extra alpine leg (build_command: true) goes
-    # through `contemper build` (docker buildx build --load, then the
-    # docker-daemon: source) instead, so that path is exercised against
-    # a real Docker daemon too; see hack/e2e.sh's --build-command.
+    # instead of a UKI. Two extra alpine legs (build_engine: docker and
+    # podman) go through `contemper build --engine <engine>` instead
+    # (docker buildx build --load, then the docker-daemon: source; or
+    # podman build, then the containers-storage: source), so both paths
+    # are exercised against a real engine too; see hack/e2e.sh's
+    # --build-command and CONTAINER_ENGINE.
     needs: changes
     if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
-    name: e2e (${{ matrix.example }}${{ matrix.build_command && ', contemper build' || '' }})
+    name: e2e (${{ matrix.example }}${{ matrix.build_engine && format(', contemper build, {0}', matrix.build_engine) || '' }})
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         example: [alpine, debian, debian-grub, archlinux]
-        build_command: [false]
+        build_engine: ['']
         include:
           - example: alpine
-            build_command: true
+            build_engine: docker
+          - example: alpine
+            build_engine: podman
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -240,9 +244,10 @@ jobs:
       - name: Boot test
         env:
           CONTEMPER_E2E_COVERDIR: _gocover
+          CONTAINER_ENGINE: ${{ matrix.build_engine }}
         run: >-
           ./hack/e2e.sh --example ${{ matrix.example }} --timeout 300s
-          ${{ matrix.build_command && '--build-command' || '' }}
+          ${{ matrix.build_engine && '--build-command' || '' }}
       # Integration coverage from a binary only the boot tests exercise
       # (see hack/e2e.sh's CONTEMPER_E2E_COVERDIR), merged into one
       # text-format profile Codecov can read. Also after a failing boot
@@ -268,7 +273,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: e2e-serial-log-${{ matrix.example }}${{ matrix.build_command && '-build-command' || '' }}
+          name: e2e-serial-log-${{ matrix.example }}${{ matrix.build_engine && format('-build-{0}', matrix.build_engine) || '' }}
           path: _out/serial.log
           if-no-files-found: ignore
 
