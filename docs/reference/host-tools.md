@@ -76,8 +76,11 @@ fail, and with `--verbose` each invocation is printed.
 
 No container runtime is needed to convert a plain registry, archive or
 layout reference. You need one only to build images in the first place,
-and `docker` specifically for `contemper build` or a `docker-daemon:`
-source: both run `docker` (`buildx` too, for `build`) as a subprocess,
-the same way as the tools above. A `containers-storage:` source needs
-`podman` in the same way (on macOS, from Homebrew, with a podman machine
-running).
+and `docker` specifically for a `docker-daemon:` source, which runs it
+as a subprocess, the same way as the tools above. A
+`containers-storage:` source needs `podman` in the same way (on macOS,
+from Homebrew, with a podman machine running). `contemper build` needs
+one of the two: `docker` with its `buildx` plugin, or `podman`. By
+default it uses docker when `docker buildx` works (and `docker` is not
+podman's docker emulation), and podman otherwise; `--engine docker` or
+`--engine podman` forces one.

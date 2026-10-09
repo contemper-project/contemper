@@ -56,7 +56,7 @@ the multi-platform image and convert that instead.
 
 `contemper build` builds one architecture at a time and rejects a list
 or `all`. To get every architecture, build a multi-platform image with
-`docker buildx` and run `convert --arch all` on it.
+`docker buildx` or podman and run `convert --arch all` on it.
 
 ### Output
 
