@@ -131,7 +131,7 @@ contemper is pre-1.0: the CLI and the bundle format may still change.
   sizes, formats and mounts it in the guest through a first-boot helper,
   persisted across redeploys for `local-qemu` instances.
 
-**Planned:** building with podman, and `publish` and `deploy` for Incus. See the
+**Planned:** `publish` and `deploy` for Incus. See the
 [roadmap](docs/design/roadmap.md) for the rest.
 
 ## Documentation
