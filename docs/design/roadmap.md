@@ -19,12 +19,12 @@ and what's next.
 Images that ship their own EFI bootloader (including Secure Boot) and
 multi-arch conversion have shipped; see [bootloader
 images](../guide/bootloader-images.md) and [multi-arch
-builds](../guide/multi-arch.md).
+builds](../guide/multi-arch.md). So have podman builds and the
+`containers-storage:` source; see [Getting
+started](../getting-started.md#choosing-the-build-engine).
 
 The themes currently open as milestones:
 
-- **Podman builds:** building with podman, and a `containers-storage:`
-  source.
 - **Incus:** publish and deploy
   against a remote Incus, Incus volumes, and deployment metadata in the
   bundle manifest.

@@ -14,8 +14,8 @@ $ contemper deploy --to local-qemu my-appliance-dev.aarch64/
 ```
 
 `<tool>` is `podman` or `docker`; the two commands above are identical
-either way. `contemper build` runs the build (with Docker buildx or podman) and the
-convert step together and skips the registry; see
+either way. `contemper build` runs the build (with Docker buildx or
+podman) and the convert step together and skips the registry; see
 [Getting started](getting-started.md) for that walkthrough.
 
 !!! info "Status"
