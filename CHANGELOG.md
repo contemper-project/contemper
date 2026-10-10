@@ -1,5 +1,62 @@
 # Changelog
 
+## [0.4.0](https://github.com/contemper-project/contemper/compare/v0.3.0...v0.4.0) (2026-10-10)
+
+
+### Features
+
+* **build:** build with podman, chosen with --engine or automatically ([89c98ea](https://github.com/contemper-project/contemper/commit/89c98eac45f34cfb5b9e739a91bb57e7fba41112))
+* **disk:** show phases and debugfs write progress while populating ext4 ([4e80b02](https://github.com/contemper-project/contemper/commit/4e80b028fc11e38e88599c695a5e1da77c5e2e14))
+* **progress:** add a phase label and percent readout to stages ([84b0cab](https://github.com/contemper-project/contemper/commit/84b0cabb59f18c260c8b2e1c559c487562589642))
+* **source:** add a containers-storage: source read through podman save ([69720d4](https://github.com/contemper-project/contemper/commit/69720d4c620a219df82ee8a69fa71b2ca3431507))
+* **source:** allow variants outside the support image's namespace, pulled anonymously ([9406630](https://github.com/contemper-project/contemper/commit/940663051db5e22c082727b59c2ae21727728b01))
+* **support:** read support image declarations from config labels ([5b0dffb](https://github.com/contemper-project/contemper/commit/5b0dffbb61d594c650b72d7073f5859586dcb575))
+* **target:** default the incus targets to the Incus support image ([7f68d05](https://github.com/contemper-project/contemper/commit/7f68d057fde71b7742eac885c93ac3d4e813ad37))
+* **target:** show qcow2 conversion progress and the remaining assembly phases ([1e88d81](https://github.com/contemper-project/contemper/commit/1e88d81d57f0bb96ddf8e48148e46f7d86943cf1))
+
+
+### Bug Fixes
+
+* **disk:** refuse a NUL byte in a debugfs script argument ([762339c](https://github.com/contemper-project/contemper/commit/762339cb497e82a6a10457c2fdd97c857c84ef8d))
+* **examples:** use only the firmware console for GRUB on arm64 ([dc7591d](https://github.com/contemper-project/contemper/commit/dc7591d0a6d197dc479d8c4fa2dbc3c75f6df464))
+* **guestmeta:** add a repeated fstab line once ([60be5c7](https://github.com/contemper-project/contemper/commit/60be5c79b09e2239e3915bf8c7145adc7b70df42))
+* **guestmeta:** split fstab fields on spaces and tabs only ([e41a9b1](https://github.com/contemper-project/contemper/commit/e41a9b154bf1801dcc69790d6d6864978a116cde))
+* **progress:** clear the spinner line when a stage fails in TTY mode ([9b45642](https://github.com/contemper-project/contemper/commit/9b45642fc69be12446bf5e70094b70b62dba55cd))
+* **progress:** don't panic on an empty stage icon in TTY mode ([039595b](https://github.com/contemper-project/contemper/commit/039595bebef37dd584f2935553b450f4c0813d75))
+* **progress:** print a stage's final line only once ([dec2cdc](https://github.com/contemper-project/contemper/commit/dec2cdceca9d101e438d16067579942557ef7a92))
+* **progress:** wait for the spinner goroutine when a stage stops ([1019b9a](https://github.com/contemper-project/contemper/commit/1019b9a68a145fbbc26e13f3a9e9585da74633d6))
+* **qemu:** use neoverse-n1 for arm64 guests under TCG ([0fa28e1](https://github.com/contemper-project/contemper/commit/0fa28e18e816d819ebb59d11694e1d81822e6c4d))
+* **source:** keep an archive named only by its extension ([8086bc2](https://github.com/contemper-project/contemper/commit/8086bc291f2f9b4db1bcf018e6f420d4cb380acb))
+* **uki:** refuse implausible stub layouts and section names ([ad7d258](https://github.com/contemper-project/contemper/commit/ad7d258e5f21566294bebc0b90c25073b9731515))
+* **uki:** require the MZ signature in a PE stub ([89b13b9](https://github.com/contemper-project/contemper/commit/89b13b99bdd1ef21178001fa1a1ece4df743292c))
+
+
+### Dependencies
+
+* **gomod:** update go module directive to v1.27.2 ([bab7d2d](https://github.com/contemper-project/contemper/commit/bab7d2dde3c58b543f4192623de85b39030cf27a))
+* **gomod:** update go module updates (minor & patch) ([b93c04c](https://github.com/contemper-project/contemper/commit/b93c04c2269a16b25e605549252dd5bcbd883c99))
+
+
+### Documentation
+
+* **build:** cover podman in the build docs and getting started ([3710222](https://github.com/contemper-project/contemper/commit/3710222f843a24642563b0ae3abe8202222deab3))
+* **build:** mention podman as a build engine ([c77aa1d](https://github.com/contemper-project/contemper/commit/c77aa1dbef50634c5a7bde3ccd030608f2e83cfa))
+* **comparison:** add d2vm ([dafa4d3](https://github.com/contemper-project/contemper/commit/dafa4d3e11268993d933be79efd94b368859d5bb))
+* **comparison:** correct the bootc scope and semantics for both boot modes ([c50038b](https://github.com/contemper-project/contemper/commit/c50038b40ed84e1ed345a2389f7c45baacf1f131))
+* **contributing:** describe the fuzz tests ([9a0becf](https://github.com/contemper-project/contemper/commit/9a0becf2905e613f0a29abbf71331bd99d471cae))
+* **contributing:** note that releases wait for the checks ([5954a12](https://github.com/contemper-project/contemper/commit/5954a12eb02f8aba41a68967efbf22b9b4130840))
+* **design:** drop the implemented notices ([7e3bb07](https://github.com/contemper-project/contemper/commit/7e3bb0736e1bfad4332126178c2337ae61844ce3))
+* **design:** keep only the planned part of the phases note ([7a78252](https://github.com/contemper-project/contemper/commit/7a78252ff7a6b3ea73c6cff462556894d5032d31))
+* **design:** mark bootloader images and multi-arch as shipped ([8f0ded6](https://github.com/contemper-project/contemper/commit/8f0ded66de2a58917e791e1fc51038a8e8ea8318))
+* **getting-started:** verify downloads offline with the Sigstore bundle ([ece4dc9](https://github.com/contemper-project/contemper/commit/ece4dc94d1efcfa03d1ca81e6d21ebc606c7f653))
+* **guide:** describe the assembly step readout ([67736b8](https://github.com/contemper-project/contemper/commit/67736b8cc6580ef7f2f13486c78eae7e4288b598))
+* **readme:** compare contemper with d2vm ([a8b1305](https://github.com/contemper-project/contemper/commit/a8b130523b35160d48b405d222f49fc6465ebb45))
+* **readme:** describe the UKI and bootloader boot modes ([f4563e2](https://github.com/contemper-project/contemper/commit/f4563e2782b9c3a6896268955a662d06260067f8))
+* **readme:** list Secure Boot and multi-arch under works today ([4076d2c](https://github.com/contemper-project/contemper/commit/4076d2c242c1dae6d9130140a4093b1904b23705))
+* **sources:** document the containers-storage: source ([944cfa1](https://github.com/contemper-project/contemper/commit/944cfa13f191122a4716568d954f5cd259f7b7b6))
+* **support:** describe support images as Containerfiles with labels ([eff4d38](https://github.com/contemper-project/contemper/commit/eff4d3816c916235fb1fe477bec6cad290a74bdb))
+* **target:** describe the Incus support image as the incus default ([3b0204f](https://github.com/contemper-project/contemper/commit/3b0204f46fea9d37fd01dd15d30f78f78911500f))
+
 ## [0.3.0](https://github.com/contemper-project/contemper/compare/v0.2.0...v0.3.0) (2026-10-04)
 
 
