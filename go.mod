@@ -1,13 +1,13 @@
 module github.com/contemper-project/contemper
 
-go 1.27.2
+go 1.27.4
 
 require (
 	github.com/diskfs/go-diskfs v1.9.4
 	github.com/google/go-containerregistry v0.22.1
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/sys v0.49.0
-	golang.org/x/term v0.47.0
+	golang.org/x/sys v0.50.0
+	golang.org/x/term v0.48.0
 )
 
 require (
