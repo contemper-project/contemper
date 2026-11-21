@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1](https://github.com/contemper-project/contemper/compare/v0.4.0...v0.4.1) (2026-11-19)
+
+
+### Dependencies
+
+* **gomod:** update go module directive to v1.27.4 ([8abb110](https://github.com/contemper-project/contemper/commit/8abb1106c45042d8a3f854811a632cbb48825fd9))
+* **gomod:** update go module updates (minor & patch) ([fbc7344](https://github.com/contemper-project/contemper/commit/fbc7344cf076909ccca1a9c6b656cdbaf47ca351))
+
 ## [0.4.0](https://github.com/contemper-project/contemper/compare/v0.3.0...v0.4.0) (2026-10-10)
 
 
